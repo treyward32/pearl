@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,13 +7,14 @@ package txauthor
 
 import (
 	"errors"
+	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/wallet/txrules"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txrules"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txsizes"
 )
 
 // SumOutputValues sums up the list of TxOuts and returns an Amount.
@@ -78,18 +79,16 @@ type ChangeSource struct {
 // increasing targets amounts.
 //
 // If any remaining output value can be returned to the wallet via a change
-// output without violating mempool dust rules, a P2WPKH change output is
+// output without violating mempool dust rules, a P2TR change output is
 // appended to the transaction outputs.  Since the change output may not be
 // necessary, fetchChange is called zero or one times to generate this script.
-// This function must return a P2WPKH script or smaller, otherwise fee estimation
+// This function must return a P2TR script or smaller, otherwise fee estimation
 // will be incorrect.
 //
 // If successful, the transaction, total input value spent, and all previous
 // output scripts are returned.  If the input source was unable to provide
 // enough input value to pay for every output any any necessary fees, an
 // InputSourceError is returned.
-//
-// BUGS: Fee estimation may be off when redeeming non-compressed P2PKH outputs.
 func NewUnsignedTransaction(outputs []*wire.TxOut, feeRatePerKb btcutil.Amount,
 	fetchInputs InputSource, changeSource *ChangeSource) (*AuthoredTx, error) {
 
@@ -108,26 +107,16 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, feeRatePerKb btcutil.Amount,
 			return nil, insufficientFundsError{}
 		}
 
-		// We count the types of inputs, which we'll use to estimate
-		// the vsize of the transaction.
-		var nested, p2wpkh, p2tr, p2pkh int
 		for _, pkScript := range scripts {
-			switch {
-			// If this is a p2sh output, we assume this is a
-			// nested P2WKH.
-			case txscript.IsPayToScriptHash(pkScript):
-				nested++
-			case txscript.IsPayToWitnessPubKeyHash(pkScript):
-				p2wpkh++
-			case txscript.IsPayToTaproot(pkScript):
-				p2tr++
-			default:
-				p2pkh++
+			if !txscript.IsPayToTaproot(pkScript) &&
+				!txscript.IsPayToMerkleRoot(pkScript) {
+				return nil, errors.New(
+					"script is not a supported address type (p2tr or p2mr)")
 			}
 		}
 
 		maxSignedSize := txsizes.EstimateVirtualSize(
-			p2pkh, p2tr, p2wpkh, nested, outputs, changeSource.ScriptSize,
+			0, len(scripts), 0, 0, outputs, changeSource.ScriptSize,
 		)
 		maxRequiredFee := txrules.FeeForSerializeSize(feeRatePerKb, maxSignedSize)
 		remainingAmount := inputAmount - targetAmount
@@ -198,6 +187,9 @@ type SecretsSource interface {
 	txscript.KeyDB
 	txscript.ScriptDB
 	ChainParams() *chaincfg.Params
+	// GetTapscriptRoot returns the tapscript root hash for the address if it has
+	// tapscript commitment, or nil if it's a standard BIP-86 address.
+	GetTapscriptRoot(btcutil.Address) []byte
 }
 
 // AddAllInputScripts modifies transaction a transaction by adding inputs
@@ -226,28 +218,6 @@ func AddAllInputScripts(tx *wire.MsgTx, prevPkScripts [][]byte,
 		pkScript := prevPkScripts[i]
 
 		switch {
-		// If this is a p2sh output, who's script hash pre-image is a
-		// witness program, then we'll need to use a modified signing
-		// function which generates both the sigScript, and the witness
-		// script.
-		case txscript.IsPayToScriptHash(pkScript):
-			err := spendNestedWitnessPubKeyHash(
-				inputs[i], pkScript, int64(inputValues[i]),
-				chainParams, secrets, tx, hashCache, i,
-			)
-			if err != nil {
-				return err
-			}
-
-		case txscript.IsPayToWitnessPubKeyHash(pkScript):
-			err := spendWitnessKeyHash(
-				inputs[i], pkScript, int64(inputValues[i]),
-				chainParams, secrets, tx, hashCache, i,
-			)
-			if err != nil {
-				return err
-			}
-
 		case txscript.IsPayToTaproot(pkScript):
 			err := spendTaprootKey(
 				inputs[i], pkScript, int64(inputValues[i]),
@@ -257,69 +227,19 @@ func AddAllInputScripts(tx *wire.MsgTx, prevPkScripts [][]byte,
 				return err
 			}
 
-		default:
-			sigScript := inputs[i].SignatureScript
-			script, err := txscript.SignTxOutput(chainParams, tx, i,
-				pkScript, txscript.SigHashAll, secrets, secrets,
-				sigScript)
+		case txscript.IsPayToMerkleRoot(pkScript):
+			err := spendMerkleRoot(
+				inputs[i], pkScript, int64(inputValues[i]),
+				chainParams, secrets, tx, hashCache, i,
+			)
 			if err != nil {
 				return err
 			}
-			inputs[i].SignatureScript = script
+
+		default:
+			return fmt.Errorf("input %d: unsupported script type", i)
 		}
 	}
-
-	return nil
-}
-
-// spendWitnessKeyHash generates, and sets a valid witness for spending the
-// passed pkScript with the specified input amount. The input amount *must*
-// correspond to the output value of the previous pkScript, or else verification
-// will fail since the new sighash digest algorithm defined in BIP0143 includes
-// the input value in the sighash.
-func spendWitnessKeyHash(txIn *wire.TxIn, pkScript []byte,
-	inputValue int64, chainParams *chaincfg.Params, secrets SecretsSource,
-	tx *wire.MsgTx, hashCache *txscript.TxSigHashes, idx int) error {
-
-	// First obtain the key pair associated with this p2wkh address.
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript,
-		chainParams)
-	if err != nil {
-		return err
-	}
-	privKey, compressed, err := secrets.GetKey(addrs[0])
-	if err != nil {
-		return err
-	}
-	pubKey := privKey.PubKey()
-
-	// Once we have the key pair, generate a p2wkh address type, respecting
-	// the compression type of the generated key.
-	var pubKeyHash []byte
-	if compressed {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeCompressed())
-	} else {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeUncompressed())
-	}
-	p2wkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, chainParams)
-	if err != nil {
-		return err
-	}
-
-	// With the concrete address type, we can now generate the
-	// corresponding witness program to be used to generate a valid witness
-	// which will allow us to spend this output.
-	witnessProgram, err := txscript.PayToAddrScript(p2wkhAddr)
-	if err != nil {
-		return err
-	}
-	witnessScript, err := txscript.WitnessSignature(tx, hashCache, idx,
-		inputValue, witnessProgram, txscript.SigHashAll, privKey, true)
-	if err != nil {
-		return err
-	}
-
-	txIn.Witness = witnessScript
 
 	return nil
 }
@@ -346,80 +266,76 @@ func spendTaprootKey(txIn *wire.TxIn, pkScript []byte,
 		return err
 	}
 
-	// We can now generate a valid witness which will allow us to spend this
-	// output.
-	witnessScript, err := txscript.TaprootWitnessSignature(
-		tx, hashCache, idx, inputValue, pkScript,
+	// Get tapscript root for the address (nil for standard BIP-86 addresses, non-nil for addresses with tapscript commitment like XMSS).
+	// Generate Schnorr signature with proper tapscript root tweaking (nil path matches TaprootWitnessSignature).
+	tapscriptRoot := secrets.GetTapscriptRoot(addrs[0])
+	sig, err := txscript.RawTxInTaprootSignature(
+		tx, hashCache, idx, inputValue, pkScript, tapscriptRoot,
 		txscript.SigHashDefault, privKey,
 	)
 	if err != nil {
 		return err
 	}
 
-	txIn.Witness = witnessScript
+	txIn.Witness = wire.TxWitness{sig}
 
 	return nil
 }
 
-// spendNestedWitnessPubKey generates both a sigScript, and valid witness for
-// spending the passed pkScript with the specified input amount. The generated
-// sigScript is the version 0 p2wkh witness program corresponding to the queried
-// key. The witness stack is identical to that of one which spends a regular
-// p2wkh output. The input amount *must* correspond to the output value of the
-// previous pkScript, or else verification will fail since the new sighash
-// digest algorithm defined in BIP0143 includes the input value in the sighash.
-func spendNestedWitnessPubKeyHash(txIn *wire.TxIn, pkScript []byte,
+// spendMerkleRoot generates and sets a valid witness for spending a P2MR
+// (BIP 360) output via script-path. The secrets source must provide the
+// signing key and the script tree metadata (via GetScript) for constructing
+// the Merkle inclusion proof and control block.
+func spendMerkleRoot(txIn *wire.TxIn, pkScript []byte,
 	inputValue int64, chainParams *chaincfg.Params, secrets SecretsSource,
 	tx *wire.MsgTx, hashCache *txscript.TxSigHashes, idx int) error {
 
-	// First we need to obtain the key pair related to this p2sh output.
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript,
-		chainParams)
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return err
 	}
-	privKey, compressed, err := secrets.GetKey(addrs[0])
-	if err != nil {
-		return err
-	}
-	pubKey := privKey.PubKey()
-
-	var pubKeyHash []byte
-	if compressed {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeCompressed())
-	} else {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeUncompressed())
+	if len(addrs) == 0 {
+		return fmt.Errorf("no address found in P2MR pkScript")
 	}
 
-	// Next, we'll generate a valid sigScript that'll allow us to spend
-	// the p2sh output. The sigScript will contain only a single push of
-	// the p2wkh witness program corresponding to the matching public key
-	// of this address.
-	p2wkhAddr, err := btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, chainParams)
+	privKey, _, err := secrets.GetKey(addrs[0])
 	if err != nil {
-		return err
+		return fmt.Errorf("P2MR spend: unable to get signing key: %w", err)
 	}
-	witnessProgram, err := txscript.PayToAddrScript(p2wkhAddr)
-	if err != nil {
-		return err
-	}
-	bldr := txscript.NewScriptBuilder()
-	bldr.AddData(witnessProgram)
-	sigScript, err := bldr.Script()
-	if err != nil {
-		return err
-	}
-	txIn.SignatureScript = sigScript
 
-	// With the sigScript in place, we'll next generate the proper witness
-	// that'll allow us to spend the p2wkh output.
-	witnessScript, err := txscript.WitnessSignature(tx, hashCache, idx,
-		inputValue, witnessProgram, txscript.SigHashAll, privKey, compressed)
+	// Retrieve the spending script (leaf script + control block) from the
+	// secrets source. For P2MR, the script DB stores the pre-built witness
+	// leaf script that will be executed.
+	redeemScript, err := secrets.GetScript(addrs[0])
+	if err != nil {
+		return fmt.Errorf("P2MR spend: unable to get redeem script: %w", err)
+	}
+
+	// Build the script tree from the single leaf to get the Merkle proof.
+	// For multi-leaf trees, the wallet would store the full tree and select
+	// the appropriate leaf.
+	leaf := txscript.NewBaseTapLeaf(redeemScript)
+	tree := txscript.AssembleTaprootScriptTree(leaf)
+	proof := tree.LeafMerkleProofs[0]
+
+	cb := &txscript.MerkleRootControlBlock{
+		LeafVersion:    txscript.BaseLeafVersion,
+		InclusionProof: proof.InclusionProof,
+	}
+	cbBytes, err := cb.ToBytes()
 	if err != nil {
 		return err
 	}
 
-	txIn.Witness = witnessScript
+	sig, err := txscript.RawTxInTapscriptSignature(
+		tx, hashCache, idx, inputValue, pkScript,
+		leaf, txscript.SigHashDefault, privKey,
+	)
+	if err != nil {
+		return err
+	}
+
+	txIn.Witness = wire.TxWitness{sig, redeemScript, cbBytes}
 
 	return nil
 }

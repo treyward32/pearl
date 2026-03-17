@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -16,7 +16,6 @@ func TestErrorCodeStringer(t *testing.T) {
 	}{
 		{ErrDuplicateBlock, "ErrDuplicateBlock"},
 		{ErrBlockTooBig, "ErrBlockTooBig"},
-		{ErrBlockWeightTooHigh, "ErrBlockWeightTooHigh"},
 		{ErrBlockVersionTooOld, "ErrBlockVersionTooOld"},
 		{ErrInvalidTime, "ErrInvalidTime"},
 		{ErrTimeTooOld, "ErrTimeTooOld"},
@@ -43,7 +42,6 @@ func TestErrorCodeStringer(t *testing.T) {
 		{ErrImmatureSpend, "ErrImmatureSpend"},
 		{ErrSpendTooHigh, "ErrSpendTooHigh"},
 		{ErrBadFees, "ErrBadFees"},
-		{ErrTooManySigOps, "ErrTooManySigOps"},
 		{ErrFirstTxNotCoinbase, "ErrFirstTxNotCoinbase"},
 		{ErrMultipleCoinbases, "ErrMultipleCoinbases"},
 		{ErrBadCoinbaseScriptLen, "ErrBadCoinbaseScriptLen"},

@@ -19,16 +19,13 @@ func TestCreateDefaultConfigFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("Failed finding config file path")
 	}
-	sampleConfigFile := filepath.Join(filepath.Dir(path), "sample-btcd.conf")
+	sampleConfigFile := filepath.Join(filepath.Dir(path), "sample-pearld.conf")
 
 	// Setup a temporary directory
-	tmpDir, err := os.MkdirTemp("", "btcd")
-	if err != nil {
-		t.Fatalf("Failed creating a temporary directory: %v", err)
-	}
+	tmpDir := t.TempDir()
 	testpath := filepath.Join(tmpDir, "test.conf")
 
-	// copy config file to location of btcd binary
+	// copy config file to location of pearld binary
 	data, err := os.ReadFile(sampleConfigFile)
 	if err != nil {
 		t.Fatalf("Failed reading sample config file: %v", err)
@@ -37,18 +34,11 @@ func TestCreateDefaultConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed obtaining app path: %v", err)
 	}
-	tmpConfigFile := filepath.Join(appPath, "sample-btcd.conf")
+	tmpConfigFile := filepath.Join(appPath, "sample-pearld.conf")
 	err = os.WriteFile(tmpConfigFile, data, 0644)
 	if err != nil {
 		t.Fatalf("Failed copying sample config file: %v", err)
 	}
-
-	// Clean-up
-	defer func() {
-		os.Remove(testpath)
-		os.Remove(tmpConfigFile)
-		os.Remove(tmpDir)
-	}()
 
 	err = createDefaultConfigFile(testpath)
 

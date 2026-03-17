@@ -9,20 +9,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/integration/rpctest"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/blockntfns"
-	"github.com/lightninglabs/neutrino/headerfs"
-	"github.com/lightninglabs/neutrino/query"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/blockntfns"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/spv/query"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,12 +56,12 @@ func (m *mockDispatcher) Query(requests []*query.Request,
 
 // setupBlockManager initialises a blockManager to be used in tests.
 func setupBlockManager(t *testing.T) (*blockManager, headerfs.BlockHeaderStore,
-	*headerfs.FilterHeaderStore, error) {
+	headerfs.FilterHeaderStore, error) {
 
 	// Set up the block and filter header stores.
 	tempDir := t.TempDir()
 	db, err := walletdb.Create(
-		"bdb", tempDir+"/weks.db", true, dbOpenTimeout,
+		"bdb", tempDir+"/weks.db", true, dbOpenTimeout, false,
 	)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error opening DB: %s", err)
@@ -798,8 +799,9 @@ func TestBlockManagerDetectBadPeers(t *testing.T) {
 	for _, test := range testCases {
 		// Create a mock block header store. We only need to be able to
 		// serve a header for the target index.
-		blockHeaders := newMockBlockHeaderStore()
-		blockHeaders.heights[targetIndex] = blockHeader
+		blockHeaders := headerfs.NewMockBlockHeaderStore()
+		blockHeaders.On("FetchHeaderByHeight", uint32(targetIndex)).
+			Return(&blockHeader, nil)
 
 		// We set up the mock queryAllPeers to only respond according to
 		// the active testcase.
@@ -915,7 +917,7 @@ func TestHandleHeaders(t *testing.T) {
 
 	hmsg := &headersMsg{
 		headers: &wire.MsgHeaders{
-			Headers: make([]*wire.BlockHeader, len(blockHashes)),
+			Headers: make([]wire.MsgHeader, len(blockHashes)),
 		},
 		peer: &ServerPeer{
 			Peer: fakePeer,
@@ -923,10 +925,11 @@ func TestHandleHeaders(t *testing.T) {
 	}
 
 	for i := range blockHashes {
-		header, err := harness.Client.GetBlockHeader(blockHashes[i])
+		// Fetch full block to get the actual certificate from the harness.
+		block, err := harness.Client.GetBlock(blockHashes[i])
 		require.NoError(t, err)
 
-		hmsg.headers.Headers[i] = header
+		hmsg.headers.Headers[i] = block.MsgHeader
 	}
 
 	// Let's feed in the correct headers. This should work fine and the peer

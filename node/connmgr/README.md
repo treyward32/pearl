@@ -1,11 +1,11 @@
 connmgr
 =======
 
-[![Build Status](https://github.com/btcsuite/btcd/workflows/Build%20and%20Test/badge.svg)](https://github.com/btcsuite/btcd/actions)
+[![Build Status](https://github.com/pearl-research-labs/pearl/workflows/Build%20and%20Test/badge.svg)](https://github.com/pearl-research-labs/pearl/actions)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/btcsuite/btcd/connmgr)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/pearl-research-labs/pearl/node/connmgr)
 
-Package connmgr implements a generic Bitcoin network connection manager.
+Package connmgr implements a generic Pearl network connection manager.
 
 ## Overview
 
@@ -26,10 +26,12 @@ In addition the connection manager provides the following utilities:
 - Permanent connections with increasing backoff retry timers
 - Disconnect or Remove an established connection
 
-## Installation and Updating
+## Installation
+
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
 
 ```bash
-$ go get -u github.com/btcsuite/btcd/connmgr
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## License

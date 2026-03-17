@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/blockchain/indexers"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/blockchain/indexers"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 var zeroHash = chainhash.Hash{}
@@ -100,7 +100,7 @@ func (bi *blockImporter) processBlock(serializedBlock []byte) (bool, error) {
 	}
 
 	// update progress statistics
-	bi.lastBlockTime = block.MsgBlock().Header.Timestamp
+	bi.lastBlockTime = block.MsgBlock().BlockHeader().Timestamp
 	bi.receivedLogTx += int64(len(block.MsgBlock().Transactions))
 
 	// Skip blocks that already exist.
@@ -114,7 +114,7 @@ func (bi *blockImporter) processBlock(serializedBlock []byte) (bool, error) {
 	}
 
 	// Don't bother trying to process orphans.
-	prevHash := &block.MsgBlock().Header.PrevBlock
+	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
 	if !prevHash.IsEqual(&zeroHash) {
 		exists, err := bi.chain.HaveBlock(prevHash)
 		if err != nil {

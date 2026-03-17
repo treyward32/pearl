@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 // TestCreateWatchingOnly checks that we can construct a watching-only
@@ -21,7 +21,7 @@ func TestCreateWatchingOnly(t *testing.T) {
 	pubPass := []byte("hello")
 
 	loader := NewLoader(
-		&chaincfg.TestNet3Params, dir, true, defaultDBTimeout, 250,
+		&chaincfg.TestNetParams, dir, true, defaultDBTimeout, 250,
 		WithWalletSyncRetryInterval(10*time.Millisecond),
 	)
 	_, err := loader.CreateNewWatchingOnlyWallet(pubPass, time.Now())

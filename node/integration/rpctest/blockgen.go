@@ -1,89 +1,26 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package rpctest
 
 import (
-	"errors"
-	"math"
-	"math/big"
-	"runtime"
+	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mining"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
-// solveBlock attempts to find a nonce which makes the passed block header hash
-// to a value less than the target difficulty. When a successful solution is
-// found true is returned and the nonce field of the passed header is updated
-// with the solution. False is returned if no solution exists.
-func solveBlock(header *wire.BlockHeader, targetDifficulty *big.Int) bool {
-	// sbResult is used by the solver goroutines to send results.
-	type sbResult struct {
-		found bool
-		nonce uint32
-	}
-
-	// solver accepts a block header and a nonce range to test. It is
-	// intended to be run as a goroutine.
-	quit := make(chan bool)
-	results := make(chan sbResult)
-	solver := func(hdr wire.BlockHeader, startNonce, stopNonce uint32) {
-		// We need to modify the nonce field of the header, so make sure
-		// we work with a copy of the original header.
-		for i := startNonce; i >= startNonce && i <= stopNonce; i++ {
-			select {
-			case <-quit:
-				return
-			default:
-				hdr.Nonce = i
-				hash := hdr.BlockHash()
-				if blockchain.HashToBig(&hash).Cmp(targetDifficulty) <= 0 {
-					select {
-					case results <- sbResult{true, i}:
-						return
-					case <-quit:
-						return
-					}
-				}
-			}
-		}
-		select {
-		case results <- sbResult{false, 0}:
-		case <-quit:
-			return
-		}
-	}
-
-	startNonce := uint32(0)
-	stopNonce := uint32(math.MaxUint32)
-	numCores := uint32(runtime.NumCPU())
-	noncesPerCore := (stopNonce - startNonce) / numCores
-	for i := uint32(0); i < numCores; i++ {
-		rangeStart := startNonce + (noncesPerCore * i)
-		rangeStop := startNonce + (noncesPerCore * (i + 1)) - 1
-		if i == numCores-1 {
-			rangeStop = stopNonce
-		}
-		go solver(*header, rangeStart, rangeStop)
-	}
-	for i := uint32(0); i < numCores; i++ {
-		result := <-results
-		if result.found {
-			close(quit)
-			header.Nonce = result.nonce
-			return true
-		}
-	}
-
-	return false
+// solveBlock generates a certificate for the given block header using the
+// network-aware SolveBlock: real mining on RegTest/MainNet, dummy cert on SimNet.
+func solveBlock(header *wire.BlockHeader, net wire.PearlNet) (wire.BlockCertificate, error) {
+	return blockchain.SolveBlock(header, net)
 }
 
 // standardCoinbaseScript returns a standard script suitable for use as the
@@ -148,11 +85,11 @@ func CreateBlock(prevBlock *btcutil.Block, inclusionTxs []*btcutil.Tx,
 	if prevBlock == nil {
 		prevHash = net.GenesisHash
 		blockHeight = 1
-		prevBlockTime = net.GenesisBlock.Header.Timestamp.Add(time.Minute)
+		prevBlockTime = net.GenesisBlock.BlockHeader().Timestamp.Add(time.Minute)
 	} else {
 		prevHash = prevBlock.Hash()
 		blockHeight = prevBlock.Height() + 1
-		prevBlockTime = prevBlock.MsgBlock().Header.Timestamp
+		prevBlockTime = prevBlock.MsgBlock().BlockHeader().Timestamp
 	}
 
 	// If a target block time was specified, then use that as the header's
@@ -199,23 +136,25 @@ func CreateBlock(prevBlock *btcutil.Block, inclusionTxs []*btcutil.Tx,
 
 	merkleRoot := blockchain.CalcMerkleRoot(blockTxns, false)
 	var block wire.MsgBlock
-	block.Header = wire.BlockHeader{
+	block.MsgHeader = wire.MsgHeader{BlockHeader: wire.BlockHeader{
 		Version:    blockVersion,
 		PrevBlock:  *prevHash,
 		MerkleRoot: merkleRoot,
 		Timestamp:  ts,
 		Bits:       net.PowLimitBits,
-	}
+	}}
 	for _, tx := range blockTxns {
 		if err := block.AddTransaction(tx.MsgTx()); err != nil {
 			return nil, err
 		}
 	}
 
-	found := solveBlock(&block.Header, net.PowLimit)
-	if !found {
-		return nil, errors.New("Unable to solve block")
+	cert, solveErr := solveBlock(block.BlockHeader(), net.Net)
+	if solveErr != nil {
+		return nil, fmt.Errorf("unable to solve block: %w", solveErr)
 	}
+	// Attach the certificate to the block
+	block.MsgHeader.MsgCertificate = wire.MsgCertificate{Certificate: cert}
 
 	utilBlock := btcutil.NewBlock(&block)
 	utilBlock.SetHeight(blockHeight)

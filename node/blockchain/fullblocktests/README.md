@@ -1,9 +1,9 @@
 fullblocktests
 ==============
 
-[![Build Status](https://github.com/btcsuite/btcd/workflows/Build%20and%20Test/badge.svg)](https://github.com/btcsuite/btcd/actions)
+[![Build Status](https://github.com/pearl-research-labs/pearl/workflows/Build%20and%20Test/badge.svg)](https://github.com/pearl-research-labs/pearl/actions)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/btcsuite/btcd/blockchain/fullblocktests)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/pearl-research-labs/pearl/node/blockchain/fullblocktests)
 
 Package fullblocktests provides a set of full block tests to be used for testing
 the consensus validation rules.  The tests are intended to be flexible enough to
@@ -17,10 +17,12 @@ This package has intentionally been designed so it can be used as a standalone
 package for any projects needing to test their implementation against a full set
 of blocks that exercise the consensus validation rules.
 
-## Installation and Updating
+## Installation
+
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
 
 ```bash
-$ go get -u github.com/btcsuite/btcd/blockchain/fullblocktests
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## License

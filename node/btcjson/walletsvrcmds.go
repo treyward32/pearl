@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
 )
 
 // AddMultisigAddressCmd defines the addmutisigaddress JSON-RPC command.
@@ -244,6 +244,7 @@ func NewGetBalancesCmd() *GetBalancesCmd {
 type GetNewAddressCmd struct {
 	Account     *string
 	AddressType *string
+	PQ          *bool
 }
 
 // NewGetNewAddressCmd returns a new instance which can be used to issue a
@@ -262,6 +263,7 @@ func NewGetNewAddressCmd(account, addrType *string) *GetNewAddressCmd {
 type GetRawChangeAddressCmd struct {
 	Account     *string
 	AddressType *string
+	PQ          *bool
 }
 
 // NewGetRawChangeAddressCmd returns a new instance which can be used to issue a
@@ -563,7 +565,7 @@ func NewLockUnspentCmd(unlock bool, transactions []TransactionInput) *LockUnspen
 type MoveCmd struct {
 	FromAccount string
 	ToAccount   string
-	Amount      float64 // In BTC
+	Amount      float64 // In PRL
 	MinConf     *int    `jsonrpcdefault:"1"`
 	Comment     *string
 }
@@ -585,12 +587,13 @@ func NewMoveCmd(fromAccount, toAccount string, amount float64, minConf *int, com
 
 // SendFromCmd defines the sendfrom JSON-RPC command.
 type SendFromCmd struct {
-	FromAccount string
-	ToAddress   string
-	Amount      float64 // In BTC
-	MinConf     *int    `jsonrpcdefault:"1"`
-	Comment     *string
-	CommentTo   *string
+	FromAccount  string
+	ToAddress    string
+	Amount       float64 // In PRL
+	FeeRatePerKb float64 // Required: fee rate in PRL/KB
+	MinConf      *int    `jsonrpcdefault:"1"`
+	Comment      *string
+	CommentTo    *string
 }
 
 // NewSendFromCmd returns a new instance which can be used to issue a sendfrom
@@ -598,23 +601,25 @@ type SendFromCmd struct {
 //
 // The parameters which are pointers indicate they are optional.  Passing nil
 // for optional parameters will use the default value.
-func NewSendFromCmd(fromAccount, toAddress string, amount float64, minConf *int, comment, commentTo *string) *SendFromCmd {
+func NewSendFromCmd(fromAccount, toAddress string, amount, feeRatePerKb float64, minConf *int, comment, commentTo *string) *SendFromCmd {
 	return &SendFromCmd{
-		FromAccount: fromAccount,
-		ToAddress:   toAddress,
-		Amount:      amount,
-		MinConf:     minConf,
-		Comment:     comment,
-		CommentTo:   commentTo,
+		FromAccount:  fromAccount,
+		ToAddress:    toAddress,
+		Amount:       amount,
+		FeeRatePerKb: feeRatePerKb,
+		MinConf:      minConf,
+		Comment:      comment,
+		CommentTo:    commentTo,
 	}
 }
 
 // SendManyCmd defines the sendmany JSON-RPC command.
 type SendManyCmd struct {
-	FromAccount string
-	Amounts     map[string]float64 `jsonrpcusage:"{\"address\":amount,...}"` // In BTC
-	MinConf     *int               `jsonrpcdefault:"1"`
-	Comment     *string
+	FromAccount  string
+	Amounts      map[string]float64 `jsonrpcusage:"{\"address\":amount,...}"` // In PRL
+	FeeRatePerKb float64            // Required: fee rate in PRL/KB
+	MinConf      *int               `jsonrpcdefault:"1"`
+	Comment      *string
 }
 
 // NewSendManyCmd returns a new instance which can be used to issue a sendmany
@@ -622,21 +627,23 @@ type SendManyCmd struct {
 //
 // The parameters which are pointers indicate they are optional.  Passing nil
 // for optional parameters will use the default value.
-func NewSendManyCmd(fromAccount string, amounts map[string]float64, minConf *int, comment *string) *SendManyCmd {
+func NewSendManyCmd(fromAccount string, amounts map[string]float64, feeRatePerKb float64, minConf *int, comment *string) *SendManyCmd {
 	return &SendManyCmd{
-		FromAccount: fromAccount,
-		Amounts:     amounts,
-		MinConf:     minConf,
-		Comment:     comment,
+		FromAccount:  fromAccount,
+		Amounts:      amounts,
+		FeeRatePerKb: feeRatePerKb,
+		MinConf:      minConf,
+		Comment:      comment,
 	}
 }
 
 // SendToAddressCmd defines the sendtoaddress JSON-RPC command.
 type SendToAddressCmd struct {
-	Address   string
-	Amount    float64
-	Comment   *string
-	CommentTo *string
+	Address      string
+	Amount       float64
+	FeeRatePerKb float64 // Required: fee rate in PRL/KB
+	Comment      *string
+	CommentTo    *string
 }
 
 // NewSendToAddressCmd returns a new instance which can be used to issue a
@@ -644,12 +651,13 @@ type SendToAddressCmd struct {
 //
 // The parameters which are pointers indicate they are optional.  Passing nil
 // for optional parameters will use the default value.
-func NewSendToAddressCmd(address string, amount float64, comment, commentTo *string) *SendToAddressCmd {
+func NewSendToAddressCmd(address string, amount, feeRatePerKb float64, comment, commentTo *string) *SendToAddressCmd {
 	return &SendToAddressCmd{
-		Address:   address,
-		Amount:    amount,
-		Comment:   comment,
-		CommentTo: commentTo,
+		Address:      address,
+		Amount:       amount,
+		FeeRatePerKb: feeRatePerKb,
+		Comment:      comment,
+		CommentTo:    commentTo,
 	}
 }
 
@@ -670,7 +678,7 @@ func NewSetAccountCmd(address, account string) *SetAccountCmd {
 
 // SetTxFeeCmd defines the settxfee JSON-RPC command.
 type SetTxFeeCmd struct {
-	Amount float64 // In BTC
+	Amount float64 // In PRL
 }
 
 // NewSetTxFeeCmd returns a new instance which can be used to issue a settxfee
@@ -737,7 +745,7 @@ type RawTxWitnessInput struct {
 	ScriptPubKey  string   `json:"scriptPubKey"`
 	RedeemScript  *string  `json:"redeemScript,omitempty"`
 	WitnessScript *string  `json:"witnessScript,omitempty"`
-	Amount        *float64 `json:"amount,omitempty"` // In BTC
+	Amount        *float64 `json:"amount,omitempty"` // In PRL
 }
 
 // SignRawTransactionWithWalletCmd defines the signrawtransactionwithwallet JSON-RPC command.
@@ -1022,7 +1030,7 @@ type PsbtOutput map[string]interface{}
 // NewPsbtOutput returns a new instance of a PSBT output to use with the
 // WalletCreateFundedPsbtCmd command.
 func NewPsbtOutput(address string, amount btcutil.Amount) PsbtOutput {
-	return PsbtOutput{address: amount.ToBTC()}
+	return PsbtOutput{address: amount.ToPRL()}
 }
 
 // NewPsbtDataOutput returns a new instance of a PSBT data output to use with
@@ -1089,6 +1097,15 @@ func NewWalletProcessPsbtCmd(psbt string, sign *bool, sighashType *string, bip32
 	}
 }
 
+// GetSyncProgressCmd defines the getsyncprogress JSON-RPC command.
+type GetSyncProgressCmd struct{}
+
+// NewGetSyncProgressCmd returns a new instance which can be used to issue a
+// getsyncprogress JSON-RPC command.
+func NewGetSyncProgressCmd() *GetSyncProgressCmd {
+	return &GetSyncProgressCmd{}
+}
+
 func init() {
 	// The commands in this file are only usable with a wallet server.
 	flags := UFWalletOnly
@@ -1143,4 +1160,5 @@ func init() {
 	MustRegisterCmd("walletpassphrasechange", (*WalletPassphraseChangeCmd)(nil), flags)
 	MustRegisterCmd("walletcreatefundedpsbt", (*WalletCreateFundedPsbtCmd)(nil), flags)
 	MustRegisterCmd("walletprocesspsbt", (*WalletProcessPsbtCmd)(nil), flags)
+	MustRegisterCmd("getsyncprogress", (*GetSyncProgressCmd)(nil), flags)
 }

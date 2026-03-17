@@ -14,66 +14,66 @@ func TestMatchErrStr(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name        string
-		bitcoindErr error
-		matchStr    string
-		matched     bool
+		name      string
+		compatErr error
+		matchStr  string
+		matched   bool
 	}{
 		{
-			name:        "error without dashes",
-			bitcoindErr: errors.New("missing input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error without dashes",
+			compatErr: errors.New("missing input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str without dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "match str without dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "error with dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error with dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str with dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing-input",
-			matched:     true,
+			name:      "match str with dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing-input",
+			matched:   true,
 		},
 		{
-			name:        "error with title case and dash",
-			bitcoindErr: errors.New("Missing-Input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error with title case and dash",
+			compatErr: errors.New("Missing-Input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str with title case and dash",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "Missing-Input",
-			matched:     true,
+			name:      "match str with title case and dash",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "Missing-Input",
+			matched:   true,
 		},
 		{
-			name:        "unmatched error",
-			bitcoindErr: errors.New("missing input"),
-			matchStr:    "missingorspent",
-			matched:     false,
+			name:      "unmatched error",
+			compatErr: errors.New("missing input"),
+			matchStr:  "missingorspent",
+			matched:   false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched := matchErrStr(tc.bitcoindErr, tc.matchStr)
+			matched := matchErrStr(tc.compatErr, tc.matchStr)
 			require.Equal(t, tc.matched, matched)
 		})
 	}
 }
 
-// TestErrorSentinel checks that all defined RPCErr errors are added to the
-// method `Error`.
-func TestBitcoindErrorSentinel(t *testing.T) {
+// TestCompatErrorSentinel checks that all defined RPCErr errors are added to
+// the method `Error`.
+func TestCompatErrorSentinel(t *testing.T) {
 	t.Parallel()
 
 	rt := require.New(t)

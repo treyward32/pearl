@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,12 +9,11 @@ import (
 	"compress/bzip2"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // genesisCoinbaseTx is the coinbase transaction for the genesis blocks for
@@ -592,7 +591,7 @@ func BenchmarkDeserializeTxLarge(b *testing.B) {
 		b.Fatalf("Failed to read transaction data: %v", err)
 	}
 	defer fi.Close()
-	buf, err := ioutil.ReadAll(bzip2.NewReader(fi))
+	buf, err := io.ReadAll(bzip2.NewReader(fi))
 	if err != nil {
 		b.Fatalf("Failed to read transaction data: %v", err)
 	}
@@ -713,7 +712,7 @@ func BenchmarkSerializeTxLarge(b *testing.B) {
 		b.Fatalf("Failed to read transaction data: %v", err)
 	}
 	defer fi.Close()
-	buf, err := ioutil.ReadAll(bzip2.NewReader(fi))
+	buf, err := io.ReadAll(bzip2.NewReader(fi))
 	if err != nil {
 		b.Fatalf("Failed to read transaction data: %v", err)
 	}
@@ -746,7 +745,6 @@ func BenchmarkReadBlockHeader(b *testing.B) {
 		0x3a, 0x9f, 0xb8, 0xaa, 0x4b, 0x1e, 0x5e, 0x4a, // MerkleRoot
 		0x29, 0xab, 0x5f, 0x49, // Timestamp
 		0xff, 0xff, 0x00, 0x1d, // Bits
-		0xf3, 0xe0, 0x01, 0x00, // Nonce
 		0x00, // TxnCount Varint
 	}
 	r := bytes.NewReader(buf)
@@ -775,7 +773,6 @@ func BenchmarkReadBlockHeaderBuf(b *testing.B) {
 		0x3a, 0x9f, 0xb8, 0xaa, 0x4b, 0x1e, 0x5e, 0x4a, // MerkleRoot
 		0x29, 0xab, 0x5f, 0x49, // Timestamp
 		0xff, 0xff, 0x00, 0x1d, // Bits
-		0xf3, 0xe0, 0x01, 0x00, // Nonce
 		0x00, // TxnCount Varint
 	}
 	r := bytes.NewReader(buf)
@@ -792,9 +789,9 @@ func BenchmarkReadBlockHeaderBuf(b *testing.B) {
 func BenchmarkWriteBlockHeader(b *testing.B) {
 	b.ReportAllocs()
 
-	header := blockOne.Header
+	header := blockOne.BlockHeader()
 	for i := 0; i < b.N; i++ {
-		writeBlockHeader(io.Discard, 0, &header)
+		writeBlockHeader(io.Discard, 0, header)
 	}
 }
 
@@ -804,9 +801,9 @@ func BenchmarkWriteBlockHeaderBuf(b *testing.B) {
 	b.ReportAllocs()
 
 	buf := binarySerializer.Borrow()
-	header := blockOne.Header
+	header := blockOne.BlockHeader()
 	for i := 0; i < b.N; i++ {
-		writeBlockHeaderBuf(io.Discard, 0, &header, buf)
+		writeBlockHeaderBuf(io.Discard, 0, header, buf)
 	}
 	binarySerializer.Return(buf)
 }
@@ -829,8 +826,8 @@ func BenchmarkDecodeGetHeaders(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgGetHeaders.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgGetHeaders.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -839,14 +836,21 @@ func BenchmarkDecodeGetHeaders(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
 // BenchmarkDecodeHeaders performs a benchmark on how long it takes to
 // decode a headers message with the maximum number of headers.
+// Uses ZKCertificate with realistic 50KB+ proof data to simulate production workloads.
 func BenchmarkDecodeHeaders(b *testing.B) {
 	b.ReportAllocs()
+
+	// Create 50KB proof data to simulate realistic ZK proof size
+	proofData := make([]byte, 51200)
+	for i := range proofData {
+		proofData[i] = byte(i % 256)
+	}
 
 	// Create a message with the maximum number of headers.
 	pver := ProtocolVersion
@@ -856,13 +860,19 @@ func BenchmarkDecodeHeaders(b *testing.B) {
 		if err != nil {
 			b.Fatalf("NewHashFromStr: unexpected error: %v", err)
 		}
-		m.AddBlockHeader(NewBlockHeader(1, hash, hash, 0, uint32(i)))
+		bh := NewBlockHeader(1, hash, hash, 0)
+		cert := &ZKCertificate{
+			Hash:       bh.BlockHash(),
+			PublicData: [PublicDataSize]byte{},
+			ProofData:  proofData,
+		}
+		m.AddBlockHeader(*bh, cert)
 	}
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgHeaders.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgHeaders.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -871,7 +881,7 @@ func BenchmarkDecodeHeaders(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
@@ -893,8 +903,8 @@ func BenchmarkDecodeGetBlocks(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgGetBlocks.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgGetBlocks.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -903,7 +913,7 @@ func BenchmarkDecodeGetBlocks(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
@@ -922,8 +932,8 @@ func BenchmarkDecodeAddr(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := ma.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgAddr.BtcEncode: unexpected error: %v", err)
+	if err := ma.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgAddr.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -932,7 +942,7 @@ func BenchmarkDecodeAddr(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
@@ -952,8 +962,8 @@ func BenchmarkDecodeInv(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgInv.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgInv.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -965,7 +975,7 @@ func BenchmarkDecodeInv(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
@@ -987,8 +997,8 @@ func BenchmarkDecodeNotFound(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgNotFound.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgNotFound.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -997,7 +1007,7 @@ func BenchmarkDecodeNotFound(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 
@@ -1013,7 +1023,7 @@ func BenchmarkDecodeMerkleBlock(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewHashFromStr: unexpected error: %v", err)
 	}
-	m.Header = *NewBlockHeader(1, hash, hash, 0, uint32(10000))
+	m.Header = *NewBlockHeader(1, hash, hash, 0)
 	for i := 0; i < 105; i++ {
 		hash, err := chainhash.NewHashFromStr(fmt.Sprintf("%x", i))
 		if err != nil {
@@ -1027,8 +1037,8 @@ func BenchmarkDecodeMerkleBlock(b *testing.B) {
 
 	// Serialize it so the bytes are available to test the decode below.
 	var bb bytes.Buffer
-	if err := m.BtcEncode(&bb, pver, LatestEncoding); err != nil {
-		b.Fatalf("MsgMerkleBlock.BtcEncode: unexpected error: %v", err)
+	if err := m.PrlEncode(&bb, pver, LatestEncoding); err != nil {
+		b.Fatalf("MsgMerkleBlock.PrlEncode: unexpected error: %v", err)
 	}
 	buf := bb.Bytes()
 
@@ -1037,7 +1047,7 @@ func BenchmarkDecodeMerkleBlock(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r.Seek(0, 0)
-		msg.BtcDecode(r, pver, LatestEncoding)
+		msg.PrlDecode(r, pver, LatestEncoding)
 	}
 }
 

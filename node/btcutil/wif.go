@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,15 @@ import (
 	"bytes"
 	"errors"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil/base58"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil/base58"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
+
+// ErrChecksumMismatch describes an error where decoding failed due
+// to a bad checksum.
+var ErrChecksumMismatch = errors.New("checksum mismatch")
 
 // ErrMalformedPrivateKey describes an error where a WIF-encoded private
 // key cannot be decoded due to being improperly formatted.  This may occur
@@ -40,7 +44,7 @@ type WIF struct {
 	// uncompressed (65-byte) one.
 	CompressPubKey bool
 
-	// netID is the bitcoin network identifier byte used when
+	// netID is the network identifier byte used when
 	// WIF encoding the private key.
 	netID byte
 }
@@ -57,7 +61,7 @@ func NewWIF(privKey *btcec.PrivateKey, net *chaincfg.Params, compress bool) (*WI
 }
 
 // IsForNet returns whether or not the decoded WIF structure is associated
-// with the passed bitcoin network.
+// with the passed network.
 func (w *WIF) IsForNet(net *chaincfg.Params) bool {
 	return w.netID == net.PrivateKeyID
 }
@@ -69,7 +73,7 @@ func (w *WIF) IsForNet(net *chaincfg.Params) bool {
 // sequence:
 //
 //   - 1 byte to identify the network, must be 0x80 for mainnet or 0xef for
-//     either testnet3 or the regression test network
+//     either testnet or the regression test network
 //   - 32 bytes of a binary-encoded, big-endian, zero-padded private key
 //   - Optional 1 byte (equal to 0x01) if the address being imported or exported
 //     was created by taking the RIPEMD160 after SHA256 hash of a serialized

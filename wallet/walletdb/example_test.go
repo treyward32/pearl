@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 // This example demonstrates creating a new database.
@@ -19,8 +19,8 @@ func ExampleCreate() {
 	// This example assumes the bdb (bolt db) driver is imported.
 	//
 	// import (
-	// 	"github.com/btcsuite/btcwallet/walletdb"
-	// 	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	// 	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	// 	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 	// )
 
 	// Create a database and schedule it to be closed and removed on exit.
@@ -28,7 +28,9 @@ func ExampleCreate() {
 	// this, but it's done here in the example to ensure the example cleans
 	// up after itself.
 	dbPath := filepath.Join(os.TempDir(), "examplecreate.db")
-	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create(
+		"bdb", dbPath, true, defaultDBTimeout, false,
+	)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -47,7 +49,7 @@ var exampleNum = 0
 func exampleLoadDB() (walletdb.DB, func(), error) {
 	dbName := fmt.Sprintf("exampleload%d.db", exampleNum)
 	dbPath := filepath.Join(os.TempDir(), dbName)
-	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -102,8 +104,8 @@ func Example_basicUsage() {
 	// This example assumes the bdb (bolt db) driver is imported.
 	//
 	// import (
-	// 	"github.com/btcsuite/btcwallet/walletdb"
-	// 	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	// 	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	// 	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 	// )
 
 	// Create a database and schedule it to be closed and removed on exit.
@@ -111,7 +113,7 @@ func Example_basicUsage() {
 	// this, but it's done here in the example to ensure the example cleans
 	// up after itself.
 	dbPath := filepath.Join(os.TempDir(), "exampleusage.db")
-	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout, false)
 	if err != nil {
 		fmt.Println(err)
 		return

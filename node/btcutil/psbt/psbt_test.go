@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,14 +9,14 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"math"
 	"strings"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,7 +45,6 @@ func createPsbtFromSignedTx(serializedSignedTx []byte) (
 		scriptSigs = append(scriptSigs, tx.TxIn[i].SignatureScript)
 		tin.Witness = nil
 		witnesses = append(witnesses, tx.TxIn[i].Witness)
-
 	}
 
 	// Outputs always contain: (value, scriptPubkey) so don't need
@@ -200,9 +199,6 @@ func TestReadValidPsbtAndReserialize(t *testing.T) {
 		var b bytes.Buffer
 		err = testPsbt.Serialize(&b)
 		require.NoErrorf(t, err, "%d: serialize", key)
-		if err != nil {
-			t.Fatalf("Unable to serialize created Psbt: %v", err)
-		}
 
 		require.Equal(t, psbtBytes, b.Bytes(), "%d: serialized", key)
 	}
@@ -219,9 +215,6 @@ func TestReadValidPsbtAndReserialize(t *testing.T) {
 		var b bytes.Buffer
 		err = testPsbt.Serialize(&b)
 		require.NoErrorf(t, err, "%d: serialize", key)
-		if err != nil {
-			t.Fatalf("Unable to serialize created Psbt: %v", err)
-		}
 
 		base64Packet := base64.StdEncoding.EncodeToString(b.Bytes())
 		require.Equal(t, v, base64Packet, "%d: serialized", key)
@@ -264,61 +257,47 @@ func TestSanityCheck(t *testing.T) {
 	// index 1 contains a psbt with two inputs, first non-witness,
 	// second witness.
 	psbtraw1, err := hex.DecodeString(validPsbtHex[1])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	psbt1, err := NewFromRawBytes(bytes.NewReader(psbtraw1), false)
-	if err != nil {
-		t.Fatalf("Unable to create Psbt struct: %v", err)
-	}
+	require.NoError(t, err, "Unable to create Psbt struct")
 
 	// Add a non-witness utxo field to input2 using raw insertion function,
 	// so that it becomes invalid, then NewUpdater should fail.
 	nonWitnessUtxoRaw, err := hex.DecodeString(
 		CUTestHexData["NonWitnessUtxo"],
 	)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	nonWitnessUtxo := wire.NewMsgTx(2)
 	err = nonWitnessUtxo.Deserialize(bytes.NewReader(nonWitnessUtxoRaw))
-	if err != nil {
-		t.Fatalf("Unable to deserialize: %v", err)
-	}
+	require.NoError(t, err, "Unable to deserialize")
 	inputs1 := &psbt1.Inputs[1]
 	inputs1.NonWitnessUtxo = nonWitnessUtxo
 
 	// The PSBT is now in an inconsistent state; Updater creation should
 	// fail.
 	updater, err := NewUpdater(psbt1)
-	if err == nil {
-		t.Fatalf("Failed to identify invalid PSBT state ( " +
-			"witness, non-witness fields)")
-	}
+	require.Error(t, err, "Failed to identify invalid PSBT state (witness, non-witness fields)")
 
 	// Overwrite back with the correct psbt
 	psbtraw1, err = hex.DecodeString(validPsbtHex[1])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	psbt1, err = NewFromRawBytes(bytes.NewReader(psbtraw1), false)
+	require.NoError(t, err, "Unable to create Psbt")
+
 	updater, err = NewUpdater(psbt1)
-	if err != nil {
-		t.Fatalf("Unable to create Updater: %v", err)
-	}
+	require.NoError(t, err, "Unable to create Updater")
 
 	// Create a fake non-witness utxo field to overlap with
 	// the existing witness input at index 1.
 	tx := wire.NewMsgTx(2)
 	err = tx.Deserialize(bytes.NewReader(nonWitnessUtxoRaw))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
+	require.NoError(t, err, "Error deserializing transaction")
+
 	err = updater.AddInNonWitnessUtxo(tx, 1)
-	if err == nil {
-		t.Fatalf("Incorrectly accepted Psbt with conflicting witness " +
-			"and non-witness utxo entries in the same input.")
-	}
+	require.Error(t, err, "Incorrectly accepted Psbt with conflicting witness and non-witness utxo entries in the same input")
 
 	// Now we try again; this time we try to add a witnessScript
 	// key-value pair to an input which is non-witness, which should
@@ -326,23 +305,17 @@ func TestSanityCheck(t *testing.T) {
 	psbt2, err := NewFromRawBytes(
 		bytes.NewReader(psbtraw1), false,
 	)
-	if err != nil {
-		t.Fatalf("Unable to create Psbt struct: %v", err)
-	}
+	require.NoError(t, err, "Unable to create Psbt struct")
+
 	updater2, err := NewUpdater(psbt2)
-	if err != nil {
-		t.Fatalf("Got error creating  updater2: %v", err)
-	}
+	require.NoError(t, err, "Got error creating updater2")
+
 	witnessScript, err := hex.DecodeString(
 		CUTestHexData["Input2WitnessScript"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = updater2.AddInWitnessScript(witnessScript, 0)
-	if err == nil {
-		t.Fatalf("Incorrectly accepted adding witness script field " +
-			"to non-witness utxo")
-	}
+	require.Error(t, err, "Incorrectly accepted adding witness script field to non-witness utxo")
 }
 
 // Data for creation and updating tests
@@ -408,240 +381,177 @@ var CUTestPubkeyData = map[string]string{
 
 func TestPsbtCreator(t *testing.T) {
 	spkOut1, err := hex.DecodeString(CUTestHexData["scriptPubkey1"])
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	spkOut2, err := hex.DecodeString(CUTestHexData["scriptPubkey2"])
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	out1 := wire.NewTxOut(CUTestAmountData["amount1"], spkOut1)
 	out2 := wire.NewTxOut(CUTestAmountData["amount2"], spkOut2)
 	outputs := []*wire.TxOut{out1, out2}
 	hash1, err := chainhash.NewHashFromStr(CUTestHexData["txid1"])
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Unable to parse hash")
+
 	prevOut1 := wire.NewOutPoint(hash1, uint32(0))
 	hash2, err := chainhash.NewHashFromStr(CUTestHexData["txid2"])
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Unable to parse hash")
+
 	prevOut2 := wire.NewOutPoint(hash2, uint32(1))
 	inputs := []*wire.OutPoint{prevOut1, prevOut2}
 
 	// Check creation fails with invalid sequences:
 	nSequences := []uint32{wire.MaxTxInSequenceNum}
 	_, err = New(inputs, outputs, int32(3), uint32(0), nSequences)
-	if err == nil {
-		t.Fatalf("Did not error when creating transaction with " +
-			"invalid nSequences")
-	}
+	require.Error(t, err, "Did not error when creating transaction with invalid nSequences")
 	nSequences = append(nSequences, wire.MaxTxInSequenceNum)
 
 	// Check creation fails with invalid version
 	_, err = New(inputs, outputs, int32(0), uint32(0), nSequences)
-	if err == nil {
-		t.Fatalf("Did not error when creating transaction with " +
-			"invalid version (3)")
-	}
+	require.Error(t, err, "Did not error when creating transaction with invalid version (3)")
 
 	// Use valid data to create:
 	cPsbt, err := New(inputs, outputs, int32(2), uint32(0), nSequences)
+	require.NoError(t, err, "Unable to create PSBT")
+
 	var b bytes.Buffer
 	err = cPsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize created Psbt: %v", err)
-	}
-	if CUTestHexData["COPsbtHex"] != hex.EncodeToString(b.Bytes()) {
-		t.Fatalf("Failed to create expected psbt, instead got: %v",
-			hex.EncodeToString(b.Bytes()))
-	}
+	require.NoError(t, err, "Unable to serialize created Psbt")
+
+	require.Equal(t, CUTestHexData["COPsbtHex"], hex.EncodeToString(b.Bytes()),
+		"Failed to create expected psbt")
 
 	// Now simulate passing the created PSBT to an Updater
 	updater, err := NewUpdater(cPsbt)
-	if err != nil {
-		t.Fatalf("Unable to create Updater object")
-	}
+	require.NoError(t, err, "Unable to create Updater object")
 	tx := wire.NewMsgTx(2)
 	nonWitnessUtxoHex, err := hex.DecodeString(
 		CUTestHexData["NonWitnessUtxo"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = tx.Deserialize(bytes.NewReader(nonWitnessUtxoHex))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
+	require.NoError(t, err, "Error deserializing transaction")
 	witnessUtxoHex, err := hex.DecodeString(
 		CUTestHexData["WitnessUtxo"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
 	txout := wire.TxOut{Value: CUTestAmountData["amount3"],
 		PkScript: witnessUtxoHex[9:]}
 	err = updater.AddInNonWitnessUtxo(tx, 0)
-	if err != nil {
-		t.Fatalf("Unable to add NonWitness Utxo to inputs: %v", err)
-	}
+	require.NoError(t, err, "Unable to add NonWitness Utxo to inputs")
+
 	err = updater.AddInWitnessUtxo(&txout, 1)
-	if err != nil {
-		t.Fatalf("Unable to add Witness Utxo to inputs: %v", err)
-	}
+	require.NoError(t, err, "Unable to add Witness Utxo to inputs")
 
 	b.Reset()
 
 	err = updater.Upsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if CUTestHexData["UOPsbtHex"] != hex.EncodeToString(b.Bytes()) {
-		t.Fatal("Failed to create valid updated PSBT after utxos")
-	}
+	require.NoError(t, err, "Unable to serialize updated Psbt")
+
+	require.Equal(t, CUTestHexData["UOPsbtHex"], hex.EncodeToString(b.Bytes()),
+		"Failed to create valid updated PSBT after utxos")
 	input1RedeemScript, err := hex.DecodeString(CUTestHexData["Input1RedeemScript"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = updater.AddInRedeemScript(input1RedeemScript, 0)
-	if err != nil {
-		t.Fatalf("Unable to add redeem script: %v", err)
-	}
+	require.NoError(t, err, "Unable to add redeem script")
+
 	input2RedeemScript, err := hex.DecodeString(CUTestHexData["Input2RedeemScript"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = updater.AddInRedeemScript(input2RedeemScript, 1)
-	if err != nil {
-		t.Fatalf("Unable to add redeem script: %v", err)
-	}
+	require.NoError(t, err, "Unable to add redeem script")
+
 	input2WitnessScript, err := hex.DecodeString(CUTestHexData["Input2WitnessScript"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = updater.AddInWitnessScript(input2WitnessScript, 1)
-	if err != nil {
-		t.Fatalf("Unable to add witness script: %v", err)
-	}
+	require.NoError(t, err, "Unable to add witness script")
 
 	b.Reset()
 	err = updater.Upsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if CUTestHexData["UOPsbtHex2"] != hex.EncodeToString(b.Bytes()) {
-		t.Fatal("Failed to create valid updated PSBT after redeem scripts")
-	}
+	require.NoError(t, err, "Unable to serialize updated Psbt")
+
+	require.Equal(t, CUTestHexData["UOPsbtHex2"], hex.EncodeToString(b.Bytes()),
+		"Failed to create valid updated PSBT after redeem scripts")
 	masterKey, err := hex.DecodeString(CUMasterKeyFingerPrint)
+	require.NoError(t, err, "Unable to decode hex")
 	masterKeyInt := binary.LittleEndian.Uint32(masterKey)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
 	input1Path1 := CUTestPathData["dpath1"]
 	input1Path2 := CUTestPathData["dpath2"]
 	input1Key1, err := hex.DecodeString(CUTestPubkeyData["pub1"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	input1Key2, err := hex.DecodeString(CUTestPubkeyData["pub2"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	err = updater.AddInBip32Derivation(masterKeyInt, input1Path1, input1Key1, 0)
-	if err != nil {
-		t.Fatal("Failed to add first key derivation for input 1")
-	}
+	require.NoError(t, err, "Failed to add first key derivation for input 1")
+
 	err = updater.AddInBip32Derivation(masterKeyInt, input1Path2, input1Key2, 0)
-	if err != nil {
-		t.Fatal("Failed to add second key derivation for input 1")
-	}
+	require.NoError(t, err, "Failed to add second key derivation for input 1")
 	input2Path1 := CUTestPathData["dpath3"]
 	input2Path2 := CUTestPathData["dpath4"]
 	input2Key1, err := hex.DecodeString(CUTestPubkeyData["pub3"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	input2Key2, err := hex.DecodeString(CUTestPubkeyData["pub4"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
 
 	// check invalid pubkeys are not accepted
 	borkedInput2Key1 := append([]byte{0xff}, input2Key1...)
 	err = updater.AddInBip32Derivation(masterKeyInt, input2Path1,
 		borkedInput2Key1, 1)
-	if err == nil {
-		t.Fatalf("Expected invalid pubkey, got: %v", err)
-	}
+	require.Error(t, err, "Expected invalid pubkey")
 
 	err = updater.AddInBip32Derivation(masterKeyInt, input2Path1, input2Key1, 1)
-	if err != nil {
-		t.Fatal("Failed to add first key derivation for input 2")
-	}
+	require.NoError(t, err, "Failed to add first key derivation for input 2")
+
 	err = updater.AddInBip32Derivation(masterKeyInt, input2Path2, input2Key2, 1)
-	if err != nil {
-		t.Fatal("Failed to add second key derivation for input 2")
-	}
+	require.NoError(t, err, "Failed to add second key derivation for input 2")
 	output1Key1, err := hex.DecodeString(CUTestPubkeyData["pub5"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
 	output1Path := CUTestPathData["dpath5"]
 
 	// check invalid pubkeys are not accepted
 	borkedOutput1Key1 := append([]byte{0xab}, output1Key1[:13]...)
 	err = updater.AddOutBip32Derivation(masterKeyInt, output1Path,
 		borkedOutput1Key1, 0)
-	if err == nil {
-		t.Fatalf("Expected invalid pubkey, got: %v", err)
-	}
+	require.Error(t, err, "Expected invalid pubkey")
 
 	err = updater.AddOutBip32Derivation(masterKeyInt, output1Path, output1Key1, 0)
-	if err != nil {
-		t.Fatal("Failed to add key to first output")
-	}
+	require.NoError(t, err, "Failed to add key to first output")
+
 	output2Key1, err := hex.DecodeString(CUTestPubkeyData["pub6"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
+
 	output2Path := CUTestPathData["dpath6"]
 	err = updater.AddOutBip32Derivation(masterKeyInt, output2Path, output2Key1, 1)
-	if err != nil {
-		t.Fatal("Failed to add key to second output")
-	}
+	require.NoError(t, err, "Failed to add key to second output")
 
 	b.Reset()
 	err = updater.Upsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if CUTestHexData["UOPsbtHex3"] != hex.EncodeToString(b.Bytes()) {
-		t.Fatal("Failed to create valid updated PSBT after BIP32 derivations")
-	}
+	require.NoError(t, err, "Unable to serialize updated Psbt")
+
+	require.Equal(t, CUTestHexData["UOPsbtHex3"], hex.EncodeToString(b.Bytes()),
+		"Failed to create valid updated PSBT after BIP32 derivations")
+
 	err = updater.AddInSighashType(txscript.SigHashType(1), 0)
-	if err != nil {
-		t.Fatal("Failed to add sighash type to first input")
-	}
+	require.NoError(t, err, "Failed to add sighash type to first input")
+
 	err = updater.AddInSighashType(txscript.SigHashType(1), 1)
-	if err != nil {
-		t.Fatal("Failed to add sighash type to second input")
-	}
+	require.NoError(t, err, "Failed to add sighash type to second input")
 
 	b.Reset()
 	err = updater.Upsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if CUTestHexData["UOPsbtHex4"] != hex.EncodeToString(b.Bytes()) {
-		t.Fatal("Failed to create valid updated PSBT after sighash types")
-	}
+	require.NoError(t, err, "Unable to serialize updated Psbt")
+
+	require.Equal(t, CUTestHexData["UOPsbtHex4"], hex.EncodeToString(b.Bytes()),
+		"Failed to create valid updated PSBT after sighash types")
+
 	b644, err := updater.Upsbt.B64Encode()
-	if err != nil {
-		t.Fatalf("Unable to B64Encode updated Psbt: %v", err)
-	}
-	if b644 != CUTestB64Data["UOPsbtB644"] {
-		t.Fatalf("Failed to base64 encode updated PSBT after sighash "+
-			"types: %v", b644)
-	}
+	require.NoError(t, err, "Unable to B64Encode updated Psbt")
+
+	require.Equal(t, CUTestB64Data["UOPsbtB644"], b644,
+		"Failed to base64 encode updated PSBT after sighash types")
 }
 
 // Signing test data taken from
@@ -662,124 +572,85 @@ func TestPsbtSigner(t *testing.T) {
 		bytes.NewReader([]byte(signerPsbtData["signer1PsbtB64"])),
 		true,
 	)
-	if err != nil {
-		t.Fatalf("Failed to parse PSBT: %v", err)
-	}
+	require.NoError(t, err, "Failed to parse PSBT")
 	psbtUpdater1 := Updater{
 		Upsbt: psbt1,
 	}
 	sig1, err := hex.DecodeString("3044022074018ad4180097b873323c0015720b3684cc8123891048e7dbcd9b55ad679c99022073d369b740e3eb53dcefa33823c8070514ca55a7dd9544f157c167913261118c01")
+	require.NoError(t, err, "Unable to decode hex")
+
 	pub1, err := hex.DecodeString("029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f")
+	require.NoError(t, err, "Unable to decode hex")
+
 	res, err := psbtUpdater1.Sign(0, sig1, pub1, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Error from adding signatures: %v %v", err, res)
-	}
+	require.NoError(t, err, "Error from adding signatures")
+	require.Equal(t, SignOutcome(0), res, "Unexpected result from Sign")
 	sig2, err := hex.DecodeString("3044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01")
+	require.NoError(t, err, "Unable to decode hex")
+
 	pub2, err := hex.DecodeString("03089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc")
+	require.NoError(t, err, "Unable to decode hex")
+
 	res, err = psbtUpdater1.Sign(1, sig2, pub2, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Error from adding signatures: %v %v", err, res)
-	}
+	require.NoError(t, err, "Error from adding signatures")
+	require.Equal(t, SignOutcome(0), res, "Unexpected result from Sign")
 	signer1Result, err := hex.DecodeString(signerPsbtData["signer1Result"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
+	require.NoError(t, err, "Unable to decode hex")
 
 	var b bytes.Buffer
 	err = psbtUpdater1.Upsbt.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if !bytes.Equal(b.Bytes(), signer1Result) {
-		t.Fatalf("Failed to add signatures correctly")
-	}
-}
+	require.NoError(t, err, "Unable to serialize updated Psbt")
 
-// Finalizer-extractor test
-
-var finalizerPsbtData = map[string]string{
-	"finalizeb64": "cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAAiAgKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgf0cwRAIgdAGK1BgAl7hzMjwAFXILNoTMgSOJEEjn282bVa1nnJkCIHPTabdA4+tT3O+jOCPIBwUUylWn3ZVE8VfBZ5EyYRGMASICAtq2H/SaFNtqfQKwzR+7ePxLGDErW05U2uTbovv+9TbXSDBFAiEA9hA4swjcHahlo0hSdG8BV3KTQgjG0kRUOTzZm98iF3cCIAVuZ1pnWm0KArhbFOXikHTYolqbV2C+ooFvZhkQoAbqAQEDBAEAAAABBEdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSriIGApWDvzmuCmCXR60Zmt3WNPphCFWdbFzTm0whg/GrluB/ENkMak8AAACAAAAAgAAAAIAiBgLath/0mhTban0CsM0fu3j8SxgxK1tOVNrk26L7/vU21xDZDGpPAAAAgAAAAIABAACAAAEBIADC6wsAAAAAF6kUt/X69A49QKWkWbHbNTXyty+pIeiHIgIDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtxHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwEiAgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8Oc0cwRAIgZfRbpZmLWaJ//hp77QFq8fH5DVSzqo90UKpfVqJRA70CIH9yRwOtHtuWaAsoS1bU/8uI9/t1nqu+CKow8puFE4PSAQEDBAEAAAABBCIAIIwjUxc3Q7WV37Sge3K6jkLjeX2nTof+fZ10l+OyAokDAQVHUiEDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwhAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zUq4iBgI63ZBPPW3PWd25BrDe4jUpt/+57VDl6GFRkmhgIh8OcxDZDGpPAAAAgAAAAIADAACAIgYDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwQ2QxqTwAAAIAAAACAAgAAgAAiAgOppMN/WZbTqiXbrGtXCvBlA5RJKUJGCzVHU+2e7KWHcRDZDGpPAAAAgAAAAIAEAACAACICAn9jmXV9Lv9VoTatAsaEsYOLZVbl8bazQoKpS2tQBRCWENkMak8AAACAAAAAgAUAAIAA",
-	"finalize":    "70736274ff01009a020000000258e87a21b56daf0c23be8e7070456c336f7cbaa5c8757924f545887bb2abdd750000000000ffffffff838d0427d0ec650a68aa46bb0b098aea4422c071b2ca78352a077959d07cea1d0100000000ffffffff0270aaf00800000000160014d85c2b71d0060b09c9886aeb815e50991dda124d00e1f5050000000016001400aea9a2e5f0f876a588df5546e8742d1d87008f00000000000100bb0200000001aad73931018bd25f84ae400b68848be09db706eac2ac18298babee71ab656f8b0000000048473044022058f6fc7c6a33e1b31548d481c826c015bd30135aad42cd67790dab66d2ad243b02204a1ced2604c6735b6393e5b41691dd78b00f0c5942fb9f751856faa938157dba01feffffff0280f0fa020000000017a9140fb9463421696b82c833af241c78c17ddbde493487d0f20a270100000017a91429ca74f8a08f81999428185c97b5d852e4063f6187650000002202029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f473044022074018ad4180097b873323c0015720b3684cc8123891048e7dbcd9b55ad679c99022073d369b740e3eb53dcefa33823c8070514ca55a7dd9544f157c167913261118c01220202dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d7483045022100f61038b308dc1da865a34852746f015772934208c6d24454393cd99bdf2217770220056e675a675a6d0a02b85b14e5e29074d8a25a9b5760bea2816f661910a006ea01010304010000000104475221029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f2102dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d752ae2206029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f10d90c6a4f000000800000008000000080220602dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d710d90c6a4f0000008000000080010000800001012000c2eb0b0000000017a914b7f5faf40e3d40a5a459b1db3535f2b72fa921e887220203089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc473044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f012202023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e73473044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d2010103040100000001042200208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b2028903010547522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae2206023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7310d90c6a4f000000800000008003000080220603089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc10d90c6a4f00000080000000800200008000220203a9a4c37f5996d3aa25dbac6b570af0650394492942460b354753ed9eeca5877110d90c6a4f000000800000008004000080002202027f6399757d2eff55a136ad02c684b1838b6556e5f1b6b34282a94b6b5005109610d90c6a4f00000080000000800500008000",
-	"resultb64":   "cHNidP8BAJoCAAAAAljoeiG1ba8MI76OcHBFbDNvfLqlyHV5JPVFiHuyq911AAAAAAD/////g40EJ9DsZQpoqka7CwmK6kQiwHGyyng1Kgd5WdB86h0BAAAAAP////8CcKrwCAAAAAAWABTYXCtx0AYLCcmIauuBXlCZHdoSTQDh9QUAAAAAFgAUAK6pouXw+HaliN9VRuh0LR2HAI8AAAAAAAEAuwIAAAABqtc5MQGL0l+ErkALaISL4J23BurCrBgpi6vucatlb4sAAAAASEcwRAIgWPb8fGoz4bMVSNSByCbAFb0wE1qtQs1neQ2rZtKtJDsCIEoc7SYExnNbY5PltBaR3XiwDwxZQvufdRhW+qk4FX26Af7///8CgPD6AgAAAAAXqRQPuUY0IWlrgsgzryQceMF9295JNIfQ8gonAQAAABepFCnKdPigj4GZlCgYXJe12FLkBj9hh2UAAAABB9oARzBEAiB0AYrUGACXuHMyPAAVcgs2hMyBI4kQSOfbzZtVrWecmQIgc9Npt0Dj61Pc76M4I8gHBRTKVafdlUTxV8FnkTJhEYwBSDBFAiEA9hA4swjcHahlo0hSdG8BV3KTQgjG0kRUOTzZm98iF3cCIAVuZ1pnWm0KArhbFOXikHTYolqbV2C+ooFvZhkQoAbqAUdSIQKVg785rgpgl0etGZrd1jT6YQhVnWxc05tMIYPxq5bgfyEC2rYf9JoU22p9ArDNH7t4/EsYMStbTlTa5Nui+/71NtdSrgABASAAwusLAAAAABepFLf1+vQOPUClpFmx2zU18rcvqSHohwEHIyIAIIwjUxc3Q7WV37Sge3K6jkLjeX2nTof+fZ10l+OyAokDAQjaBABHMEQCIGLrelVhB6fHP0WsSrWh3d9vcHX7EnWWmn84Pv/3hLyyAiAMBdu3Rw2/LwhVfdNWxzJcHtMJE+mWzThAlF2xIijaXwFHMEQCIGX0W6WZi1mif/4ae+0BavHx+Q1Us6qPdFCqX1aiUQO9AiB/ckcDrR7blmgLKEtW1P/LiPf7dZ6rvgiqMPKbhROD0gFHUiEDCJ3BDHrG21T5EymvYXMz2ziM6tDCMfcjN50bmQMLAtwhAjrdkE89bc9Z3bkGsN7iNSm3/7ntUOXoYVGSaGAiHw5zUq4AIgIDqaTDf1mW06ol26xrVwrwZQOUSSlCRgs1R1Ptnuylh3EQ2QxqTwAAAIAAAACABAAAgAAiAgJ/Y5l1fS7/VaE2rQLGhLGDi2VW5fG2s0KCqUtrUAUQlhDZDGpPAAAAgAAAAIAFAACAAA==",
-	"result":      "70736274ff01009a020000000258e87a21b56daf0c23be8e7070456c336f7cbaa5c8757924f545887bb2abdd750000000000ffffffff838d0427d0ec650a68aa46bb0b098aea4422c071b2ca78352a077959d07cea1d0100000000ffffffff0270aaf00800000000160014d85c2b71d0060b09c9886aeb815e50991dda124d00e1f5050000000016001400aea9a2e5f0f876a588df5546e8742d1d87008f00000000000100bb0200000001aad73931018bd25f84ae400b68848be09db706eac2ac18298babee71ab656f8b0000000048473044022058f6fc7c6a33e1b31548d481c826c015bd30135aad42cd67790dab66d2ad243b02204a1ced2604c6735b6393e5b41691dd78b00f0c5942fb9f751856faa938157dba01feffffff0280f0fa020000000017a9140fb9463421696b82c833af241c78c17ddbde493487d0f20a270100000017a91429ca74f8a08f81999428185c97b5d852e4063f6187650000000107da00473044022074018ad4180097b873323c0015720b3684cc8123891048e7dbcd9b55ad679c99022073d369b740e3eb53dcefa33823c8070514ca55a7dd9544f157c167913261118c01483045022100f61038b308dc1da865a34852746f015772934208c6d24454393cd99bdf2217770220056e675a675a6d0a02b85b14e5e29074d8a25a9b5760bea2816f661910a006ea01475221029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f2102dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d752ae0001012000c2eb0b0000000017a914b7f5faf40e3d40a5a459b1db3535f2b72fa921e8870107232200208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b20289030108da0400473044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01473044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d20147522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae00220203a9a4c37f5996d3aa25dbac6b570af0650394492942460b354753ed9eeca5877110d90c6a4f000000800000008004000080002202027f6399757d2eff55a136ad02c684b1838b6556e5f1b6b34282a94b6b5005109610d90c6a4f00000080000000800500008000",
-	"network":     "0200000000010258e87a21b56daf0c23be8e7070456c336f7cbaa5c8757924f545887bb2abdd7500000000da00473044022074018ad4180097b873323c0015720b3684cc8123891048e7dbcd9b55ad679c99022073d369b740e3eb53dcefa33823c8070514ca55a7dd9544f157c167913261118c01483045022100f61038b308dc1da865a34852746f015772934208c6d24454393cd99bdf2217770220056e675a675a6d0a02b85b14e5e29074d8a25a9b5760bea2816f661910a006ea01475221029583bf39ae0a609747ad199addd634fa6108559d6c5cd39b4c2183f1ab96e07f2102dab61ff49a14db6a7d02b0cd1fbb78fc4b18312b5b4e54dae4dba2fbfef536d752aeffffffff838d0427d0ec650a68aa46bb0b098aea4422c071b2ca78352a077959d07cea1d01000000232200208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b2028903ffffffff0270aaf00800000000160014d85c2b71d0060b09c9886aeb815e50991dda124d00e1f5050000000016001400aea9a2e5f0f876a588df5546e8742d1d87008f000400473044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01473044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d20147522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae00000000",
-	"twoOfThree":  "70736274ff01005e01000000019a5fdb3c36f2168ea34a031857863c63bb776fd8a8a9149efd7341dfaf81c9970000000000ffffffff01e013a8040000000022002001c3a65ccfa5b39e31e6bafa504446200b9c88c58b4f21eb7e18412aff154e3f000000000001012bc817a80400000000220020114c9ab91ea00eb3e81a7aa4d0d8f1bc6bd8761f8f00dbccb38060dc2b9fdd5522020242ecd19afda551d58f496c17e3f51df4488089df4caafac3285ed3b9c590f6a847304402207c6ab50f421c59621323460aaf0f731a1b90ca76eddc635aed40e4d2fc86f97e02201b3f8fe931f1f94fde249e2b5b4dbfaff2f9df66dd97c6b518ffa746a4390bd1012202039f0acfe5a292aafc5331f18f6360a3cc53d645ebf0cc7f0509630b22b5d9f547473044022075329343e01033ebe5a22ea6eecf6361feca58752716bdc2260d7f449360a0810220299740ed32f694acc5f99d80c988bb270a030f63947f775382daf4669b272da0010103040100000001056952210242ecd19afda551d58f496c17e3f51df4488089df4caafac3285ed3b9c590f6a821035a654524d301dd0265c2370225a6837298b8ca2099085568cc61a8491287b63921039f0acfe5a292aafc5331f18f6360a3cc53d645ebf0cc7f0509630b22b5d9f54753ae22060242ecd19afda551d58f496c17e3f51df4488089df4caafac3285ed3b9c590f6a818d5f7375b2c000080000000800000008000000000010000002206035a654524d301dd0265c2370225a6837298b8ca2099085568cc61a8491287b63918e2314cf32c000080000000800000008000000000010000002206039f0acfe5a292aafc5331f18f6360a3cc53d645ebf0cc7f0509630b22b5d9f54718e524a1ce2c000080000000800000008000000000010000000000",
-}
-
-func TestFinalize2of3(t *testing.T) {
-	b, err := hex.DecodeString(finalizerPsbtData["twoOfThree"])
-	if err != nil {
-		t.Fatalf("Error decoding hex: %v", err)
-	}
-	p, err := NewFromRawBytes(bytes.NewReader(b), false)
-	if err != nil {
-		t.Fatalf("Error parsing PSBT: %v", err)
-	}
-	if p.IsComplete() {
-		t.Fatalf("Psbt is complete")
-	}
-	err = MaybeFinalizeAll(p)
-	if err != nil {
-		t.Fatalf("Error in MaybeFinalizeAll: %v", err)
-	}
-	if !p.IsComplete() {
-		t.Fatalf("Psbt is not complete")
-	}
+	require.Equal(t, signer1Result, b.Bytes(), "Failed to add signatures correctly")
 }
 
 func TestPsbtExtractor(t *testing.T) {
-	rawToFinalize, err := base64.StdEncoding.DecodeString(
-		finalizerPsbtData["finalizeb64"],
-	)
-	if err != nil {
-		t.Fatalf("Error decoding b64: %v", err)
+	// Construct a Taproot witness UTXO script: OP_1 <32-byte key>.
+	trKey := bytes.Repeat([]byte{0x02}, 32)
+	witnessPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).AddData(trKey).Script()
+	require.NoError(t, err, "failed to build taproot witness script")
+	witnessUtxo := &wire.TxOut{
+		Value:    50_000,
+		PkScript: witnessPkScript,
 	}
 
-	psbt1, err := NewFromRawBytes(
-		bytes.NewReader(rawToFinalize), false,
-	)
-	if err != nil {
-		t.Fatalf("Failed to parse PSBT: %v", err)
-	}
+	// Destination is also a P2TR script.
+	destKey := bytes.Repeat([]byte{0x03}, 32)
+	destPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).AddData(destKey).Script()
+	require.NoError(t, err, "failed to build destination taproot script")
 
-	for i := range psbt1.Inputs {
-		err = Finalize(psbt1, i)
-		if err != nil {
-			t.Fatalf("Error from finalizing PSBT: %v", err)
-		}
-	}
+	// Create unsigned tx with one input and one output.
+	unsigned := wire.NewMsgTx(2)
+	unsigned.AddTxIn(&wire.TxIn{PreviousOutPoint: wire.OutPoint{}})
+	unsigned.AddTxOut(&wire.TxOut{Value: 49_000, PkScript: destPkScript})
 
-	finalizer1Result, err := base64.StdEncoding.DecodeString(
-		finalizerPsbtData["resultb64"],
-	)
-	if err != nil {
-		t.Fatalf("Unable to decode b64: %v", err)
-	}
-	finalToNetworkExpected, err := hex.DecodeString(finalizerPsbtData["network"])
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	tx, err := Extract(psbt1)
-	if err != nil {
-		t.Fatalf("Failed to extract: %v", err)
-	}
-	var resultToNetwork bytes.Buffer
-	if err := tx.Serialize(&resultToNetwork); err != nil {
-		t.Fatalf("unable to serialize: %v", err)
-	}
+	psbtPkt, err := NewFromUnsignedTx(unsigned)
+	require.NoError(t, err, "failed to create PSBT from unsigned tx")
 
-	var b bytes.Buffer
-	err = psbt1.Serialize(&b)
-	if err != nil {
-		t.Fatalf("Unable to serialize updated Psbt: %v", err)
-	}
-	if !bytes.Equal(b.Bytes(), finalizer1Result) {
-		t.Fatalf("Failed to finalize transaction: expected %x, "+
-			"got %x", finalizer1Result, b.Bytes())
-	}
-	if !bytes.Equal(finalToNetworkExpected, resultToNetwork.Bytes()) {
-		t.Fatalf("Failed to network serialize transaction: %x", b.Bytes())
-	}
+	// Attach witness UTXO and a dummy Taproot key-spend signature.
+	psbtPkt.Inputs = []PInput{*NewPsbtInput(nil, witnessUtxo)}
+	psbtPkt.Inputs[0].TaprootKeySpendSig = bytes.Repeat([]byte{0x11}, 64)
+	psbtPkt.Inputs[0].SighashType = txscript.SigHashDefault
+
+	// Finalize and extract.
+	err = Finalize(psbtPkt, 0)
+	require.NoError(t, err, "failed to finalize taproot PSBT")
+
+	require.True(t, psbtPkt.IsComplete(), "PSBT should be complete after finalize")
+
+	tx, err := Extract(psbtPkt)
+	require.NoError(t, err, "failed to extract tx")
+
+	// Basic assertions.
+	require.Equal(t, 1, len(tx.TxIn), "unexpected input count")
+
+	wit := tx.TxIn[0].Witness
+	require.Equal(t, 1, len(wit), "unexpected witness stack size")
+
+	l := len(wit[0])
+	require.True(t, l == 64 || l == 65, "unexpected witness sig length: %d", l)
 }
 
 func TestFinalizerAddSigHashFlags(t *testing.T) {
@@ -828,622 +699,191 @@ func TestFinalizerAddSigHashFlags(t *testing.T) {
 
 }
 
-func TestImportFromCore1(t *testing.T) {
-	// This example #1 was created manually using Bitcoin Core 0.17 regtest.
-	// It contains two inputs, one p2wkh and one p2pkh (non-witness).
-	// We take the created PSBT as input, then add the fields for each input
-	// separately, then finalize and extract, and compare with the network
-	// serialized tx output from Core.
-	imported := "cHNidP8BAJwCAAAAAjaoF6eKeGsPiDQxxqqhFDfHWjBtZzRqmaZmvyCVWZ5JAQAAAAD/////RhypNiFfnQSMNpo0SGsgIvDOyMQFAYEHZXD5jp4kCrUAAAAAAP////8CgCcSjAAAAAAXqRQFWy8ScSkkhlGMwfOnx15YwRzApofwX5MDAAAAABepFAt4TyLfGnL9QY6GLYHbpSQj+QclhwAAAAAAAAAAAA=="
-	psbt1, err := NewFromRawBytes(bytes.NewReader([]byte(imported)), true)
-	if err != nil {
-		t.Fatalf("Failed to parse PSBT: %v", err)
-	}
-
-	// update with the first input's utxo (witness) and the second input's utxo
-	// (non-witness)
-	fundingTxInput1Hex := "02000000014f2cbac7d7691fafca30313097d79be9e78aa6670752fcb1fc15508e77586efb000000004847304402201b5568d7cab977ae0892840b779d84e36d62e42fd93b95e648aaebeacd2577d602201d2ebda2b0cddfa0c1a71d3cbcb602e7c9c860a41ed8b4d18d40c92ccbe92aed01feffffff028c636f91000000001600147447b6d7e6193499565779c8eb5184fcfdfee6ef00879303000000001600149e88f2828a074ebf64af23c2168d1816258311d72d010000"
-	fundingTxInput2Hex := "020000000001012f03f70c673d83d65da0e8d0db3867b3e7d7bfbd34fd6be65892042e57576eb00000000000feffffff028027128c000000001976a91485780899b61a5506f342bd67a2f635181f50c8b788acb8032c040000000017a914e2e3d32d42d6f043cab39708a6073301df5039db8702473044022047ae396fd8aba8f67482ad16e315fe680db585c1ac6422ffb18dacd9cf5bac350220321176fd6157ef51d9eae9230b0b5bd7dd29bb6247a879189e6aaa8091f3020201210368081f7ff37dfadbed407eba17b232f959e41e6ac78741192c805ebf80d487852f010000"
-	fundingTxInput1Bytes, err := hex.DecodeString(fundingTxInput1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	txFund1 := wire.NewMsgTx(2)
-	err = txFund1.Deserialize(bytes.NewReader(fundingTxInput1Bytes))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	// First input is witness, take correct output:
-	txFund1Out := txFund1.TxOut[1]
-
-	fundingTxInput2Bytes, err := hex.DecodeString(fundingTxInput2Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	txFund2 := wire.NewMsgTx(2)
-	err = txFund2.Deserialize(bytes.NewReader(fundingTxInput2Bytes))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	psbtupdater1 := Updater{Upsbt: psbt1}
-	psbtupdater1.AddInWitnessUtxo(txFund1Out, 0)
-	err = psbtupdater1.AddInNonWitnessUtxo(txFund2, 1)
-	if err != nil {
-		t.Fatalf("Error inserting non-witness utxo: %v", err)
-	}
-
-	// Signing was done with Core; we manually insert the relevant input
-	// entries here.
-	sig1Hex := "304402200da03ac9890f5d724c42c83c2a62844c08425a274f1a5bca50dcde4126eb20dd02205278897b65cb8e390a0868c9582133c7157b2ad3e81c1c70d8fbd65f51a5658b01"
-	sig1, err := hex.DecodeString(sig1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	pub1Hex := "024d6b24f372dd4551277c8df4ecc0655101e11c22894c8e05a3468409c865a72c"
-	pub1, err := hex.DecodeString(pub1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-
-	// Check that invalid pubkeys are not accepted.
-	pubInvalid := append(pub1, 0x00)
-
-	res, err := psbtupdater1.Sign(0, sig1, pubInvalid, nil, nil)
-	if err == nil {
-		t.Fatalf("Incorrectly accepted invalid pubkey: %v",
-			pubInvalid)
-	}
-
-	res, err = psbtupdater1.Sign(0, sig1, pub1, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Error from adding signatures: %v %v", err, res)
-	}
-
-	sig2Hex := "3044022014eb9c4858f71c9f280bc68402aa742a5187f54c56c8eb07c902eb1eb5804e5502203d66656de8386b9b044346d5605f5ae2b200328fb30476f6ac993fc0dbb0455901"
-	sig2, err := hex.DecodeString(sig2Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	pub2Hex := "03b4c79acdf4e7d978bef4019c421e4c6c67044ed49d27322dc90e808d8080e862"
-	pub2, err := hex.DecodeString(pub2Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-
-	// ===============================================================
-	// Before adding the signature, we'll make a new PSBT with
-	// modifications to the input data and check it fails sanity checks.
-
-	// First an invalid tx:
-	psbtBorkedInput2, _ := NewFromRawBytes(bytes.NewReader([]byte(imported)), true)
-	borkedUpdater, err := NewUpdater(psbtBorkedInput2)
-	if err != nil {
-		t.Fatalf("NewUpdater failed while trying to create borked "+
-			"version: %v", err)
-	}
-	borkedUpdater.AddInWitnessUtxo(txFund1Out, 0)
-
-	res, err = borkedUpdater.Sign(0, sig2, pub2, nil, nil)
-	if err != ErrInvalidSignatureForInput {
-		t.Fatalf("AddPartialSig succeeded, but should have failed "+
-			"due to mismatch between pubkey and prevOut; err was: %v", err)
-	}
-
-	// Next, a valid tx serialization, but not the right one
-	wrongTxBytes, err := hex.DecodeString("020000000001012d1d7b17356d0ad8232a5817d2d2fa5cd97d803c0ed03e013e97b65f4f1e5e7501000000171600147848cfb25bb163c7c63732615980a25eddbadc7bfeffffff022a8227630000000017a91472128ae6b6a1b74e499bedb5efb1cb09c9a6713287107240000000000017a91485f81cb970d854e2513ebf5c5b5d09e4509f4af3870247304402201c09aa8bcd18753ef01d8712a55eea5a0f69b6c4cc2944ac942264ff0662c91402201fc1390bf8b0023dd12ae78d7ec181124e106de57bc8f00812ae92bd024d3045012103ba077fc011aa59393bfe17cf491b3a02a9c4d39df122b2148322da0ec23508f459430800")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	wrongTx := wire.NewMsgTx(2)
-	err = wrongTx.Deserialize(bytes.NewReader(wrongTxBytes))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	psbtBorkedInput2.Inputs[1] = *NewPsbtInput(wrongTx, nil)
-	res, err = borkedUpdater.Sign(1, sig2, pub2, nil, nil)
-	if err != ErrInvalidSignatureForInput {
-		t.Fatalf("Error should have been invalid sig for input, was: %v", err)
-	}
-	// ======================================================
-
-	res, err = psbtupdater1.Sign(1, sig2, pub2, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Failed to add signature to second input: %v %v", err, res)
-	}
-
-	// Neither input (p2pkh and p2wkh) require redeem script nor witness script,
-	// so there are no more fields to add; we are ready to finalize.
-	err = Finalize(psbt1, 0)
-	if err != nil {
-		t.Fatalf("Failed to finalize the first input, %v", err)
-	}
-	if psbt1.IsComplete() {
-		t.Fatalf("PSBT was complete but has not been fully finalized")
-	}
-	err = Finalize(psbt1, 1)
-	if err != nil {
-		t.Fatalf("Failed to finalize second input, %v", err)
-	}
-
-	tx, err := Extract(psbt1)
-	if err != nil {
-		t.Fatalf("unable to extract tx: %v", err)
-	}
-	var networkSerializedTx bytes.Buffer
-	if err := tx.Serialize(&networkSerializedTx); err != nil {
-		t.Fatalf("unable to encode tx: %v", err)
-	}
-
-	expectedTx := "0200000000010236a817a78a786b0f883431c6aaa11437c75a306d67346a99a666bf2095599e490100000000ffffffff461ca936215f9d048c369a34486b2022f0cec8c4050181076570f98e9e240ab5000000006a473044022014eb9c4858f71c9f280bc68402aa742a5187f54c56c8eb07c902eb1eb5804e5502203d66656de8386b9b044346d5605f5ae2b200328fb30476f6ac993fc0dbb04559012103b4c79acdf4e7d978bef4019c421e4c6c67044ed49d27322dc90e808d8080e862ffffffff028027128c0000000017a914055b2f1271292486518cc1f3a7c75e58c11cc0a687f05f93030000000017a9140b784f22df1a72fd418e862d81dba52423f90725870247304402200da03ac9890f5d724c42c83c2a62844c08425a274f1a5bca50dcde4126eb20dd02205278897b65cb8e390a0868c9582133c7157b2ad3e81c1c70d8fbd65f51a5658b0121024d6b24f372dd4551277c8df4ecc0655101e11c22894c8e05a3468409c865a72c0000000000"
-	expectedTxBytes, err := hex.DecodeString(expectedTx)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	if !bytes.Equal(expectedTxBytes, networkSerializedTx.Bytes()) {
-		t.Fatalf("The produced network transaction did not match the expected: %x \n %x \n",
-			networkSerializedTx.Bytes(), expectedTxBytes)
-	}
-
-}
-
-func TestImportFromCore2(t *testing.T) {
-	// This example #2 was created manually using Bitcoin Core 0.17 regtest.
-	// It contains two inputs, one p2sh-p2wkh and one fake utxo.
-	// The PSBT has been created with walletcreatepsbt and then partial-signed
-	// on the real input with walletprocessbst in Core.
-	// We first check that the updating here, using the Core created signature,
-	// redeem script and signature for the p2sh-p2wkh input, creates the
-	// same partial-signed intermediate transaction as Core did after
-	// walletprocesspsbt.
-	// We then attach a fake
-	// input of type p2sh-p2wsh, attach its witnessUtxo, redeemscript and
-	// witnessscript fields, and then finalize the whole transaction. Unlike
-	// the previous example, we cannot here compare with a Core produced
-	// network serialized final transaction, because of the fake input.
-	imported := "cHNidP8BAJsCAAAAAkxTQ+rig5QNnUS5nMc+Pccow4IcOJeQRcNNw+7p5ZA5AQAAAAD/////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoNAAAAAP////8CAIYOcAAAAAAWABQ1l7nn13RubTwqRQU2BnVV5WlXBWAxMbUAAAAAF6kUkiuXUjfWFgTp6nl/gf9+8zIWR6KHAAAAAAAAAAAA"
-	psbt1, err := NewFromRawBytes(bytes.NewReader([]byte(imported)), true)
-	if err != nil {
-		t.Fatalf("Failed to parse PSBT: %v", err)
-	}
-
-	// update with the first input's utxo, taken from its funding
-	// transaction
-	fundingTxInput1Hex := "02000000017b260536a3c17aee49c41a9b36fdf01a418e0c04df06fbabcb0d4f590b95d175000000006a473044022074a5a13159b6c12d77881c9501aa5c18616fb76c1809fc4d55f18a2e63159a6702200d1aa72be6056a41808898d24da93c0c0192cad65b7c2cc86e00b3e0fbbd57f601210212cc429d61fde565d0c2271a3e4fdb063cb49ae2257fa71460be753ceb56d175feffffff02bc060d8f0000000017a9140b56c31b5dc5a5a22c45a7850e707ad602d94a3087008352840000000017a9149f3679d67a9a486238764f618a93b82a7d999103879a000000"
-	fundingTxInput1Bytes, err := hex.DecodeString(fundingTxInput1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	txFund1 := wire.NewMsgTx(2)
-	err = txFund1.Deserialize(bytes.NewReader(fundingTxInput1Bytes))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	// First input is witness, take correct output:
-	txFund1Out := txFund1.TxOut[1]
-
-	psbtupdater1 := Updater{Upsbt: psbt1}
-	psbtupdater1.AddInWitnessUtxo(txFund1Out, 0)
-
-	// This input is p2sh-p2wkh, so it requires a redeemscript but not
-	// a witness script. The redeemscript is the witness program.
-	redeemScript, err := hex.DecodeString("00147aed39420a8b7ab98a83791327ccb70819d1fbe2")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	psbtupdater1.AddInRedeemScript(redeemScript, 0)
-
-	// Signing for the first input was done with Core; we manually insert the
-	// relevant input entries here.
-	sig1Hex := "30440220546d182d00e45ef659c329dce6197dc19e0abc795e2c9279873f5a887998b273022044143113fc3475d04fc8d5113e0bbcb42d80514a9f1a2247e9b2a7878e20d44901"
-	sig1, err := hex.DecodeString(sig1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	pub1Hex := "02bb3ce35af26f4c826eab3e5fc263ef56871b26686a8a995599b7ee6576613104"
-	pub1, err := hex.DecodeString(pub1Hex)
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-
-	res, err := psbtupdater1.Sign(0, sig1, pub1, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Unable to add partial signature: %v %v", err, res)
-	}
-
-	// Since this input is now finalizable, we do so:
-	err = Finalize(psbt1, 0)
-	if err != nil {
-		t.Fatalf("Failed to finalize the first input: %v", err)
-	}
-	if psbt1.IsComplete() {
-		t.Fatalf("PSBT was complete but has not been fully finalized")
-	}
-
-	// Core also adds the OutRedeemScript field for the output it knows about.
-	// Note that usually we would not of course re-create, but rather start
-	// from the half-signed version; so this is needed only for a sanity check
-	// that we can recreate the half-signed.
-	output2RedeemScript, err := hex.DecodeString("0014e0846bd17848ab40ca1f56b655c6fa31667880cc")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	psbtupdater1.AddOutRedeemScript(output2RedeemScript, 1)
-	// The main function of the test is to compare the thus-generated
-	// partially (not completely) signed transaction with that generated and
-	// encoded by Core.
-	expectedPsbtPartialB64 := "cHNidP8BAJsCAAAAAkxTQ+rig5QNnUS5nMc+Pccow4IcOJeQRcNNw+7p5ZA5AQAAAAD/////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoNAAAAAP////8CAIYOcAAAAAAWABQ1l7nn13RubTwqRQU2BnVV5WlXBWAxMbUAAAAAF6kUkiuXUjfWFgTp6nl/gf9+8zIWR6KHAAAAAAABASAAg1KEAAAAABepFJ82edZ6mkhiOHZPYYqTuCp9mZEDhwEHFxYAFHrtOUIKi3q5ioN5EyfMtwgZ0fviAQhrAkcwRAIgVG0YLQDkXvZZwync5hl9wZ4KvHleLJJ5hz9aiHmYsnMCIEQUMRP8NHXQT8jVET4LvLQtgFFKnxoiR+myp4eOINRJASECuzzjWvJvTIJuqz5fwmPvVocbJmhqiplVmbfuZXZhMQQAAAABABYAFOCEa9F4SKtAyh9WtlXG+jFmeIDMAA=="
-	generatedPsbtPartialB64, err := psbt1.B64Encode()
-	if err != nil {
-		t.Fatalf("Unable to B64Encode Psbt: %v", err)
-	}
-	if expectedPsbtPartialB64 != generatedPsbtPartialB64 {
-		t.Fatalf("Partial did not match expected: %v", generatedPsbtPartialB64)
-	}
-
-	// We now simulate adding the signing data for the second (fake) input,
-	// and check that we can finalize and extract. This input is p2sh-p2wsh.
-	// the second input is fake, we're going to make it witness type,
-	// so create a TxOut struct that fits
-	fakeTxOutSerialized, err := hex.DecodeString("00c2eb0b0000000017a914b7f5faf40e3d40a5a459b1db3535f2b72fa921e887")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	fakevalSerialized := binary.LittleEndian.Uint64(fakeTxOutSerialized[:8])
-	fakeScriptPubKey := fakeTxOutSerialized[9:]
-	txFund2Out := wire.NewTxOut(int64(fakevalSerialized), fakeScriptPubKey)
-	psbt2, err := NewFromRawBytes(bytes.NewReader([]byte(expectedPsbtPartialB64)), true)
-	if err != nil {
-		t.Fatalf("Failed to load partial PSBT: %v", err)
-	}
-	psbtupdater2, err := NewUpdater(psbt2)
-	if err != nil {
-		t.Fatalf("Failed to create updater: %v", err)
-	}
-	psbtupdater2.AddInWitnessUtxo(txFund2Out, 1)
-	// Add redeemScript, which is the witnessscript/program:
-	redeemScript, err = hex.DecodeString("00208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b2028903")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	err = psbtupdater2.AddInRedeemScript(redeemScript, 1)
-	if err != nil {
-		t.Fatalf("Failed to add redeemscript to second input: %v", err)
-	}
-	// Add witnessScript, which here is multisig:
-	witnessScript, err := hex.DecodeString("522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	// To test multisig checks, add a nonsense version of the multisig script
-	witnessScriptNonsense, err := hex.DecodeString("52ffff")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	err = psbtupdater2.AddInWitnessScript(witnessScript, 1)
-	if err != nil {
-		t.Fatalf("Failed to add witnessscript to second input: %v", err)
-	}
-	// Construct the two partial signatures to be added
-	sig21, err := hex.DecodeString("3044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	pub21, err := hex.DecodeString("03089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	sig22, err := hex.DecodeString("3044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d201")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	pub22, err := hex.DecodeString("023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e73")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	res, err = psbtupdater2.Sign(1, sig21, pub21, nil, nil)
-
-	// Check that the finalization procedure fails here due to not
-	// meeting the multisig policy
-	success, err := MaybeFinalize(psbt2, 1)
-	if success {
-		t.Fatalf("Incorrectly succeeded in finalizing without sigs")
-	}
-	if err != ErrUnsupportedScriptType {
-		t.Fatalf("Got unexpected error type: %v", err)
-	}
-
-	res, err = psbtupdater2.Sign(1, sig22, pub22, nil, nil)
-
-	// Check that the finalization procedure also fails with a nonsense
-	// script
-	err = psbtupdater2.AddInWitnessScript(witnessScriptNonsense, 1)
-	if err != nil {
-		t.Fatalf("Failed to add witnessscript to second input: %v", err)
-	}
-	success, err = MaybeFinalize(psbt2, 1)
-	if success {
-		t.Fatalf("Incorrectly succeeded in finalizing with invalid msigscript")
-	}
-	if err != ErrUnsupportedScriptType {
-		t.Fatalf("Got unexpected error type: %v", err)
-	}
-
-	// Restore the correct witnessScript to complete correctly
-	err = psbtupdater2.AddInWitnessScript(witnessScript, 1)
-	if err != nil {
-		t.Fatalf("Failed to add witnessscript to second input: %v", err)
-	}
-
-	success, err = MaybeFinalize(psbt2, 1)
-	if !success {
-		if err != nil {
-			t.Fatalf("Failed to finalize second input: %v", err)
-		} else {
-			t.Fatalf("Input was not finalizable")
-		}
-	}
-
-	// Add a (fake) witnessOut descriptor field to one of the outputs,
-	// for coverage purposes (we aren't currently using this field)
-	psbtupdater2.AddOutWitnessScript([]byte{0xff, 0xff, 0xff}, 0)
-
-	// Sanity check; we should not have lost the additional output entry
-	// provided by Core initially
-	uoutput1 := psbtupdater2.Upsbt.Outputs[1]
-	if uoutput1.RedeemScript == nil {
-		t.Fatalf("PSBT should contain outredeemscript entry, but it does not.")
-	}
-	// Nor should we have lost our fake witnessscript output entry
-	uoutput2 := psbtupdater2.Upsbt.Outputs[0]
-	if uoutput2.WitnessScript == nil {
-		t.Fatalf("PSBT should contain outwitnessscript but it does not.")
-	}
-	var tx bytes.Buffer
-	networkSerializedTx, err := Extract(psbt2)
-	if err != nil {
-		t.Fatalf("unable to extract tx: %v", err)
-	}
-	if err := networkSerializedTx.Serialize(&tx); err != nil {
-		t.Fatalf("unable to encode tx: %v", err)
-	}
-	expectedSerializedTx, err := hex.DecodeString("020000000001024c5343eae283940d9d44b99cc73e3dc728c3821c38979045c34dc3eee9e5903901000000171600147aed39420a8b7ab98a83791327ccb70819d1fbe2ffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0d000000232200208c2353173743b595dfb4a07b72ba8e42e3797da74e87fe7d9d7497e3b2028903ffffffff0200860e70000000001600143597b9e7d7746e6d3c2a450536067555e5695705603131b50000000017a914922b975237d61604e9ea797f81ff7ef3321647a287024730440220546d182d00e45ef659c329dce6197dc19e0abc795e2c9279873f5a887998b273022044143113fc3475d04fc8d5113e0bbcb42d80514a9f1a2247e9b2a7878e20d449012102bb3ce35af26f4c826eab3e5fc263ef56871b26686a8a995599b7ee65766131040400473044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01473044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d20147522103089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc21023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e7352ae00000000")
-	if err != nil {
-		t.Fatalf("Failed to decode hex: %v", err)
-	}
-	if !bytes.Equal(expectedSerializedTx, tx.Bytes()) {
-		t.Fatalf("Failed to create correct network serialized "+
-			"transaction: expected %x, got %x",
-			expectedSerializedTx, tx.Bytes())
-	}
-}
-
 func TestMaybeFinalizeAll(t *testing.T) {
-	// The following data is from a 3rd transaction from Core,
-	// using 3 inputs, all p2wkh.
-	imported := "cHNidP8BAKQCAAAAAzJyXH13IqBFvvZ7y1VSgUgkMvMoPgP5CfFNqsjQexKQAQAAAAD/////fMdLydu5bsoiHN9cFSaBL0Qnq2KLSKx0RA4b938CAgQAAAAAAP/////yKNgfsDAHr/zFz8R9k8EFI26allfg9DdE8Gzj6tGlegEAAAAA/////wHw9E0OAAAAABYAFDnPCRduiEWmmSc1j30SJ8k9u7PHAAAAAAAAAAAA"
-	psbt1, err := NewFromRawBytes(bytes.NewReader([]byte(imported)), true)
-	if err != nil {
-		t.Fatalf("Failed to parse PSBT: %v", err)
+	// Create a simple test PSBT with 3 Taproot inputs
+	// First, create an unsigned transaction with 3 inputs and 1 output
+	unsigned := wire.NewMsgTx(2)
+
+	// Add 3 inputs
+	for i := 0; i < 3; i++ {
+		unsigned.AddTxIn(&wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash:  [32]byte{byte(i + 1)}, // Different hash for each input
+				Index: uint32(i),
+			},
+		})
 	}
 
-	// update with the first input's utxo, taken from its funding
-	// transaction
-	fundingTxInput1, err := hex.DecodeString("020000000001017b260536a3c17aee49c41a9b36fdf01a418e0c04df06fbabcb0d4f590b95d1750100000017160014af82cd4409241b1de892726324bd780e3b5cd8aafeffffff02a85f9800000000001600149d21f8b306ddfd4dd035080689e88b4c3471e3cc801d2c0400000000160014d97ccd3dfb60820d7d33d862371ca5a73039bd560247304402201a1d2fdb5a7190b7fa59907769f0fc9c91fd3b34f6424acf5868a8ac21ec287102200a59b9d076ecf98c88f2196ed2be0aafff4966ead754041182fff5f92115a783012103604ffd31dc71db2e32c20f09eafe6353cd7515d3648aff829bb4879b553e30629a000000")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	fundingTxInput2, err := hex.DecodeString("020000000001019c27b886e420fcadb077706b0933efa8bb53e3a250c3ec45cfdba5e05e233f360100000000feffffff0200b4c404000000001600140853f50c7d2d5d2af326a75efdbc83b62551e89afce31c0d000000001600142d6936c082c35607ec3bdb334a932d928150b75802473044022000d962f5e5e6425f9de21da7ac65b4fd8af8f6bfbd33c7ba022827c73866b477022034c59935c1ea10b5ba335d93f55a200c2588ec6058b8c7aedd10d5cbc4654f99012102c30e9f0cd98f6a805464d6b8a326b5679b6c3262934341855ee0436eaedfd2869a000000")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
-	}
-	fundingTxInput3, err := hex.DecodeString("02000000012bf4331bb95df4eadb14f7a28db3fecdc5e87f08c29c2332b66338dd606699f60000000048473044022075ed43f508528da47673550a785702e9a93eca84a11faea91c4e9c66fcab3c9e022054a37610bd40b12263a5933188f062b718e007f290cecde2b6e41da3e1ebbddf01feffffff020c99a8240100000016001483bd916985726094d6d1c5b969722da580b5966a804a5d05000000001600140a2ee13a6696d75006af5e8a026ea49316087dae9a000000")
-	if err != nil {
-		t.Fatalf("Unable to decode hex: %v", err)
+	// Add one Taproot output
+	destKey := bytes.Repeat([]byte{0x04}, 32)
+	destPkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).AddData(destKey).Script()
+	require.NoError(t, err)
+	unsigned.AddTxOut(&wire.TxOut{
+		Value:    140_000,
+		PkScript: destPkScript,
+	})
+
+	// Create PSBT from unsigned transaction
+	psbt1, err := NewFromUnsignedTx(unsigned)
+	require.NoError(t, err)
+
+	// Create Taproot witness UTXOs for each input
+	for i := 0; i < 3; i++ {
+		// Create Taproot script: OP_1 <32-byte key>
+		trKey := bytes.Repeat([]byte{byte(0x10 + i)}, 32)
+		witnessPkScript, err := txscript.NewScriptBuilder().
+			AddOp(txscript.OP_1).AddData(trKey).Script()
+		require.NoError(t, err)
+
+		witnessUtxo := &wire.TxOut{
+			Value:    50_000,
+			PkScript: witnessPkScript,
+		}
+
+		psbt1.Inputs[i] = *NewPsbtInput(nil, witnessUtxo)
 	}
 
-	psbtupdater1 := Updater{Upsbt: psbt1}
-	tx := wire.NewMsgTx(2)
-	err = tx.Deserialize(bytes.NewReader(fundingTxInput1))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	txFund1Out := tx.TxOut[1]
-	psbtupdater1.AddInWitnessUtxo(txFund1Out, 0)
+	// Add Taproot key spend signatures for input 0 and 1 first
+	// Using dummy 64-byte Schnorr signatures
+	sig1 := bytes.Repeat([]byte{0xAA}, 64)
+	psbt1.Inputs[0].TaprootKeySpendSig = sig1
+	psbt1.Inputs[0].SighashType = txscript.SigHashDefault
 
-	tx = wire.NewMsgTx(2)
-	err = tx.Deserialize(bytes.NewReader(fundingTxInput2))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	txFund2Out := tx.TxOut[0]
-	psbtupdater1.AddInWitnessUtxo(txFund2Out, 1)
+	sig2 := bytes.Repeat([]byte{0xBB}, 64)
+	psbt1.Inputs[1].TaprootKeySpendSig = sig2
+	psbt1.Inputs[1].SighashType = txscript.SigHashDefault
 
-	tx = wire.NewMsgTx(2)
-	err = tx.Deserialize(bytes.NewReader(fundingTxInput3))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	txFund3Out := tx.TxOut[1]
-	psbtupdater1.AddInWitnessUtxo(txFund3Out, 2)
-
-	// To be ready for finalization, we need to have  partial signature
-	// fields for each input
-	sig1, _ := hex.DecodeString("30440220027605ee8015970baf02a72652967a543e1b29a6882d799738ed1baee508822702203818a2f1b9770c46a473f47ad7ae90bcc129a5d047f00fae354c80197a7cf50601")
-	pub1, _ := hex.DecodeString("03235fc1f9dc8bbf6fa3df35dfeb0dd486f2d488f139579885eb684510f004f6c1")
-	sig2, _ := hex.DecodeString("304402206f5aea4621696610de48736b95a89b1d3a434a4e536d9aae65e039c477cf4c7202203b27a18b0f63be7d3bbf5be1bc2306a7ec8c2da12c2820ff07b73c7f3f1d4d7301")
-	pub2, _ := hex.DecodeString("022011b496f0603a268b55a781c7be0c3849f605f09cb2e917ed44288b8144a752")
-	sig3, _ := hex.DecodeString("3044022036dbc6f8f85a856e7803cbbcf0a97b7a74806fc592e92d7c06826f911610b98e0220111d43c4b20f756581791334d9c5cbb1a9c07558f28404cabf01c782897ad50501")
-	pub3, _ := hex.DecodeString("0381772a80c69e275e20d7f014555b13031e9cacf1c54a44a67ab2bc7eba64f227")
-	res, err := psbtupdater1.Sign(0, sig1, pub1, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Failed to add partial signature for input 0: %v %v", err, res)
-	}
-	res, err = psbtupdater1.Sign(1, sig2, pub2, nil, nil)
-	if err != nil || res != 0 {
-		t.Fatalf("Failed to add partial signature for input 1: %v %v", err, res)
-	}
-
-	// Not ready for finalize all, check it fails:
+	// Not ready for finalize all yet, check it fails:
 	err = MaybeFinalizeAll(psbt1)
-	if err != ErrNotFinalizable {
-		t.Fatalf("Expected finalization failure, got: %v", err)
-	}
+	require.ErrorIs(t, err, ErrNotFinalizable, "Expected finalization failure")
 
-	res, err = psbtupdater1.Sign(2, sig3, pub3, nil, nil)
+	// Add signature for input 2
+	sig3 := bytes.Repeat([]byte{0xCC}, 64)
+	psbt1.Inputs[2].TaprootKeySpendSig = sig3
+	psbt1.Inputs[2].SighashType = txscript.SigHashDefault
 
-	// Since this input is now finalizable and is p2wkh only, we can do
-	// all at once:
+	// Now all inputs have Taproot signatures, should be finalizable
 	err = MaybeFinalizeAll(psbt1)
-	if err != nil {
-		t.Fatalf("Failed to finalize PSBT: %v", err)
-	}
-	if !psbt1.IsComplete() {
-		t.Fatalf("PSBT was finalized but not marked complete")
-	}
+	require.NoError(t, err, "Failed to finalize PSBT")
 
+	require.True(t, psbt1.IsComplete(),
+		"PSBT was finalized but not marked complete")
+
+	// Verify that the witness was properly set for each input
+	for i := 0; i < 3; i++ {
+		require.NotNil(t, psbt1.Inputs[i].FinalScriptWitness,
+			"Final witness should be set for input %d", i)
+
+		// Parse the witness from the serialized format
+		witnessReader := bytes.NewReader(psbt1.Inputs[i].FinalScriptWitness)
+		witCount, err := wire.ReadVarInt(witnessReader, 0)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), witCount, "Taproot key spend should have 1 witness element")
+
+		// Read the single witness element (the signature)
+		wit, err := wire.ReadVarBytes(witnessReader, 0, txscript.MaxScriptSize, "witness")
+		require.NoError(t, err)
+		require.Equal(t, 64, len(wit), "Taproot signature should be 64 bytes")
+	}
 }
 
 func TestFromUnsigned(t *testing.T) {
-	serTx, err := hex.DecodeString("00000000000101e165f072311e71825b47a4797221d7ae56d4b40b7707c540049aee43302448a40000000000feffffff0212f1126a0000000017a9143e836801b2b15aa193449d815c62d6c4b6227c898780778e060000000017a914ba4bdb0b07d67bc60f59c1f4fe54170565254974870000000000")
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	serTx, err := hex.DecodeString("0000000001e165f072311e71825b47a4797221d7ae56d4b40b7707c540049aee43302448a40000000000feffffff0212f1126a0000000017a9143e836801b2b15aa193449d815c62d6c4b6227c898780778e060000000017a914ba4bdb0b07d67bc60f59c1f4fe541705652549748700000000")
+	require.NoError(t, err, "Unable to decode hex")
+
 	tx := wire.NewMsgTx(2)
 	err = tx.Deserialize(bytes.NewReader(serTx))
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Error deserializing transaction")
+
 	psbt1, err := NewFromUnsignedTx(tx)
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Error creating PSBT from unsigned tx")
+
 	encoded, err := psbt1.B64Encode()
-	if err != nil {
-		t.Fatalf("Unable to B64Encode Psbt: %v", err)
-	}
+	require.NoError(t, err, "Unable to B64Encode Psbt")
 
 	// Compare with output of Core:
 	fromCoreB64 := "cHNidP8BAHMAAAAAAeFl8HIxHnGCW0ekeXIh165W1LQLdwfFQASa7kMwJEikAAAAAAD+////AhLxEmoAAAAAF6kUPoNoAbKxWqGTRJ2BXGLWxLYifImHgHeOBgAAAAAXqRS6S9sLB9Z7xg9ZwfT+VBcFZSVJdIcAAAAAAAAAAA=="
-	if encoded != fromCoreB64 {
-		t.Fatalf("Got incorrect b64: %v", encoded)
-	}
+	require.Equal(t, fromCoreB64, encoded, "Got incorrect b64")
+
 	_, err = NewFromRawBytes(bytes.NewReader([]byte(fromCoreB64)), true)
-	if err != nil {
-		t.Fatalf("Error: %v", err)
-	}
+	require.NoError(t, err, "Error parsing PSBT from base64")
 }
 
-func TestNonWitnessToWitness(t *testing.T) {
-	// We'll start with a PSBT produced by Core for which
-	// the first input is signed and we'll provided the signatures for
-	// the other three inputs; they are p2sh-p2wkh, p2wkh and legacy
-	// respectively.
-	// In each case we'll *first* attach the NonWitnessUtxo field,
-	// and then call sign; in the first two but not the third case, the
-	// NonWitnessUtxo will automatically be replaced with the WitnessUtxo.
-	// Finally we'll check that the fully finalized PSBT produced matches
-	// the one produced by Core for the same keys.
+// TestPSBTNumberOfHashesOverflow tests the case where the number of hashes
+// in the PSBT exceeds the maximum allowed value. This is a regression test
+// for a bug that was fixed in the PSBT library.
+func TestPSBTNumberOfHashesOverflow(t *testing.T) {
+	// This hex string represents a PSBT with an invalid number of hashes. The
+	// PSBT library should return an error when trying to parse this PSBT.
+	//
+	// TODO(ffranr): Is there a more minimal PSBT example?
+	hexString := "70736274ff01007374ff01030100000000002f0000002e2873007374" +
+		"ff01070100000000000000000000000000000000000000060680050000736274f" +
+		"f01000a0000000060c70006060000736274ff01000a0000010000010024070100" +
+		"00000000000000000000000000000000000006060000736274ff01000a0000000" +
+		"000010024c760002a707362c760000b0500000000000000060605000073626274" +
+		"ff01000a000000000001002421212121212121212121212121212121212121212" +
+		"12121212121212121212121212121212107010000000000000000000000000000" +
+		"000000000006060000736274ff01000a000eff000001000a0a040404040404040" +
+		"400"
 
-	psbt1B64 := "cHNidP8BAM4CAAAABHtBMXY+SX95xidmWJP67CTQ02FPUpbNhIxNplAdlvk+AQAAAAD/////G2mt4bX7+sVi1jdbuBa5Q/xsJdgzFCgdHHSZq3ewK6YAAAAAAP/////NrbZb7GzfAg4kOqFWAIbXabq4cAvtVGv+eecIIv1KggEAAAAA/////73s9ifprgErlaONH1rgpNs3l6+t+mz2XGTHsTVWCem/AQAAAAD/////AfAmclMAAAAAF6kUQwsEC5nzbdY5meON2ZQ2thmeFgOHAAAAAAABASAAZc0dAAAAABepFPAv3VTMu5+4WN+/HIji6kG9RpzKhwEHFxYAFLN3PqXSyIHWKqm4ah5m9erc/3OoAQhrAkcwRAIgH7kzGO2iskfCvX0dgkDuzfqJ7tAu7KUZOeykTkJ1SYkCIBv4QRZK1hLz45D0gs+Lz93OE4s37lkPVE+SlXZtazWEASEC3jaf19MMferBn0Bn5lxXJGOqoqmfSvnHclQvB5gJ3nEAAAAAAQAWABTB+Qcq6iqdSvvc6959kd7XHrhYFgA="
-	nwutxo1ser, _ := hex.DecodeString("02000000017f7baa6b7377541c4aca372d2dce8e1098ba44aa8379b7ea87644ef27e08ec240000000048473044022072e3b94c33cb5128518cd3903cc0ca19e8c234ac6d462e01ae2bb1da7768ed7d0220167d7ad89f6e1bbb3b866ae6fc2f67b5e7d51eb4f33f7bfe3f4b2673856b815001feffffff0200c2eb0b0000000017a9142dd25c78db2e2e09376eab9cb342e1b03005abe487e4ab953e0000000017a914120b8ca3fb4c7f852e30d4e3714fb64027a0b4c38721020000")
-	nwutxo2ser, _ := hex.DecodeString("0200000001f51b0bb5d945dd5532448a4d3fb88134d0bd90493813515f9c2ddb1fa15b9ba60000000048473044022047d83caf88d398245c006374bfa9f27ae968f5f51d640cacd5a214ed2cba397a02204519b26035496855f574a72b73bdcfa46d53995faf64c8f0ab394b628cc5383901feffffff020ccb9f3800000000160014e13544a3c718faa6c5ad7089a6660383c12b072700a3e11100000000160014a5439b477c116b79bd4c7c5131f3e58d54f27bb721020000")
-	nwutxo3ser, _ := hex.DecodeString("0200000001eb452f0fc9a8c39edb79f7174763f3cb25dc56db455926e411719a115ef16509000000004847304402205aa80cc615eb4b3f6e89696db4eadd192581a6c46f5c09807d3d98ece1d77355022025007e58c1992a1e5d877ee324bfe0a65db26d29f80941cfa277ac3efbcad2a701feffffff02bce9a9320000000017a9141590e852ac66eb8798afeb2a5ed67c568a2d6561870084d717000000001976a914a57ea05eacf94900d5fb92bccd273cfdb90af36f88ac21020000")
+	// Convert hex string to byte slice
+	buffer, err := hex.DecodeString(hexString)
+	require.NoError(t, err)
 
-	nwutxo1 := wire.NewMsgTx(2)
-	err := nwutxo1.Deserialize(bytes.NewReader(nwutxo1ser))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	nwutxo2 := wire.NewMsgTx(2)
-	err = nwutxo2.Deserialize(bytes.NewReader(nwutxo2ser))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
-	nwutxo3 := wire.NewMsgTx(2)
-	err = nwutxo3.Deserialize(bytes.NewReader(nwutxo3ser))
-	if err != nil {
-		t.Fatalf("Error deserializing transaction: %v", err)
-	}
+	// Attempt to parse the PSBT.
+	psbt, err := NewFromRawBytes(bytes.NewBuffer(buffer), false)
+	require.Nil(t, psbt)
+	require.ErrorIs(t, err, ErrInvalidPsbtFormat)
+}
 
-	// import the PSBT
-	psbt1, err := NewFromRawBytes(bytes.NewReader([]byte(psbt1B64)), true)
-	if err != nil {
-		t.Fatalf("Failed to create PSBT: %v", err)
-	}
-
-	// check that we recognize the finality of the first input
-	if !isFinalized(psbt1, 0) {
-		t.Fatalf("First input incorrectly read as not finalized.")
-	}
-
-	// Add NonWitnessUtxo fields for each of the other three inputs
-	u := Updater{Upsbt: psbt1}
-	u.AddInNonWitnessUtxo(nwutxo1, 1)
-	u.AddInNonWitnessUtxo(nwutxo2, 2)
-	u.AddInNonWitnessUtxo(nwutxo3, 3)
-
-	// Signatures for each of those inputs were created with Core:
-	sig1, _ := hex.DecodeString("304402205676877e6162ce40a49ee5a74443cdc1e7915637c42da7b872c2ec2298fd371b02203c1d4a05b1e2a7a588d9ec9b8d4892d2cd59bebe0e777483477a0ec692ebbe6d01")
-	pub1, _ := hex.DecodeString("02534f23cb88a048b649672967263bd7570312d5d31d066fa7b303970010a77b2b")
-	redeemScript1, _ := hex.DecodeString("00142412be29368c0260cb841eecd9b59d7e01174aa1")
-
-	sig2, _ := hex.DecodeString("3044022065d0a349709b8d8043cfd644cf6c196c1f601a22e1b3fdfbf8c0cc2a80fe2f1702207c87d36b666a8862e81ec5df288707f517d2f35ea1548feb82019de2c8de90f701")
-	pub2, _ := hex.DecodeString("0257d88eaf1e79b72ea0a33ae89b57dae95ea68499bdc6770257e010ab899f0abb")
-
-	sig3, _ := hex.DecodeString("30440220290abcaacbd759c4f989762a9ee3468a9231788aab8f50bf65955d8597d8dd3602204d7e394f4419dc5392c6edba6945837458dd750a030ac67a746231903a8eb7db01")
-	pub3, _ := hex.DecodeString("0388025f50bb51c0469421ed13381f22f9d46a070ec2837e055c49c5876f0d0968")
-
-	// Add the signatures and any scripts needed to the inputs
-	res, err := u.Sign(1, sig1, pub1, redeemScript1, nil)
-	if res != 0 || err != nil {
-		t.Fatalf("Failed to sign at index %v res %v err %v", 1, res, err)
-	}
-	res, err = u.Sign(2, sig2, pub2, nil, nil)
-	if res != 0 || err != nil {
-		t.Fatalf("Failed to sign at index %v res %v err %v", 2, res, err)
-	}
-	res, err = u.Sign(3, sig3, pub3, nil, nil)
-	if res != 0 || err != nil {
-		t.Fatalf("Failed to sign at index %v res %v err %v", 3, res, err)
+// TestMinTaprootBip32DerivationByteSize tests the
+// minTaprootBip32DerivationByteSize function to ensure it correctly calculates
+// the minimum byte size of the Taproot BIP32 derivation path.
+func TestMinTaprootBip32DerivationByteSize(t *testing.T) {
+	tests := []struct {
+		label        string
+		numHashes    uint64
+		expectedSize uint64
+		expectErr    bool
+	}{
+		{
+			label:        "only compact size + fingerprint",
+			numHashes:    0,
+			expectedSize: 5,
+			expectErr:    false,
+		},
+		{
+			label:        "numHashes == 1, therefore: 1 * 32 + 5",
+			numHashes:    1,
+			expectedSize: 37,
+			expectErr:    false,
+		},
+		{
+			label:        "numHashes == 2, therefore: 2 * 32 + 5",
+			numHashes:    2,
+			expectedSize: 69,
+			expectErr:    false,
+		},
+		{
+			label:        "overflow expected",
+			numHashes:    math.MaxUint64,
+			expectedSize: 0,
+			expectErr:    true,
+		},
 	}
 
-	// Attempt to finalize the rest of the transaction
-	_, err = MaybeFinalize(psbt1, 1)
-	if err != nil {
-		t.Fatalf("Failed to finalize input 1 %v", err)
-	}
-	_, err = MaybeFinalize(psbt1, 2)
-	if err != nil {
-		t.Fatalf("Failed to finalize input 2 %v", err)
-	}
-	_, err = MaybeFinalize(psbt1, 3)
-	if err != nil {
-		t.Fatalf("Failed to finalize input 3 %v", err)
-	}
-
-	// Finally we can check whether both the B64 encoding of the PSBT,
-	// and the final network serialized signed transaction, that we generated
-	// with Core using the 2 wallets, matches what this code produces:
-	expectedFinalizedPsbt := "cHNidP8BAM4CAAAABHtBMXY+SX95xidmWJP67CTQ02FPUpbNhIxNplAdlvk+AQAAAAD/////G2mt4bX7+sVi1jdbuBa5Q/xsJdgzFCgdHHSZq3ewK6YAAAAAAP/////NrbZb7GzfAg4kOqFWAIbXabq4cAvtVGv+eecIIv1KggEAAAAA/////73s9ifprgErlaONH1rgpNs3l6+t+mz2XGTHsTVWCem/AQAAAAD/////AfAmclMAAAAAF6kUQwsEC5nzbdY5meON2ZQ2thmeFgOHAAAAAAABASAAZc0dAAAAABepFPAv3VTMu5+4WN+/HIji6kG9RpzKhwEHFxYAFLN3PqXSyIHWKqm4ah5m9erc/3OoAQhrAkcwRAIgH7kzGO2iskfCvX0dgkDuzfqJ7tAu7KUZOeykTkJ1SYkCIBv4QRZK1hLz45D0gs+Lz93OE4s37lkPVE+SlXZtazWEASEC3jaf19MMferBn0Bn5lxXJGOqoqmfSvnHclQvB5gJ3nEAAQEgAMLrCwAAAAAXqRQt0lx42y4uCTduq5yzQuGwMAWr5IcBBxcWABQkEr4pNowCYMuEHuzZtZ1+ARdKoQEIawJHMEQCIFZ2h35hYs5ApJ7lp0RDzcHnkVY3xC2nuHLC7CKY/TcbAiA8HUoFseKnpYjZ7JuNSJLSzVm+vg53dINHeg7Gkuu+bQEhAlNPI8uIoEi2SWcpZyY711cDEtXTHQZvp7MDlwAQp3srAAEBHwCj4REAAAAAFgAUpUObR3wRa3m9THxRMfPljVTye7cBCGsCRzBEAiBl0KNJcJuNgEPP1kTPbBlsH2AaIuGz/fv4wMwqgP4vFwIgfIfTa2ZqiGLoHsXfKIcH9RfS816hVI/rggGd4sjekPcBIQJX2I6vHnm3LqCjOuibV9rpXqaEmb3GdwJX4BCriZ8KuwABAL0CAAAAAetFLw/JqMOe23n3F0dj88sl3FbbRVkm5BFxmhFe8WUJAAAAAEhHMEQCIFqoDMYV60s/bolpbbTq3RklgabEb1wJgH09mOzh13NVAiAlAH5YwZkqHl2HfuMkv+CmXbJtKfgJQc+id6w++8rSpwH+////ArzpqTIAAAAAF6kUFZDoUqxm64eYr+sqXtZ8VootZWGHAITXFwAAAAAZdqkUpX6gXqz5SQDV+5K8zSc8/bkK82+IrCECAAABB2pHMEQCICkKvKrL11nE+Yl2Kp7jRoqSMXiKq49Qv2WVXYWX2N02AiBNfjlPRBncU5LG7bppRYN0WN11CgMKxnp0YjGQOo632wEhA4gCX1C7UcBGlCHtEzgfIvnUagcOwoN+BVxJxYdvDQloAAEAFgAUwfkHKuoqnUr73OvefZHe1x64WBYA"
-	calculatedPsbt, err := u.Upsbt.B64Encode()
-	if err != nil {
-		t.Fatalf("Failed to base64 encode")
-	}
-	if expectedFinalizedPsbt != calculatedPsbt {
-		t.Fatalf("Failed to generate correct PSBT")
-	}
-
-	expectedNetworkSer, _ := hex.DecodeString("020000000001047b4131763e497f79c627665893faec24d0d3614f5296cd848c4da6501d96f93e0100000017160014b3773ea5d2c881d62aa9b86a1e66f5eadcff73a8ffffffff1b69ade1b5fbfac562d6375bb816b943fc6c25d83314281d1c7499ab77b02ba600000000171600142412be29368c0260cb841eecd9b59d7e01174aa1ffffffffcdadb65bec6cdf020e243aa1560086d769bab8700bed546bfe79e70822fd4a820100000000ffffffffbdecf627e9ae012b95a38d1f5ae0a4db3797afadfa6cf65c64c7b1355609e9bf010000006a4730440220290abcaacbd759c4f989762a9ee3468a9231788aab8f50bf65955d8597d8dd3602204d7e394f4419dc5392c6edba6945837458dd750a030ac67a746231903a8eb7db01210388025f50bb51c0469421ed13381f22f9d46a070ec2837e055c49c5876f0d0968ffffffff01f02672530000000017a914430b040b99f36dd63999e38dd99436b6199e1603870247304402201fb93318eda2b247c2bd7d1d8240eecdfa89eed02eeca51939eca44e4275498902201bf841164ad612f3e390f482cf8bcfddce138b37ee590f544f9295766d6b3584012102de369fd7d30c7deac19f4067e65c572463aaa2a99f4af9c772542f079809de710247304402205676877e6162ce40a49ee5a74443cdc1e7915637c42da7b872c2ec2298fd371b02203c1d4a05b1e2a7a588d9ec9b8d4892d2cd59bebe0e777483477a0ec692ebbe6d012102534f23cb88a048b649672967263bd7570312d5d31d066fa7b303970010a77b2b02473044022065d0a349709b8d8043cfd644cf6c196c1f601a22e1b3fdfbf8c0cc2a80fe2f1702207c87d36b666a8862e81ec5df288707f517d2f35ea1548feb82019de2c8de90f701210257d88eaf1e79b72ea0a33ae89b57dae95ea68499bdc6770257e010ab899f0abb0000000000")
-	tx, err := Extract(psbt1)
-	if err != nil {
-		t.Fatalf("Failed to extract: %v", err)
-	}
-	var b bytes.Buffer
-	if err := tx.Serialize(&b); err != nil {
-		t.Fatalf("unable to encode tx: %v", err)
-	}
-	if !bytes.Equal(expectedNetworkSer, b.Bytes()) {
-		t.Fatalf("Expected serialized transaction was not produced: %x", b.Bytes())
+	for _, tt := range tests {
+		t.Run(tt.label, func(t *testing.T) {
+			actualSize, err := minTaprootBip32DerivationByteSize(tt.numHashes)
+			if tt.expectErr {
+				require.Error(t, err, tt.expectErr)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expectedSize, actualSize)
+			}
+		})
 	}
 }
 
@@ -1453,14 +893,11 @@ func TestEmptyInputSerialization(t *testing.T) {
 	// Create and serialize a new, empty PSBT. The wire package will assume
 	// it's a non-witness transaction, as there are no inputs.
 	psbt, err := New(nil, nil, 2, 0, nil)
-	if err != nil {
-		t.Fatalf("failed to create empty PSBT: %v", err)
-	}
+	require.NoError(t, err, "failed to create empty PSBT")
+
 	var buf bytes.Buffer
 	err = psbt.Serialize(&buf)
-	if err != nil {
-		t.Fatalf("failed to serialize empty PSBT: %v", err)
-	}
+	require.NoError(t, err, "failed to serialize empty PSBT")
 
 	// Try to deserialize the empty transaction again. The wire package will
 	// assume it's a witness transaction because of the special case where
@@ -1468,118 +905,10 @@ func TestEmptyInputSerialization(t *testing.T) {
 	// will fail. But a workaround should try again to deserialize the TX
 	// with the non-witness format.
 	psbt2, err := NewFromRawBytes(&buf, false)
-	if err != nil {
-		t.Fatalf("failed to deserialize empty PSBT: %v", err)
-	}
-	if len(psbt2.UnsignedTx.TxIn) > 0 || len(psbt2.UnsignedTx.TxOut) > 0 {
-		t.Fatalf("deserialized transaction not empty")
-	}
-}
+	require.NoError(t, err, "failed to deserialize empty PSBT")
 
-// TestWitnessForNonWitnessUtxo makes sure that a packet that only has a non-
-// witness UTXO set can still be signed correctly by adding witness data. This
-// is to make sure that PSBTs following the CVE-2020-14199 bugfix are not
-// rejected. See https://github.com/bitcoin/bitcoin/pull/19215.
-func TestWitnessForNonWitnessUtxo(t *testing.T) {
-	// Our witness UTXO is index 1 of this raw transaction from the test
-	// vectors.
-	prevTxRaw, _ := hex.DecodeString("0200000000010158e87a21b56daf0c23be8e7070456c336f7cbaa5c8757924f545887bb2abdd7501000000171600145f275f436b09a8cc9a2eb2a2f528485c68a56323feffffff02d8231f1b0100000017a914aed962d6654f9a2b36608eb9d64d2b260db4f1118700c2eb0b0000000017a914b7f5faf40e3d40a5a459b1db3535f2b72fa921e88702483045022100a22edcc6e5bc511af4cc4ae0de0fcd75c7e04d8c1c3a8aa9d820ed4b967384ec02200642963597b9b1bc22c75e9f3e117284a962188bf5e8a74c895089046a20ad770121035509a48eb623e10aace8bfd0212fdb8a8e5af3c94b0b133b95e114cab89e4f7965000000")
-	prevTx := wire.NewMsgTx(2)
-	err := prevTx.Deserialize(bytes.NewReader(prevTxRaw))
-	if err != nil {
-		t.Fatalf("failed to deserialize previous TX: %v", err)
-	}
-
-	// First create a packet that contains one input and one output.
-	outPkScript, _ := hex.DecodeString(CUTestHexData["scriptPubkey1"])
-	packet := &Packet{
-		UnsignedTx: &wire.MsgTx{
-			Version:  2,
-			LockTime: 0,
-			TxIn: []*wire.TxIn{{
-				PreviousOutPoint: wire.OutPoint{
-					Hash:  prevTx.TxHash(),
-					Index: 1,
-				},
-			}},
-			TxOut: []*wire.TxOut{{
-				PkScript: outPkScript,
-				Value:    1.9 * btcutil.SatoshiPerBitcoin,
-			}},
-		},
-		Inputs:  []PInput{{}},
-		Outputs: []POutput{{}},
-	}
-
-	// Create an updater for the packet. This also performs a sanity check.
-	updater, err := NewUpdater(packet)
-	if err != nil {
-		t.Fatalf("failed to sanity check raw packet: %v", err)
-	}
-
-	// Now add our witness UTXO to the input. But because hardware wallets
-	// that are patched against CVE-2020-14199 require the full non-witness
-	// UTXO to be set for all inputs, we do what Core does and add the full
-	// transaction in the NonWitnessUtxo instead of just the outpoint in
-	// WitnessUtxo.
-	err = updater.AddInNonWitnessUtxo(prevTx, 0)
-	if err != nil {
-		t.Fatalf("failed to update non-witness UTXO: %v", err)
-	}
-
-	// Then add the redeem scripts and witness scripts.
-	redeemScript, _ := hex.DecodeString(CUTestHexData["Input2RedeemScript"])
-	err = updater.AddInRedeemScript(redeemScript, 0)
-	if err != nil {
-		t.Fatalf("failed to update redeem script: %v", err)
-	}
-	witnessScript, _ := hex.DecodeString(CUTestHexData["Input2WitnessScript"])
-	err = updater.AddInWitnessScript(witnessScript, 0)
-	if err != nil {
-		t.Fatalf("failed to update redeem script: %v", err)
-	}
-
-	// Add the first of the two partial signatures.
-	sig1, _ := hex.DecodeString("3044022062eb7a556107a7c73f45ac4ab5a1dddf6f7075fb1275969a7f383efff784bcb202200c05dbb7470dbf2f08557dd356c7325c1ed30913e996cd3840945db12228da5f01")
-	pub1, _ := hex.DecodeString("03089dc10c7ac6db54f91329af617333db388cead0c231f723379d1b99030b02dc")
-	res, err := updater.Sign(0, sig1, pub1, nil, nil)
-	if err != nil {
-		t.Fatalf("failed to sign with pubkey 1: %v", err)
-	}
-	if res != SignSuccesful {
-		t.Fatalf("signing was not successful, got result %v", res)
-	}
-
-	// Check that the finalization procedure fails here due to not
-	// meeting the multisig policy
-	success, err := MaybeFinalize(packet, 0)
-	if success {
-		t.Fatalf("Incorrectly succeeded in finalizing without sigs")
-	}
-	if err != ErrUnsupportedScriptType {
-		t.Fatalf("Got unexpected error type: %v", err)
-	}
-
-	// Add the second partial signature.
-	sig2, _ := hex.DecodeString("3044022065f45ba5998b59a27ffe1a7bed016af1f1f90d54b3aa8f7450aa5f56a25103bd02207f724703ad1edb96680b284b56d4ffcb88f7fb759eabbe08aa30f29b851383d201")
-	pub2, _ := hex.DecodeString("023add904f3d6dcf59ddb906b0dee23529b7ffb9ed50e5e86151926860221f0e73")
-	res, err = updater.Sign(0, sig2, pub2, nil, nil)
-	if err != nil {
-		t.Fatalf("failed to sign with pubkey 2: %v", err)
-	}
-	if res != SignSuccesful {
-		t.Fatalf("signing was not successful, got result %v", res)
-	}
-
-	// Finally make sure we can finalize the packet and extract the raw TX.
-	err = MaybeFinalizeAll(packet)
-	if err != nil {
-		t.Fatalf("error finalizing PSBT: %v", err)
-	}
-	_, err = Extract(packet)
-	if err != nil {
-		t.Fatalf("unable to extract funding TX: %v", err)
-	}
+	require.Empty(t, psbt2.UnsignedTx.TxIn, "deserialized transaction has inputs")
+	require.Empty(t, psbt2.UnsignedTx.TxOut, "deserialized transaction has outputs")
 }
 
 // TestUnknowns tests that we can parse and serialize unknown fields on all

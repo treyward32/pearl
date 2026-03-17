@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,14 +10,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcwallet/internal/zero"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/wallet/internal/zero"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 var (
@@ -33,8 +32,7 @@ var (
 	// ErrInvalidSignature is returned when we go to generate a signature
 	// to verify against the public key and that signature comes back as
 	// invalid.
-	ErrInvalidSignature = fmt.Errorf("private key sig doesn't validate " +
-		"against pubkey")
+	ErrInvalidSignature = fmt.Errorf("private key sig doesn't validate against pubkey")
 )
 
 // AddressType represents the various address types waddrmgr is currently able
@@ -45,62 +43,30 @@ var (
 type AddressType uint8
 
 const (
-	// PubKeyHash is a regular p2pkh address.
-	PubKeyHash AddressType = iota
-
-	// Script reprints a raw script address.
-	Script
-
-	// RawPubKey is just raw public key to be used within scripts, This
-	// type indicates that a scoped manager with this address type
-	// shouldn't be consulted during historical rescans.
-	RawPubKey
-
-	// NestedWitnessPubKey represents a p2wkh output nested within a p2sh
-	// output. Using this address type, the wallet can receive funds from
-	// other wallet's which don't yet recognize the new segwit standard
-	// output types. Receiving funds to this address maintains the
-	// scalability, and malleability fixes due to segwit in a backwards
-	// compatible manner.
-	NestedWitnessPubKey
-
-	// WitnessPubKey represents a p2wkh (pay-to-witness-key-hash) address
-	// type.
-	WitnessPubKey
-
-	// WitnessScript represents a p2wsh (pay-to-witness-script-hash) address
-	// type.
-	WitnessScript
-
 	// TaprootPubKey represents a p2tr (pay-to-taproot) address type that
 	// uses BIP-0086 (for the derivation path and for calculating the tap
 	// root hash/tweak).
-	TaprootPubKey
+	TaprootPubKey AddressType = iota
 
 	// TaprootScript represents a p2tr (pay-to-taproot) address type that
 	// commits to a script and not just a single key.
 	TaprootScript
+
+	// MerkleRootScript represents a p2mr (pay-to-merkle-root, BIP 360)
+	// address type that commits directly to a Merkle root of a script tree,
+	// with no internal key.
+	MerkleRootScript
 )
 
 // String returns a human-readbale format of the address type.
 func (a AddressType) String() string {
 	switch a {
-	case PubKeyHash:
-		return "PubKeyHash"
-	case Script:
-		return "Script"
-	case RawPubKey:
-		return "RawPubKey"
-	case NestedWitnessPubKey:
-		return "NestedWitnessPubKey"
-	case WitnessPubKey:
-		return "WitnessPubKey"
-	case WitnessScript:
-		return "WitnessScript"
 	case TaprootPubKey:
 		return "TaprootPubKey"
 	case TaprootScript:
 		return "TaprootScript"
+	case MerkleRootScript:
+		return "MerkleRootScript"
 	default:
 		return "Unknown"
 	}
@@ -114,6 +80,10 @@ const (
 	// witnessVersionV1 is the SegWit v1 witness version used for p2tr
 	// outputs and addresses.
 	witnessVersionV1 byte = 0x01
+
+	// witnessVersionV2 is the SegWit v2 witness version used for p2mr
+	// (pay-to-merkle-root, BIP 360) outputs and addresses.
+	witnessVersionV2 byte = 0x02
 )
 
 // ManagedAddress is an interface that provides acces to information regarding
@@ -177,6 +147,11 @@ type ManagedPubKeyAddress interface {
 	// imported keys, the first value will be set to false to indicate that
 	// we don't know exactly how the key was derived.
 	DerivationInfo() (KeyScope, DerivationPath, bool)
+
+	// TapscriptRoot returns the 32-byte tapscript root hash if the address
+	// has tapscript commitment. Returns nil if this is a standard BIP-86
+	// address without commitment.
+	TapscriptRoot() []byte
 }
 
 // ValidatableManagedAddress is a type of managed pubkey address that can
@@ -197,8 +172,9 @@ type ValidatableManagedAddress interface {
 	Validate(msg [32]byte, priv *btcec.PrivateKey) error
 }
 
+// TODO Or: merge into ManagedTaprootScriptAddress
 // ManagedScriptAddress extends ManagedAddress and represents a pay-to-script-hash
-// style of bitcoin addresses.  It additionally provides information about the
+// style of addresses.  It additionally provides information about the
 // script.
 type ManagedScriptAddress interface {
 	ManagedAddress
@@ -232,6 +208,7 @@ type managedAddress struct {
 	privKeyEncrypted []byte // nil if part of watch-only account
 	privKeyCT        []byte // non-nil if unlocked
 	privKeyMutex     sync.Mutex
+	tapscriptRoot    []byte // 32-byte tapscript root hash (nil if no commitment)
 }
 
 // Enforce managedAddress satisfies the ManagedPubKeyAddress interface.
@@ -307,20 +284,11 @@ func (a *managedAddress) Address() btcutil.Address {
 //
 // This is part of the ManagedAddress interface implementation.
 func (a *managedAddress) AddrHash() []byte {
-	var hash []byte
-
-	switch n := a.address.(type) {
-	case *btcutil.AddressPubKeyHash:
-		hash = n.Hash160()[:]
-	case *btcutil.AddressScriptHash:
-		hash = n.Hash160()[:]
-	case *btcutil.AddressWitnessPubKeyHash:
-		hash = n.Hash160()[:]
-	case *btcutil.AddressTaproot:
-		hash = n.WitnessProgram()
+	if taprootAddr, ok := a.address.(*btcutil.AddressTaproot); ok {
+		return taprootAddr.WitnessProgram()
 	}
 
-	return hash
+	return nil
 }
 
 // Imported returns true if the address was imported instead of being part of an
@@ -363,13 +331,8 @@ func (a *managedAddress) PubKey() *btcec.PublicKey {
 // pubKeyBytes returns the serialized public key bytes for the managed address
 // based on whether or not the managed address is marked as compressed.
 func (a *managedAddress) pubKeyBytes() []byte {
-	if a.addrType == TaprootPubKey {
-		return schnorr.SerializePubKey(a.pubKey)
-	}
-	if a.compressed {
-		return a.pubKey.SerializeCompressed()
-	}
-	return a.pubKey.SerializeUncompressed()
+	// For Taproot-only wallet, always use compressed format for consistency
+	return a.pubKey.SerializeCompressed()
 }
 
 // ExportPubKey returns the public key associated with the address
@@ -378,6 +341,12 @@ func (a *managedAddress) pubKeyBytes() []byte {
 // This is part of the ManagedPubKeyAddress interface implementation.
 func (a *managedAddress) ExportPubKey() string {
 	return hex.EncodeToString(a.pubKeyBytes())
+}
+
+// TapscriptRoot returns the tapscript root hash if the address has tapscript
+// commitment. Returns nil if this is a standard BIP-86 address without commitment.
+func (a *managedAddress) TapscriptRoot() []byte {
+	return a.tapscriptRoot
 }
 
 // PrivKey returns the private key for the address.  It can fail if the address
@@ -401,7 +370,7 @@ func (a *managedAddress) PrivKey() (*btcec.PrivateKey, error) {
 	// Decrypt the key as needed.  Also, make sure it's a copy since the
 	// private key stored in memory can be cleared at any time.  Otherwise
 	// the returned private key could be invalidated from under the caller.
-	privKeyCopy, err := a.unlock(a.manager.rootManager.cryptoKeyPriv)
+	privKeyCopy, err := a.unlock(a.manager.rootManager.CryptoKeyPriv())
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +390,7 @@ func (a *managedAddress) ExportPrivKey() (*btcutil.WIF, error) {
 		return nil, err
 	}
 
-	return btcutil.NewWIF(pk, a.manager.rootManager.chainParams, a.compressed)
+	return btcutil.NewWIF(pk, a.manager.rootManager.ChainParams(), a.compressed)
 }
 
 // DerivationInfo contains the information required to derive the key that
@@ -477,14 +446,22 @@ func (a *managedAddress) Validate(msg [32]byte, priv *btcec.PrivateKey) error {
 			a.pubKey.SerializeUncompressed())
 	}
 
+	// If we have internal private key data, verify it matches the passed key
+	if a.privKeyCT != nil {
+		internalPrivKey, _ := btcec.PrivKeyFromBytes(a.privKeyCT)
+		if !priv.Key.Equals(&internalPrivKey.Key) {
+			return ErrInvalidSignature
+		}
+	}
+
 	// Next, we'll verify that if we take the base public key, and generate
 	// an address of the corresponding type, that matches up w/ what we've
 	// stored internally.
 	//
 	// This can potentially catch a hardware/software error when mapping
-	// the public key to a Bitcoin address.
+	// the public key to an address.
 	addr, err := newManagedAddressWithoutPrivKey(
-		a.manager, a.derivationPath, a.pubKey, a.compressed, a.addrType,
+		a.manager, a.derivationPath, a.pubKey, a.compressed, a.addrType, a.tapscriptRoot,
 	)
 	if err != nil {
 		return fmt.Errorf("unable to re-create addr: %w", err)
@@ -501,19 +478,17 @@ func (a *managedAddress) Validate(msg [32]byte, priv *btcec.PrivateKey) error {
 	// TODO(roasbeef): potentially run _all_ checks then see which one
 	// fails?
 	var sig signature
-
-	addrPrivKey, _ := btcec.PrivKeyFromBytes(a.privKeyCT)
-
+	// TODO Or: clean this up
 	switch a.addrType {
 	// For the "legacy" addr types, we'll generate an ECDSA signature to
 	// verify against.
-	case NestedWitnessPubKey, PubKeyHash, WitnessPubKey:
-		sig = ecdsa.Sign(addrPrivKey, msg[:])
+	// case NestedWitnessPubKey, PubKeyHash, WitnessPubKey:
+	// 	sig = ecdsa.Sign(addrPrivKey, msg[:])
 
 	// For the newer taproot addr type, we'll generate a schnorr signature
 	// to verify against.
 	case TaprootPubKey:
-		sig, err = schnorr.Sign(addrPrivKey, msg[:])
+		sig, err = schnorr.Sign(priv, msg[:])
 		if err != nil {
 			return fmt.Errorf("unable to generate validate "+
 				"schnorr sig: %w", err)
@@ -534,79 +509,28 @@ func (a *managedAddress) Validate(msg [32]byte, priv *btcec.PrivateKey) error {
 // newManagedAddressWithoutPrivKey returns a new managed address based on the
 // passed account, public key, and whether or not the public key should be
 // compressed.
+//
+// If tapscriptRoot is provided (non-nil, 32 bytes), the taproot address will
+// commit to that tapscript tree, enabling script-path spending in addition to
+// key-path spending.
 func newManagedAddressWithoutPrivKey(m *ScopedKeyManager,
 	derivationPath DerivationPath, pubKey *btcec.PublicKey, compressed bool,
-	addrType AddressType) (*managedAddress, error) {
+	addrType AddressType, tapscriptRoot []byte) (*managedAddress, error) {
 
-	// Create a pay-to-pubkey-hash address from the public key.
-	var pubKeyHash []byte
-	if compressed {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeCompressed())
+	var tapKey *btcec.PublicKey
+	if tapscriptRoot != nil && len(tapscriptRoot) == 32 {
+		// Compute taproot output key with script commitment
+		tapKey = txscript.ComputeTaprootOutputKey(pubKey, tapscriptRoot)
 	} else {
-		pubKeyHash = btcutil.Hash160(pubKey.SerializeUncompressed())
+		// Standard BIP-86 key-only commitment
+		tapKey = txscript.ComputeTaprootKeyNoScript(pubKey)
 	}
 
-	var address btcutil.Address
-	var err error
-
-	switch addrType {
-
-	case NestedWitnessPubKey:
-		// For this address type we'll generate an address which is
-		// backwards compatible to Bitcoin nodes running 0.6.0 onwards, but
-		// allows us to take advantage of segwit's scripting improvements,
-		// and malleability fixes.
-
-		// First, we'll generate a normal p2wkh address from the pubkey hash.
-		witAddr, err := btcutil.NewAddressWitnessPubKeyHash(
-			pubKeyHash, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Next we'll generate the witness program which can be used as a
-		// pkScript to pay to this generated address.
-		witnessProgram, err := txscript.PayToAddrScript(witAddr)
-		if err != nil {
-			return nil, err
-		}
-
-		// Finally, we'll use the witness program itself as the pre-image
-		// to a p2sh address. In order to spend, we first use the
-		// witnessProgram as the sigScript, then present the proper
-		// <sig, pubkey> pair as the witness.
-		address, err = btcutil.NewAddressScriptHash(
-			witnessProgram, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-	case PubKeyHash:
-		address, err = btcutil.NewAddressPubKeyHash(
-			pubKeyHash, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-	case WitnessPubKey:
-		address, err = btcutil.NewAddressWitnessPubKeyHash(
-			pubKeyHash, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-	case TaprootPubKey:
-		tapKey := txscript.ComputeTaprootKeyNoScript(pubKey)
-		address, err = btcutil.NewAddressTaproot(
-			schnorr.SerializePubKey(tapKey), m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
+	address, err := btcutil.NewAddressTaproot(
+		schnorr.SerializePubKey(tapKey), m.rootManager.ChainParams(),
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	return &managedAddress{
@@ -616,26 +540,30 @@ func newManagedAddressWithoutPrivKey(m *ScopedKeyManager,
 		imported:         false,
 		internal:         false,
 		addrType:         addrType,
-		compressed:       compressed,
+		compressed:       true, // Taproot always uses compressed keys
 		pubKey:           pubKey,
 		privKeyEncrypted: nil,
 		privKeyCT:        nil,
+		tapscriptRoot:    tapscriptRoot,
 	}, nil
 }
 
 // newManagedAddress returns a new managed address based on the passed account,
 // private key, and whether or not the public key is compressed.  The managed
 // address will have access to the private and public keys.
+//
+// If tapscriptRoot is provided, the address will include tapscript commitment.
 func newManagedAddress(s *ScopedKeyManager, derivationPath DerivationPath,
 	privKey *btcec.PrivateKey, compressed bool,
-	addrType AddressType, acctInfo *accountInfo) (*managedAddress, error) {
+	addrType AddressType, acctInfo *accountInfo,
+	tapscriptRoot []byte) (*managedAddress, error) {
 
 	// Encrypt the private key.
 	//
 	// NOTE: The privKeyBytes here are set into the managed address which
 	// are cleared when locked, so they aren't cleared here.
 	privKeyBytes := privKey.Serialize()
-	privKeyEncrypted, err := s.rootManager.cryptoKeyPriv.Encrypt(privKeyBytes)
+	privKeyEncrypted, err := s.rootManager.CryptoKeyPriv().Encrypt(privKeyBytes)
 	if err != nil {
 		str := "failed to encrypt private key"
 		return nil, managerError(ErrCrypto, str, err)
@@ -645,7 +573,7 @@ func newManagedAddress(s *ScopedKeyManager, derivationPath DerivationPath,
 	// and then add the private key to it.
 	ecPubKey := privKey.PubKey()
 	managedAddr, err := newManagedAddressWithoutPrivKey(
-		s, derivationPath, ecPubKey, compressed, addrType,
+		s, derivationPath, ecPubKey, compressed, addrType, tapscriptRoot,
 	)
 	if err != nil {
 		return nil, err
@@ -706,9 +634,12 @@ func newManagedAddress(s *ScopedKeyManager, derivationPath DerivationPath,
 // account and extended key.  The managed address will have access to the
 // private and public keys if the provided extended key is private, otherwise it
 // will only have access to the public key.
+//
+// If tapscriptRoot is provided, the address will include tapscript commitment.
 func newManagedAddressFromExtKey(s *ScopedKeyManager,
 	derivationPath DerivationPath, key *hdkeychain.ExtendedKey,
-	addrType AddressType, acctInfo *accountInfo) (*managedAddress, error) {
+	addrType AddressType, acctInfo *accountInfo,
+	tapscriptRoot []byte) (*managedAddress, error) {
 
 	// Create a new managed address based on the public or private key
 	// depending on whether the generated key is private.
@@ -722,7 +653,7 @@ func newManagedAddressFromExtKey(s *ScopedKeyManager,
 		// Ensure the temp private key big integer is cleared after
 		// use.
 		managedAddr, err = newManagedAddress(
-			s, derivationPath, privKey, true, addrType, acctInfo,
+			s, derivationPath, privKey, true, addrType, acctInfo, tapscriptRoot,
 		)
 		if err != nil {
 			return nil, err
@@ -735,7 +666,7 @@ func newManagedAddressFromExtKey(s *ScopedKeyManager,
 
 		managedAddr, err = newManagedAddressWithoutPrivKey(
 			s, derivationPath, pubKey, true,
-			addrType,
+			addrType, tapscriptRoot,
 		)
 		if err != nil {
 			return nil, err
@@ -753,178 +684,47 @@ type clearTextScriptSetter interface {
 	setClearTextScript([]byte)
 }
 
-// baseScriptAddress represents the common fields of a pay-to-script-hash and
-// a pay-to-witness-script-hash address.
-type baseScriptAddress struct {
-	manager         *ScopedKeyManager
-	account         uint32
-	address         *btcutil.AddressScriptHash
-	scriptEncrypted []byte
-	scriptClearText []byte
-	scriptMutex     sync.Mutex
-}
+// newTaprootScriptAddress initializes and returns a new pay-to-taproot script address.
+func newTaprootScriptAddress(m *ScopedKeyManager, account uint32, scriptIdent,
+	scriptEncrypted []byte, isSecretScript bool) (ManagedScriptAddress, error) {
 
-var _ clearTextScriptSetter = (*baseScriptAddress)(nil)
+	// Only support witness version 1 (Taproot)
+	witnessVersion := witnessVersionV1
 
-// unlock decrypts and stores the associated script.  It will fail if the key is
-// invalid or the encrypted script is not available.  The returned clear text
-// script will always be a copy that may be safely used by the caller without
-// worrying about it being zeroed during an address lock.
-func (a *baseScriptAddress) unlock(key EncryptorDecryptor) ([]byte, error) {
-	// Protect concurrent access to clear text script.
-	a.scriptMutex.Lock()
-	defer a.scriptMutex.Unlock()
-
-	if len(a.scriptClearText) == 0 {
-		script, err := key.Decrypt(a.scriptEncrypted)
-		if err != nil {
-			str := fmt.Sprintf("failed to decrypt script for %s",
-				a.address)
-			return nil, managerError(ErrCrypto, str, err)
-		}
-
-		a.scriptClearText = script
-	}
-
-	scriptCopy := make([]byte, len(a.scriptClearText))
-	copy(scriptCopy, a.scriptClearText)
-	return scriptCopy, nil
-}
-
-// lock zeroes the associated clear text script.
-func (a *baseScriptAddress) lock() {
-	// Zero and nil the clear text script associated with this address.
-	a.scriptMutex.Lock()
-	zero.Bytes(a.scriptClearText)
-	a.scriptClearText = nil
-	a.scriptMutex.Unlock()
-}
-
-// InternalAccount returns the account the address is associated with. This will
-// always be the ImportedAddrAccount constant for script addresses.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *baseScriptAddress) InternalAccount() uint32 {
-	return a.account
-}
-
-// Imported always returns true since script addresses are always imported
-// addresses and not part of any chain.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *baseScriptAddress) Imported() bool {
-	return true
-}
-
-// Internal always returns false since script addresses are always imported
-// addresses and not part of any chain in order to be for internal use.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *baseScriptAddress) Internal() bool {
-	return false
-}
-
-// setClearTextScript sets the unencrypted script on the struct after unlocking/
-// decrypting it.
-func (a *baseScriptAddress) setClearTextScript(script []byte) {
-	a.scriptClearText = make([]byte, len(script))
-	copy(a.scriptClearText, script)
-}
-
-// scriptAddress represents a pay-to-script-hash address.
-type scriptAddress struct {
-	baseScriptAddress
-	address *btcutil.AddressScriptHash
-}
-
-// AddrType returns the address type of the managed address. This can be used
-// to quickly discern the address type without further processing
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) AddrType() AddressType {
-	return Script
-}
-
-// Address returns the btcutil.Address which represents the managed address.
-// This will be a pay-to-script-hash address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) Address() btcutil.Address {
-	return a.address
-}
-
-// AddrHash returns the script hash for the address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) AddrHash() []byte {
-	return a.address.Hash160()[:]
-}
-
-// Compressed returns false since script addresses are never compressed.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) Compressed() bool {
-	return false
-}
-
-// Used returns true if the address has been used in a transaction.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) Used(ns walletdb.ReadBucket) bool {
-	return a.manager.fetchUsed(ns, a.AddrHash())
-}
-
-// Script returns the script associated with the address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *scriptAddress) Script() ([]byte, error) {
-	// No script is available for a watching-only address manager.
-	if a.manager.rootManager.WatchOnly() {
-		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
-	}
-
-	a.manager.mtx.Lock()
-	defer a.manager.mtx.Unlock()
-
-	// Account manager must be unlocked to decrypt the script.
-	if a.manager.rootManager.IsLocked() {
-		return nil, managerError(ErrLocked, errLocked, nil)
-	}
-
-	// Decrypt the script as needed.  Also, make sure it's a copy since the
-	// script stored in memory can be cleared at any time.  Otherwise,
-	// the returned script could be invalidated from under the caller.
-	return a.unlock(a.manager.rootManager.cryptoKeyScript)
-}
-
-// Enforce scriptAddress satisfies the ManagedScriptAddress interface.
-var _ ManagedScriptAddress = (*scriptAddress)(nil)
-
-// newScriptAddress initializes and returns a new pay-to-script-hash address.
-func newScriptAddress(m *ScopedKeyManager, account uint32, scriptHash,
-	scriptEncrypted []byte) (*scriptAddress, error) {
-
-	address, err := btcutil.NewAddressScriptHashFromHash(
-		scriptHash, m.rootManager.chainParams,
+	address, err := btcutil.NewAddressTaproot(
+		scriptIdent, m.rootManager.ChainParams(),
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return &scriptAddress{
-		baseScriptAddress: baseScriptAddress{
-			manager:         m,
-			account:         account,
-			scriptEncrypted: scriptEncrypted,
-		},
-		address: address,
+	// Lift the x-only coordinate of the tweaked public key.
+	tweakedPubKey, err := schnorr.ParsePubKey(scriptIdent)
+	if err != nil {
+		return nil, fmt.Errorf("error lifting public key from "+
+			"script ident: %w", err)
+	}
+
+	return &taprootScriptAddress{
+		manager:         m,
+		account:         account,
+		scriptEncrypted: scriptEncrypted,
+		address:         address,
+		witnessVersion:  witnessVersion,
+		isSecretScript:  isSecretScript,
+		TweakedPubKey:   tweakedPubKey,
 	}, nil
 }
 
-// witnessScriptAddress represents a pay-to-witness-script-hash address.
-type witnessScriptAddress struct {
-	baseScriptAddress
-	address btcutil.Address
+// taprootScriptAddress represents a pay-to-taproot address that commits to a
+// script.
+type taprootScriptAddress struct {
+	manager         *ScopedKeyManager
+	account         uint32
+	scriptEncrypted []byte
+	scriptClearText []byte
+	scriptMutex     sync.Mutex
+	address         btcutil.Address
 
 	// witnessVersion is the version of the witness script.
 	witnessVersion byte
@@ -933,148 +733,14 @@ type witnessScriptAddress struct {
 	// and encrypted with the script encryption key or "public" and
 	// therefore only encrypted with the public encryption key.
 	isSecretScript bool
-}
-
-// AddrType returns the address type of the managed address. This can be used
-// to quickly discern the address type without further processing
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) AddrType() AddressType {
-	return WitnessScript
-}
-
-// Address returns the btcutil.Address which represents the managed address.
-// This will be a pay-to-witness-script-hash address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) Address() btcutil.Address {
-	return a.address
-}
-
-// AddrHash returns the script hash for the address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) AddrHash() []byte {
-	return a.address.ScriptAddress()
-}
-
-// Compressed returns true since witness script addresses are always compressed.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) Compressed() bool {
-	return true
-}
-
-// Used returns true if the address has been used in a transaction.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) Used(ns walletdb.ReadBucket) bool {
-	return a.manager.fetchUsed(ns, a.AddrHash())
-}
-
-// Script returns the script associated with the address.
-//
-// This is part of the ManagedAddress interface implementation.
-func (a *witnessScriptAddress) Script() ([]byte, error) {
-	// No script is available for a watching-only address manager.
-	if a.isSecretScript && a.manager.rootManager.WatchOnly() {
-		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
-	}
-
-	a.manager.mtx.Lock()
-	defer a.manager.mtx.Unlock()
-
-	// Account manager must be unlocked to decrypt the script.
-	if a.isSecretScript && a.manager.rootManager.IsLocked() {
-		return nil, managerError(ErrLocked, errLocked, nil)
-	}
-
-	cryptoKey := a.manager.rootManager.cryptoKeyScript
-	if !a.isSecretScript {
-		cryptoKey = a.manager.rootManager.cryptoKeyPub
-	}
-
-	// Decrypt the script as needed. Also, make sure it's a copy since the
-	// script stored in memory can be cleared at any time. Otherwise,
-	// the returned script could be invalidated from under the caller.
-	return a.unlock(cryptoKey)
-}
-
-// Enforce witnessScriptAddress satisfies the ManagedScriptAddress interface.
-var _ ManagedScriptAddress = (*witnessScriptAddress)(nil)
-
-// newWitnessScriptAddress initializes and returns a new
-// pay-to-witness-script-hash address.
-func newWitnessScriptAddress(m *ScopedKeyManager, account uint32, scriptIdent,
-	scriptEncrypted []byte, witnessVersion byte,
-	isSecretScript bool) (ManagedScriptAddress, error) {
-
-	switch witnessVersion {
-	case witnessVersionV0:
-		address, err := btcutil.NewAddressWitnessScriptHash(
-			scriptIdent, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		return &witnessScriptAddress{
-			baseScriptAddress: baseScriptAddress{
-				manager:         m,
-				account:         account,
-				scriptEncrypted: scriptEncrypted,
-			},
-			address:        address,
-			witnessVersion: witnessVersion,
-			isSecretScript: isSecretScript,
-		}, nil
-
-	case witnessVersionV1:
-		address, err := btcutil.NewAddressTaproot(
-			scriptIdent, m.rootManager.chainParams,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		// Lift the x-only coordinate of the tweaked public key.
-		tweakedPubKey, err := schnorr.ParsePubKey(scriptIdent)
-		if err != nil {
-			return nil, fmt.Errorf("error lifting public key from "+
-				"script ident: %w", err)
-		}
-
-		return &taprootScriptAddress{
-			witnessScriptAddress: witnessScriptAddress{
-				baseScriptAddress: baseScriptAddress{
-					manager:         m,
-					account:         account,
-					scriptEncrypted: scriptEncrypted,
-				},
-				address:        address,
-				witnessVersion: witnessVersion,
-				isSecretScript: isSecretScript,
-			},
-			TweakedPubKey: tweakedPubKey,
-		}, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported witness version %d",
-			witnessVersion)
-	}
-}
-
-// taprootScriptAddress represents a pay-to-taproot address that commits to a
-// script.
-type taprootScriptAddress struct {
-	witnessScriptAddress
 
 	TweakedPubKey *btcec.PublicKey
 }
 
-// Enforce taprootScriptAddress satisfies the ManagedTaprootScriptAddress
-// interface.
+// Enforce taprootScriptAddress satisfies both interfaces.
 var _ ManagedTaprootScriptAddress = (*taprootScriptAddress)(nil)
+var _ ManagedScriptAddress = (*taprootScriptAddress)(nil)
+var _ clearTextScriptSetter = (*taprootScriptAddress)(nil)
 
 // AddrType returns the address type of the managed address. This can be used
 // to quickly discern the address type without further processing
@@ -1111,4 +777,111 @@ func (a *taprootScriptAddress) TaprootScript() (*Tapscript, error) {
 
 	// Decode the additional TLV encoded data.
 	return tlvDecodeTaprootTaprootScript(script)
+}
+
+// unlock decrypts and stores the associated script.  It will fail if the key is
+// invalid or the encrypted script is not available.  The returned clear text
+// script will always be a copy that may be safely used by the caller without
+// worrying about it being zeroed during an address lock.
+func (a *taprootScriptAddress) unlock(key EncryptorDecryptor) ([]byte, error) {
+	// Protect concurrent access to clear text script.
+	a.scriptMutex.Lock()
+	defer a.scriptMutex.Unlock()
+
+	if len(a.scriptClearText) == 0 {
+		script, err := key.Decrypt(a.scriptEncrypted)
+		if err != nil {
+			str := fmt.Sprintf("failed to decrypt script for %d", a.account)
+			return nil, managerError(ErrCrypto, str, err)
+		}
+
+		a.scriptClearText = script
+	}
+
+	scriptCopy := make([]byte, len(a.scriptClearText))
+	copy(scriptCopy, a.scriptClearText)
+	return scriptCopy, nil
+}
+
+// lock zeroes the associated clear text script.
+func (a *taprootScriptAddress) lock() {
+	// Zero and nil the clear text script associated with this address.
+	a.scriptMutex.Lock()
+	zero.Bytes(a.scriptClearText)
+	a.scriptClearText = nil
+	a.scriptMutex.Unlock()
+}
+
+// InternalAccount returns the account the address is associated with. This will
+// always be the ImportedAddrAccount constant for script addresses.
+//
+// This is part of the ManagedAddress interface implementation.
+func (a *taprootScriptAddress) InternalAccount() uint32 {
+	return a.account
+}
+
+// Imported always returns true since script addresses are always imported
+// addresses and not part of any chain.
+//
+// This is part of the ManagedAddress interface implementation.
+func (a *taprootScriptAddress) Imported() bool {
+	return true
+}
+
+// Internal always returns false since script addresses are always imported
+// addresses and not part of any chain in order to be for internal use.
+//
+// This is part of the ManagedAddress interface implementation.
+func (a *taprootScriptAddress) Internal() bool {
+	return false
+}
+
+// setClearTextScript sets the unencrypted script on the struct after unlocking/
+// decrypting it.
+func (a *taprootScriptAddress) setClearTextScript(script []byte) {
+	a.scriptClearText = make([]byte, len(script))
+	copy(a.scriptClearText, script)
+}
+
+// Compressed returns true since Taproot addresses are always compressed.
+//
+// This is part of the ManagedAddress interface implementation.
+func (a *taprootScriptAddress) Compressed() bool {
+	return true
+}
+
+// Used returns true if the backing address has been used in a transaction based
+// on inspecting the blockchain (UTXO set) used by a chain service.
+//
+// This is part of the ManagedAddress interface implementation.
+func (a *taprootScriptAddress) Used(ns walletdb.ReadBucket) bool {
+	return a.manager.fetchUsed(ns, a.AddrHash())
+}
+
+// Script returns the script associated with the address.
+//
+// This implements the ScriptAddress interface.
+func (a *taprootScriptAddress) Script() ([]byte, error) {
+	// No script is available for a watching-only address manager.
+	if a.isSecretScript && a.manager.rootManager.WatchOnly() {
+		return nil, managerError(ErrWatchingOnly, errWatchingOnly, nil)
+	}
+
+	a.manager.mtx.Lock()
+	defer a.manager.mtx.Unlock()
+
+	// Account manager must be unlocked to decrypt the script.
+	if a.isSecretScript && a.manager.rootManager.IsLocked() {
+		return nil, managerError(ErrLocked, errLocked, nil)
+	}
+
+	cryptoKey := a.manager.rootManager.CryptoKeyScript()
+	if !a.isSecretScript {
+		cryptoKey = a.manager.rootManager.CryptoKeyPub()
+	}
+
+	// Decrypt the script as needed. Also, make sure it's a copy since the
+	// script stored in memory can be cleared at any time. Otherwise,
+	// the returned script could be invalidated from under the caller.
+	return a.unlock(cryptoKey)
 }

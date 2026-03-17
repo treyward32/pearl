@@ -1,76 +1,39 @@
 # Installation
 
-The first step is to install btcd.  See one of the following sections for
-details on how to install on the supported operating systems.
-
 ## Requirements
 
-[Go](http://golang.org) 1.17 or newer.
+- [Go](https://golang.org) 1.26 or newer
+- [Rust](https://rustup.rs) toolchain (for ZK verification library)
+- C compiler (for XMSS library)
+- [Task](https://taskfile.dev) runner
 
-## GPG Verification Key
+## Build from Source
 
-All official release tags are signed by Conformal so users can ensure the code
-has not been tampered with and is coming from the btcsuite developers.  To
-verify the signature perform the following:
-
-* Download the Conformal public key:
-  https://raw.githubusercontent.com/btcsuite/btcd/master/release/GIT-GPG-KEY-conformal.txt
-
-* Import the public key into your GPG keyring:
-
-  ```bash
-  gpg --import GIT-GPG-KEY-conformal.txt
-  ```
-
-* Verify the release tag with the following command where `TAG_NAME` is a
-  placeholder for the specific tag:
-
-  ```bash
-  git tag -v TAG_NAME
-  ```
-
-## Windows Installation
-
-* Install the MSI available at: [btcd windows installer](https://github.com/btcsuite/btcd/releases)
-* Launch btcd from the Start Menu
-
-## Linux/BSD/MacOSX/POSIX Installation
-
-* Install Go according to the [installation instructions](http://golang.org/doc/install)
-* Ensure Go was installed properly and is a supported version:
+Clone the repository and build the blockchain binaries:
 
 ```bash
-go version
-go env GOROOT GOPATH
+git clone https://github.com/pearl-research-labs/pearl.git
+cd pearl
+task build:blockchain
 ```
 
-NOTE: The `GOROOT` and `GOPATH` above must not be the same path.  It is
-recommended that `GOPATH` is set to a directory in your home directory such as
-`~/goprojects` to avoid write permission issues.  It is also recommended to add
-`$GOPATH/bin` to your `PATH` at this point.
+Binaries are placed in `bin/`:
+- `pearld` — full node
+- `prlctl` — CLI control tool
+- `oyster` — wallet daemon
 
-* Run the following commands to obtain btcd, all dependencies, and install it:
+To build only the node:
 
 ```bash
-git clone https://github.com/btcsuite/btcd $GOPATH/src/github.com/btcsuite/btcd
-cd $GOPATH/src/github.com/btcsuite/btcd
-go install -v . ./cmd/...
+task build:pearld
 ```
-
-* btcd (and utilities) will now be installed in ```$GOPATH/bin```.  If you did
-  not already add the bin directory to your system path during Go installation,
-  we recommend you do so now.
-
-## Gentoo Linux Installation
-
-* [Install Layman](https://gitlab.com/bitcoin/gentoo) and enable the Bitcoin overlay.
-* Copy or symlink `/var/lib/layman/bitcoin/Documentation/package.keywords/btcd-live` to `/etc/portage/package.keywords/`
-* Install btcd: `$ emerge net-p2p/btcd`
 
 ## Startup
 
-Typically btcd will run and start downloading the block chain with no extra
-configuration necessary, however, there is an optional method to use a
-`bootstrap.dat` file that may speed up the initial block chain download process.
+pearld will run and start downloading the block chain with no extra
+configuration necessary. See the
+[configuration documentation](configuration.md) for advanced options.
 
-* [Using bootstrap.dat](https://github.com/btcsuite/btcd/blob/master/docs/configuration.md#using-bootstrapdat)
+```bash
+./bin/pearld
+```

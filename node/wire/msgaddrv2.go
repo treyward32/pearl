@@ -9,7 +9,7 @@ import (
 // in a single addrv2 message (MsgAddrV2).
 const MaxV2AddrPerMsg = 1000
 
-// MsgAddrV2 implements the Message interface and represents a bitcoin addrv2
+// MsgAddrV2 implements the Message interface and represents a addrv2
 // message that can support longer-length addresses like torv3, cjdns, and i2p.
 // It is used to gossip addresses on the network. Each message is limited to
 // MaxV2AddrPerMsg addresses. This is the same limit as MsgAddr.
@@ -17,8 +17,8 @@ type MsgAddrV2 struct {
 	AddrList []*NetAddressV2
 }
 
-// BtcDecode decodes r using the bitcoin protocol into a MsgAddrV2.
-func (m *MsgAddrV2) BtcDecode(r io.Reader, pver uint32,
+// PrlDecode decodes r using the wire protocol into a MsgAddrV2.
+func (m *MsgAddrV2) PrlDecode(r io.Reader, pver uint32,
 	enc MessageEncoding) error {
 
 	count, err := ReadVarInt(r, pver)
@@ -30,7 +30,7 @@ func (m *MsgAddrV2) BtcDecode(r io.Reader, pver uint32,
 	if count > MaxV2AddrPerMsg {
 		str := fmt.Sprintf("too many addresses for message [count %v,"+
 			" max %v]", count, MaxV2AddrPerMsg)
-		return messageError("MsgAddrV2.BtcDecode", str)
+		return messageError("MsgAddrV2.PrlDecode", str)
 	}
 
 	addrList := make([]NetAddressV2, count)
@@ -38,14 +38,14 @@ func (m *MsgAddrV2) BtcDecode(r io.Reader, pver uint32,
 	for i := uint64(0); i < count; i++ {
 		na := &addrList[i]
 		err := readNetAddressV2(r, pver, na)
-		switch err {
-		case ErrSkippedNetworkID:
-			// This may be a network ID we don't know of, but is
-			// still valid. We can safely skip those.
-			continue
-		case ErrInvalidAddressSize:
-			// The encoding used by the peer does not follow
-			// BIP-155 and we should stop processing this message.
+		if err != nil {
+			// A network address of a type we don't know of may be
+			// safely skipped. All other errors mean we should stop
+			// processing the message.
+			if err == ErrSkippedNetworkID {
+				continue
+			}
+
 			return err
 		}
 
@@ -55,15 +55,15 @@ func (m *MsgAddrV2) BtcDecode(r io.Reader, pver uint32,
 	return nil
 }
 
-// BtcEncode encodes the MsgAddrV2 into a writer w.
-func (m *MsgAddrV2) BtcEncode(w io.Writer, pver uint32,
+// PrlEncode encodes the MsgAddrV2 into a writer w.
+func (m *MsgAddrV2) PrlEncode(w io.Writer, pver uint32,
 	enc MessageEncoding) error {
 
 	count := len(m.AddrList)
 	if count > MaxV2AddrPerMsg {
-		str := fmt.Sprintf("too many addresses for message [count %v,"+
-			" max %v]", count, MaxV2AddrPerMsg)
-		return messageError("MsgAddrV2.BtcEncode", str)
+		str := fmt.Sprintf("too many addresses for message: "+
+			"got %v, max %v", count, MaxV2AddrPerMsg)
+		return messageError("MsgAddrV2.PrlEncode", str)
 	}
 
 	err := WriteVarInt(w, pver, uint64(count))
@@ -93,7 +93,7 @@ func (m *MsgAddrV2) MaxPayloadLength(pver uint32) uint32 {
 	return 3 + (MaxV2AddrPerMsg * maxNetAddressV2Payload())
 }
 
-// NewMsgAddrV2 returns a new bitcoin addrv2 message that conforms to the
+// NewMsgAddrV2 returns a new addrv2 message that conforms to the
 // Message interface.
 func NewMsgAddrV2() *MsgAddrV2 {
 	return &MsgAddrV2{

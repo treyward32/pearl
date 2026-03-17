@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,9 +10,9 @@ import (
 	"io"
 	"math"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
 )
 
 const (
@@ -78,7 +78,7 @@ func HashMerkleBranches(left, right *chainhash.Hash) chainhash.Hash {
 // is stored in a linear array.
 //
 // A merkle tree is a tree in which every non-leaf node is the hash of its
-// children nodes.  A diagram depicting how this works for bitcoin transactions
+// children nodes.  A diagram depicting how this works for transactions
 // where h(x) is a double sha256 follows:
 //
 //	         root = h1234 = h(h12 + h34)
@@ -169,7 +169,7 @@ func BuildMerkleTreeStore(transactions []*btcutil.Tx, witness bool) []*chainhash
 // memory and fewer allocations.
 //
 // A merkle tree is a tree in which every non-leaf node is the hash of its
-// children nodes. A diagram depicting how this works for bitcoin transactions
+// children nodes. A diagram depicting how this works for transactions
 // where h(x) is a double sha256 follows:
 //
 //	         root = h1234 = h(h12 + h34)

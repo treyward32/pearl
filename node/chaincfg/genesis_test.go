@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -14,6 +14,7 @@ import (
 // TestGenesisBlock tests the genesis block of the main network for validity by
 // checking the encoded bytes and hashes.
 func TestGenesisBlock(t *testing.T) {
+	t.Skip("Enable this test once we settle on a genesis block") // TODO Or: re-enable after genesis finalization
 	// Encode the genesis block to raw bytes.
 	var buf bytes.Buffer
 	err := MainNetParams.GenesisBlock.Serialize(&buf)
@@ -40,6 +41,7 @@ func TestGenesisBlock(t *testing.T) {
 // TestRegTestGenesisBlock tests the genesis block of the regression test
 // network for validity by checking the encoded bytes and hashes.
 func TestRegTestGenesisBlock(t *testing.T) {
+	t.Skip("Enable this test once we settle on a genesis block") // TODO Or: re-enable after genesis finalization
 	// Encode the genesis block to raw bytes.
 	var buf bytes.Buffer
 	err := RegressionNetParams.GenesisBlock.Serialize(&buf)
@@ -64,36 +66,38 @@ func TestRegTestGenesisBlock(t *testing.T) {
 	}
 }
 
-// TestTestNet3GenesisBlock tests the genesis block of the test network (version
+// TestTestNetGenesisBlock tests the genesis block of the test network (version
 // 3) for validity by checking the encoded bytes and hashes.
-func TestTestNet3GenesisBlock(t *testing.T) {
+func TestTestNetGenesisBlock(t *testing.T) {
+	t.Skip("Enable this test once we settle on a genesis block") // TODO Or: re-enable after genesis finalization
 	// Encode the genesis block to raw bytes.
 	var buf bytes.Buffer
-	err := TestNet3Params.GenesisBlock.Serialize(&buf)
+	err := TestNetParams.GenesisBlock.Serialize(&buf)
 	if err != nil {
-		t.Fatalf("TestTestNet3GenesisBlock: %v", err)
+		t.Fatalf("TestTestNetGenesisBlock: %v", err)
 	}
 
 	// Ensure the encoded block matches the expected bytes.
-	if !bytes.Equal(buf.Bytes(), testNet3GenesisBlockBytes) {
-		t.Fatalf("TestTestNet3GenesisBlock: Genesis block does not "+
+	if !bytes.Equal(buf.Bytes(), testNetGenesisBlockBytes) {
+		t.Fatalf("TestTestNetGenesisBlock: Genesis block does not "+
 			"appear valid - got %v, want %v",
 			spew.Sdump(buf.Bytes()),
-			spew.Sdump(testNet3GenesisBlockBytes))
+			spew.Sdump(testNetGenesisBlockBytes))
 	}
 
 	// Check hash of the block against expected hash.
-	hash := TestNet3Params.GenesisBlock.BlockHash()
-	if !TestNet3Params.GenesisHash.IsEqual(&hash) {
-		t.Fatalf("TestTestNet3GenesisBlock: Genesis block hash does "+
+	hash := TestNetParams.GenesisBlock.BlockHash()
+	if !TestNetParams.GenesisHash.IsEqual(&hash) {
+		t.Fatalf("TestTestNetGenesisBlock: Genesis block hash does "+
 			"not appear valid - got %v, want %v", spew.Sdump(hash),
-			spew.Sdump(TestNet3Params.GenesisHash))
+			spew.Sdump(TestNetParams.GenesisHash))
 	}
 }
 
 // TestSimNetGenesisBlock tests the genesis block of the simulation test network
 // for validity by checking the encoded bytes and hashes.
 func TestSimNetGenesisBlock(t *testing.T) {
+	t.Skip("Enable this test once we settle on a genesis block") // TODO Or: re-enable after genesis finalization
 	// Encode the genesis block to raw bytes.
 	var buf bytes.Buffer
 	err := SimNetParams.GenesisBlock.Serialize(&buf)
@@ -121,6 +125,7 @@ func TestSimNetGenesisBlock(t *testing.T) {
 // TestSigNetGenesisBlock tests the genesis block of the signet test network for
 // validity by checking the encoded bytes and hashes.
 func TestSigNetGenesisBlock(t *testing.T) {
+	t.Skip("Enable this test once we settle on a genesis block") // TODO Or: re-enable after genesis finalization
 	// Encode the genesis block to raw bytes.
 	var buf bytes.Buffer
 	err := SigNetParams.GenesisBlock.Serialize(&buf)
@@ -142,6 +147,35 @@ func TestSigNetGenesisBlock(t *testing.T) {
 		t.Fatalf("TestSigNetGenesisBlock: Genesis block hash does "+
 			"not appear valid - got %v, want %v", spew.Sdump(hash),
 			spew.Sdump(SigNetParams.GenesisHash))
+	}
+}
+
+// TestGenesisBlockHashValidity tests that the computed hash of each network's
+// genesis block matches its expected GenesisHash. This is critical for node
+// restart - if these don't match, the node will fail to load the block index.
+func TestGenesisBlockHashValidity(t *testing.T) {
+	networks := []struct {
+		name   string
+		params *Params
+	}{
+		{"MainNet", &MainNetParams},
+		{"TestNet", &TestNetParams},
+		{"TestNet2", &TestNet2Params},
+		{"RegTest", &RegressionNetParams},
+		{"SimNet", &SimNetParams},
+		{"SigNet", &SigNetParams},
+	}
+
+	for _, net := range networks {
+		t.Run(net.name, func(t *testing.T) {
+			computed := net.params.GenesisBlock.BlockHash()
+			expected := net.params.GenesisHash
+			if !computed.IsEqual(expected) {
+				t.Fatalf("Genesis block hash mismatch for %s: "+
+					"computed %v, expected %v",
+					net.name, spew.Sdump(computed), spew.Sdump(*expected))
+			}
+		})
 	}
 }
 
@@ -227,9 +261,9 @@ var regTestGenesisBlockBytes = []byte{
 	0xac, 0x00, 0x00, 0x00, 0x00, /* |.....|    */
 }
 
-// testNet3GenesisBlockBytes are the wire encoded bytes for the genesis block of
+// testNetGenesisBlockBytes are the wire encoded bytes for the genesis block of
 // the test network (version 3) as of protocol version 60002.
-var testNet3GenesisBlockBytes = []byte{
+var testNetGenesisBlockBytes = []byte{
 	0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* |........| */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* |........| */
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* |........| */

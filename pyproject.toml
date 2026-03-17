@@ -1,0 +1,55 @@
+[project]
+name = "Pearl"
+version = "0.1.0"
+description = "Pearl monorepo workspace"
+requires-python = "==3.12.*"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Workspace sources - these apply globally to all members
+[tool.uv.sources]
+miner-utils = {workspace = true}
+miner-base = {workspace = true}
+pearl-gateway = {workspace = true}
+py-pearl-mining = {workspace = true}
+vllm-miner = {workspace = true}
+pearl-gemm-build-utils = {workspace = true}
+pearl-gemm = {workspace = true}
+# use torch compiled against nvidia runtime
+torch = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["miner", "miner/vllm-miner/tests"]
+markers = [
+    "integration: marks tests as integration tests (may require external services)",
+    "schema: marks tests as schema validation tests",
+    "https: marks tests as HTTPS/TLS connectivity tests",
+    "performance: marks tests as performance tests (throughput, latency, memory)",
+    "slow: marks tests as slow running tests (typically >30 seconds)",
+]
+python_files = ["test_*.py", "*_test.py"]
+norecursedirs = [".git", ".venv", "venv", ".github", ".pytest_cache", ".mypy_cache", ".ruff_cache", "build", "dist", "third_party"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --import-mode=importlib"
+
+[tool.uv.workspace]
+members = [
+  "miner/miner-utils",
+  "miner/miner-base",
+  "miner/pearl-gateway",
+  "py-pearl-mining",
+  "miner/vllm-miner",
+  "miner/pearl-gemm-build-utils",
+  "miner/pearl-gemm"
+]

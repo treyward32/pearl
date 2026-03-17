@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,16 +9,16 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/btcutil/psbt"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet/txauthor"
-	"github.com/btcsuite/btcwallet/wallet/txrules"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/btcutil/psbt"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txauthor"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txrules"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 // FundPsbt creates a fully populated PSBT packet that contains enough inputs to
@@ -217,16 +217,14 @@ func (w *Wallet) FundPsbt(packet *psbt.Packet, keyScope *waddrmgr.KeyScope,
 			packet.UnsignedTx.TxOut, changeTxOut,
 		)
 
-		addr, _, _, err := w.ScriptForOutput(changeTxOut)
+		addr, err := w.FetchManagedPubkey(changeTxOut)
 		if err != nil {
-			return 0, fmt.Errorf("error querying wallet for "+
-				"change addr: %w", err)
+			return 0, fmt.Errorf("error querying wallet for change addr: %w", err)
 		}
 
 		changeOutputInfo, err := createOutputInfo(changeTxOut, addr)
 		if err != nil {
-			return 0, fmt.Errorf("error adding output info to "+
-				"change output: %w", err)
+			return 0, fmt.Errorf("error adding output info to change output: %w", err)
 		}
 
 		packet.Outputs = append(packet.Outputs, *changeOutputInfo)
@@ -263,7 +261,7 @@ func (w *Wallet) DecorateInputs(packet *psbt.Packet, failOnUnknown bool) error {
 	for idx := range packet.Inputs {
 		txIn := packet.UnsignedTx.TxIn[idx]
 
-		tx, utxo, derivationPath, _, err := w.FetchInputInfo(
+		_, utxo, derivationPath, _, err := w.FetchInputInfo(
 			&txIn.PreviousOutPoint,
 		)
 
@@ -278,11 +276,6 @@ func (w *Wallet) DecorateInputs(packet *psbt.Packet, failOnUnknown bool) error {
 			return fmt.Errorf("error fetching UTXO: %w", err)
 		}
 
-		addr, witnessProgram, _, err := w.ScriptForOutput(utxo)
-		if err != nil {
-			return fmt.Errorf("error fetching UTXO script: %w", err)
-		}
-
 		switch {
 		case txscript.IsPayToTaproot(utxo.PkScript):
 			addInputInfoSegWitV1(
@@ -290,48 +283,14 @@ func (w *Wallet) DecorateInputs(packet *psbt.Packet, failOnUnknown bool) error {
 			)
 
 		default:
-			addInputInfoSegWitV0(
-				&packet.Inputs[idx], tx, utxo, derivationPath,
-				addr, witnessProgram,
-			)
+			return fmt.Errorf("script is not a p2tr address")
 		}
 	}
 
 	return nil
 }
 
-// addInputInfoSegWitV0 adds the UTXO and BIP32 derivation info for a SegWit v0
-// PSBT input (p2wkh, np2wkh) from the given wallet information.
-func addInputInfoSegWitV0(in *psbt.PInput, prevTx *wire.MsgTx, utxo *wire.TxOut,
-	derivationInfo *psbt.Bip32Derivation, addr waddrmgr.ManagedAddress,
-	witnessProgram []byte) {
-
-	// As a fix for CVE-2020-14199 we have to always include the full
-	// non-witness UTXO in the PSBT for segwit v0.
-	in.NonWitnessUtxo = prevTx
-
-	// To make it more obvious that this is actually a witness output being
-	// spent, we also add the same information as the witness UTXO.
-	in.WitnessUtxo = &wire.TxOut{
-		Value:    utxo.Value,
-		PkScript: utxo.PkScript,
-	}
-	in.SighashType = txscript.SigHashAll
-
-	// Include the derivation path for each input.
-	in.Bip32Derivation = []*psbt.Bip32Derivation{
-		derivationInfo,
-	}
-
-	// For nested P2WKH we need to add the redeem script to the input,
-	// otherwise an offline wallet won't be able to sign for it. For normal
-	// P2WKH this will be nil.
-	if addr.AddrType() == waddrmgr.NestedWitnessPubKey {
-		in.RedeemScript = witnessProgram
-	}
-}
-
-// addInputInfoSegWitV0 adds the UTXO and BIP32 derivation info for a SegWit v1
+// addInputInfoSegWitV1 adds the UTXO and BIP32 derivation info for a SegWit v1
 // PSBT input (p2tr) from the given wallet information.
 func addInputInfoSegWitV1(in *psbt.PInput, utxo *wire.TxOut,
 	derivationInfo *psbt.Bip32Derivation) {
@@ -372,6 +331,10 @@ func createOutputInfo(txOut *wire.TxOut,
 			"derivation path")
 	}
 
+	if !txscript.IsPayToTaproot(txOut.PkScript) {
+		return nil, fmt.Errorf("script is not a p2tr address")
+	}
+
 	// Include the derivation path for this output.
 	derivation := &psbt.Bip32Derivation{
 		PubKey:               addr.PubKey().SerializeCompressed(),
@@ -384,21 +347,18 @@ func createOutputInfo(txOut *wire.TxOut,
 			derivationPath.Index,
 		},
 	}
+
+	schnorrPubKey := derivation.PubKey[1:]
 	out := &psbt.POutput{
 		Bip32Derivation: []*psbt.Bip32Derivation{
 			derivation,
 		},
-	}
-
-	// Include the Taproot derivation path as well if this is a P2TR output.
-	if txscript.IsPayToTaproot(txOut.PkScript) {
-		schnorrPubKey := derivation.PubKey[1:]
-		out.TaprootBip32Derivation = []*psbt.TaprootBip32Derivation{{
+		TaprootBip32Derivation: []*psbt.TaprootBip32Derivation{{
 			XOnlyPubKey:          schnorrPubKey,
 			MasterKeyFingerprint: derivation.MasterKeyFingerprint,
 			Bip32Path:            derivation.Bip32Path,
-		}}
-		out.TaprootInternalKey = schnorrPubKey
+		}},
+		TaprootInternalKey: schnorrPubKey,
 	}
 
 	return out, nil
@@ -502,7 +462,7 @@ func (w *Wallet) FinalizePsbt(keyScope *waddrmgr.KeyScope, account uint32,
 				// key scope provided doesn't impact the result
 				// of this call.
 				watchOnly, err = w.Manager.IsWatchOnlyAccount(
-					ns, waddrmgr.KeyScopeBIP0084, account,
+					ns, waddrmgr.KeyScopeBIP0086, account,
 				)
 			} else {
 				watchOnly, err = w.Manager.IsWatchOnlyAccount(

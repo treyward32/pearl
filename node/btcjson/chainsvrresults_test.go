@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // TestChainSvrCustomResults ensures any results that have custom marshalling
@@ -216,8 +216,8 @@ func TestChainSvrMiningInfoResults(t *testing.T) {
 	}
 }
 
-// TestGetNetworkInfoWarnings tests that we can use both a single string value
-// and an array of string values for the warnings field in GetNetworkInfoResult.
+// TestGetNetworkInfoWarnings tests unmarshalling the warnings field in
+// GetNetworkInfoResult.
 func TestGetNetworkInfoWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -227,19 +227,10 @@ func TestGetNetworkInfoWarnings(t *testing.T) {
 		expected btcjson.GetNetworkInfoResult
 	}{
 		{
-			name:   "network info with single warning",
-			result: `{"warnings": "this is a warning"}`,
-			expected: btcjson.GetNetworkInfoResult{
-				Warnings: btcjson.StringOrArray{
-					"this is a warning",
-				},
-			},
-		},
-		{
 			name:   "network info with array of warnings",
 			result: `{"warnings": ["a", "or", "b"]}`,
 			expected: btcjson.GetNetworkInfoResult{
-				Warnings: btcjson.StringOrArray{
+				Warnings: []string{
 					"a", "or", "b",
 				},
 			},

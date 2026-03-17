@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/btcsuite/btcd/btcutil/base58"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcutil/base58"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 const (
@@ -53,7 +53,7 @@ func ReadBip32Derivation(path []byte) (uint32, []uint32, error) {
 	//   "<32-bit uint> <32-bit uint>*"
 	// with the asterisk meaning 0 to n times. Which in turn means that an
 	// empty path is valid, only the key fingerprint is mandatory.
-	if len(path)%uint32Size != 0 {
+	if len(path) < uint32Size || len(path)%uint32Size != 0 {
 		return 0, nil, ErrInvalidPsbtFormat
 	}
 

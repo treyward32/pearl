@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,10 +7,11 @@ package wallet
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/stretchr/testify/require"
 )
 
 // TestComputeInputScript checks that the wallet can create the full
@@ -22,15 +23,13 @@ func TestComputeInputScript(t *testing.T) {
 		name              string
 		scope             waddrmgr.KeyScope
 		expectedScriptLen int
-	}{{
-		name:              "BIP084 P2WKH",
-		scope:             waddrmgr.KeyScopeBIP0084,
-		expectedScriptLen: 0,
-	}, {
-		name:              "BIP049 nested P2WKH",
-		scope:             waddrmgr.KeyScopeBIP0049Plus,
-		expectedScriptLen: 23,
-	}}
+	}{ // The only supported scope is BIP086 P2TR
+		{
+			name:              "BIP086 P2TR",
+			scope:             waddrmgr.KeyScopeBIP0086,
+			expectedScriptLen: 0,
+		},
+	}
 
 	w, cleanup := testWallet(t)
 	defer cleanup()
@@ -48,16 +47,13 @@ func runTestCase(t *testing.T, w *Wallet, scope waddrmgr.KeyScope,
 
 	// Create an address we can use to send some coins to.
 	addr, err := w.CurrentAddress(0, scope)
-	if err != nil {
-		t.Fatalf("unable to get current address: %v", addr)
-	}
-	p2shAddr, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		t.Fatalf("unable to convert wallet address to p2sh: %v", err)
-	}
+	require.NoError(t, err, "unable to get current address")
+	t.Logf("Address: %v, Type: %T", addr, addr)
+	p2trAddr, err := txscript.PayToAddrScript(addr)
+	require.NoError(t, err, "unable to convert wallet address to p2tr")
 
 	// Add an output paying to the wallet's address to the database.
-	utxOut := wire.NewTxOut(100000, p2shAddr)
+	utxOut := wire.NewTxOut(100000, p2trAddr)
 	incomingTx := &wire.MsgTx{
 		TxIn:  []*wire.TxIn{{}},
 		TxOut: []*wire.TxOut{utxOut},
@@ -85,17 +81,9 @@ func runTestCase(t *testing.T, w *Wallet, scope waddrmgr.KeyScope,
 	witness, script, err := w.ComputeInputScript(
 		outgoingTx, utxOut, 0, sigHashes, txscript.SigHashAll, nil,
 	)
-	if err != nil {
-		t.Fatalf("error computing input script: %v", err)
-	}
-	if len(script) != scriptLen {
-		t.Fatalf("unexpected script length, got %d wanted %d",
-			len(script), scriptLen)
-	}
-	if len(witness) != 2 {
-		t.Fatalf("unexpected witness stack length, got %d, wanted %d",
-			len(witness), 2)
-	}
+	require.NoError(t, err, "error computing input script")
+	require.Equal(t, scriptLen, len(script), "unexpected script length")
+	require.Equal(t, 1, len(witness), "unexpected witness stack length")
 
 	// Finally verify that the created witness is valid.
 	outgoingTx.TxIn[0].Witness = witness
@@ -103,7 +91,5 @@ func runTestCase(t *testing.T, w *Wallet, scope waddrmgr.KeyScope,
 	err = validateMsgTx(
 		outgoingTx, [][]byte{utxOut.PkScript}, []btcutil.Amount{100000},
 	)
-	if err != nil {
-		t.Fatalf("error validating tx: %v", err)
-	}
+	require.NoError(t, err, "error validating tx")
 }

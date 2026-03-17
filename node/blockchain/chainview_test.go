@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,8 +9,9 @@ import (
 	"math/rand"
 	"reflect"
 	"testing"
+	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // testNoncePrng provides a deterministic prng for the nonce in generated fake
@@ -25,12 +26,12 @@ func chainedNodes(parent *blockNode, numNodes int) []*blockNode {
 	tip := parent
 	for i := 0; i < numNodes; i++ {
 		// This is invalid, but all that is needed is enough to get the
-		// synthetic tests to work.
-		header := wire.BlockHeader{Nonce: testNoncePrng.Uint32()}
+		// synthetic tests to work. Use random timestamp to create different hashes.
+		header := wire.BlockHeader{Timestamp: time.Unix(int64(testNoncePrng.Uint32()), 0)}
 		if tip != nil {
 			header.PrevBlock = tip.hash
 		}
-		nodes[i] = newBlockNode(&header, tip)
+		nodes[i] = newBlockNode(&header, tip, statusDataStored, 0)
 		tip = nodes[i]
 	}
 	return nodes

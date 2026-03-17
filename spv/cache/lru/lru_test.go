@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/lightninglabs/neutrino/cache"
+	"github.com/pearl-research-labs/pearl/spv/cache"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,7 +105,7 @@ func TestElementSizeCapacityEvictsEverything(t *testing.T) {
 	c.Put(1, &sizeable{value: 1, size: 1})
 	c.Put(2, &sizeable{value: 2, size: 2})
 	c.Put(3, &sizeable{value: 3, size: 3})
-	require.Equal(t, c.size, uint64(6))
+	require.Equal(t, c.Size(), uint64(6))
 
 	// Insert element with size=capacity of cache.
 	c.Put(4, &sizeable{value: 4, size: 6})
@@ -113,6 +113,55 @@ func TestElementSizeCapacityEvictsEverything(t *testing.T) {
 	require.Equal(t, c.cache.Len(), 1)
 	four = getSizeableValue(c.Get(4))
 	require.Equal(t, four, 4)
+}
+
+// TestCacheSizeTracksMutations ensures that Size mirrors the total bytes held
+// in the cache as items are inserted, evicted, replaced, and deleted.
+func TestCacheSizeTracksMutations(t *testing.T) {
+	t.Parallel()
+
+	// Initialize a cache with enough headroom to exercise evictions while
+	// still keeping multiple entries resident.
+	c := NewCache[int, *sizeable](5)
+
+	// assertSize is a helper to reduce boilerplate when checking Size().
+	assertSize := func(expected uint64) {
+		t.Helper()
+		require.Equal(t, expected, c.Size())
+	}
+
+	// The initial size is 0.
+	assertSize(0)
+
+	// Insert two entries whose combined size exactly matches the cache
+	// capacity and check that Size reflects the summed weight.
+	_, err := c.Put(1, &sizeable{value: 1, size: 2})
+	require.NoError(t, err)
+	assertSize(2)
+	_, err = c.Put(2, &sizeable{value: 2, size: 3})
+	require.NoError(t, err)
+	assertSize(5)
+
+	// Insert a third entry that forces the LRU element (key 1) out so the
+	// cache can stay within its capacity budget.
+	_, err = c.Put(3, &sizeable{value: 3, size: 2})
+	require.NoError(t, err)
+	assertSize(5)
+	_, err = c.Get(1)
+	require.ErrorIs(t, err, cache.ErrElementNotFound)
+
+	// Replacing an existing element with a smaller version should shrink
+	// the overall Size accounting accordingly.
+	_, err = c.Put(2, &sizeable{value: 20, size: 1})
+	require.NoError(t, err)
+	assertSize(3)
+
+	// Deleting an item should subtract its contribution and return the
+	// removed value to the caller.
+	val, ok := c.LoadAndDelete(3)
+	require.True(t, ok)
+	require.Equal(t, 3, val.value)
+	assertSize(1)
 }
 
 // TestCacheFailsInsertionSizeBiggerCapacity tests that the cache fails the
@@ -326,7 +375,7 @@ func TestLoadAndDelete(t *testing.T) {
 
 	// The length should be 0.
 	require.Zero(t, c.Len())
-	require.Zero(t, c.size)
+	require.Zero(t, c.Size())
 }
 
 // TestRangeIteration checks that the `Range` method works as expected.
@@ -444,4 +493,158 @@ func TestRangeFIFO(t *testing.T) {
 
 	// Check the number of items visited.
 	require.Equal(t, numItems, visited)
+}
+
+// TestDeleteCallback tests that the global delete callback is called when
+// elements are deleted from the cache.
+func TestDeleteCallback(t *testing.T) {
+	t.Parallel()
+
+	deletedKeys := make([]int, 0)
+	deletedValues := make([]*sizeable, 0)
+
+	// Create cache with global callback using option pattern.
+	c := NewCache(2, WithDeleteCallback(func(key int, value *sizeable) {
+		deletedKeys = append(deletedKeys, key)
+		deletedValues = append(deletedValues, value)
+	}))
+
+	// Add elements to the LRU cache.
+	c.Put(1, &sizeable{value: 1, size: 1})
+	c.Put(2, &sizeable{value: 2, size: 1})
+
+	// This should evict key 1.
+	c.Put(3, &sizeable{value: 3, size: 1})
+
+	// Verify callback was called with correct key and value.
+	require.Len(t, deletedKeys, 1)
+	require.Len(t, deletedValues, 1)
+	require.Equal(t, 1, deletedKeys[0])
+	require.Equal(t, 1, deletedValues[0].value)
+
+	// Add another element to evict key 2.
+	c.Put(4, &sizeable{value: 4, size: 1})
+
+	require.Len(t, deletedKeys, 2)
+	require.Len(t, deletedValues, 2)
+	require.Equal(t, 2, deletedKeys[1])
+	require.Equal(t, 2, deletedValues[1].value)
+}
+
+// TestCallbackOnExplicitDelete tests that the delete callback is called when
+// elements are explicitly deleted from the cache.
+func TestCallbackOnExplicitDelete(t *testing.T) {
+	t.Parallel()
+
+	deletedKeys := make([]int, 0)
+	deletedValues := make([]*sizeable, 0)
+
+	c := NewCache(10, WithDeleteCallback(func(key int, value *sizeable) {
+		deletedKeys = append(deletedKeys, key)
+		deletedValues = append(deletedValues, value)
+	}))
+
+	// Add elements.
+	c.Put(1, &sizeable{value: 1, size: 1})
+	c.Put(2, &sizeable{value: 2, size: 1})
+
+	// Explicitly delete an element.
+	c.Delete(1)
+
+	// Verify callback was called.
+	require.Len(t, deletedKeys, 1)
+	require.Len(t, deletedValues, 1)
+	require.Equal(t, 1, deletedKeys[0])
+	require.Equal(t, 1, deletedValues[0].value)
+}
+
+// TestCallbackOnLoadAndDelete tests that the delete callback is called when
+// using the LoadAndDelete method.
+func TestCallbackOnLoadAndDelete(t *testing.T) {
+	t.Parallel()
+
+	deletedKeys := make([]int, 0)
+	deletedValues := make([]*sizeable, 0)
+
+	c := NewCache(10, WithDeleteCallback(func(key int, value *sizeable) {
+		deletedKeys = append(deletedKeys, key)
+		deletedValues = append(deletedValues, value)
+	}))
+
+	c.Put(1, &sizeable{value: 1, size: 1})
+
+	value, found := c.LoadAndDelete(1)
+	require.True(t, found)
+	require.Equal(t, 1, value.value)
+
+	// Verify callback was called.
+	require.Len(t, deletedKeys, 1)
+	require.Len(t, deletedValues, 1)
+	require.Equal(t, 1, deletedKeys[0])
+	require.Equal(t, 1, deletedValues[0].value)
+}
+
+// TestNoCallbackOnNonDelete tests that callbacks are not called when
+// elements are not deleted.
+func TestNoCallbackOnNonDelete(t *testing.T) {
+	t.Parallel()
+
+	callbackCalled := false
+
+	c := NewCache(10, WithDeleteCallback(func(key int, value *sizeable) {
+		callbackCalled = true
+	}))
+
+	// Add elements without triggering delete.
+	c.Put(1, &sizeable{value: 1, size: 1})
+	c.Put(2, &sizeable{value: 2, size: 1})
+
+	// Verify callback was not called.
+	require.False(t, callbackCalled)
+}
+
+// TestCallbackWithNilCallback tests that the cache works correctly when
+// no delete callback is provided.
+func TestCallbackWithNilCallback(t *testing.T) {
+	t.Parallel()
+
+	c := NewCache[int, *sizeable](2)
+
+	// Add elements without setting any callback.
+	c.Put(1, &sizeable{value: 1, size: 1})
+	c.Put(2, &sizeable{value: 2, size: 1})
+
+	// Trigger delete/eviction of the first element - should not panic.
+	c.Put(3, &sizeable{value: 3, size: 1})
+
+	// Verify cache still works.
+	require.Equal(t, 2, c.Len())
+	_, err := c.Get(1)
+	require.ErrorIs(t, err, cache.ErrElementNotFound)
+}
+
+// TestMultipleDeletes tests that the delete callback is called for each
+// deletion when multiple elements are deleted at once.
+func TestMultipleDeletes(t *testing.T) {
+	t.Parallel()
+
+	deletedKeys := make([]int, 0)
+
+	c := NewCache(3, WithDeleteCallback(func(key int, value *sizeable) {
+		deletedKeys = append(deletedKeys, key)
+	}))
+
+	// Fill the cache.
+	c.Put(1, &sizeable{value: 1, size: 1})
+	c.Put(2, &sizeable{value: 2, size: 1})
+	c.Put(3, &sizeable{value: 3, size: 1})
+
+	// Add a large element that will evict multiple items.
+	c.Put(4, &sizeable{value: 4, size: 3})
+
+	// Verify callbacks were called for all evicted elements.
+	require.Len(t, deletedKeys, 3)
+	require.Contains(t, deletedKeys, 1)
+	require.Contains(t, deletedKeys, 2)
+	require.Contains(t, deletedKeys, 3)
 }

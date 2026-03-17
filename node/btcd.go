@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -16,10 +16,10 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 
-	"github.com/btcsuite/btcd/blockchain/indexers"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/limits"
-	"github.com/btcsuite/btcd/ossec"
+	"github.com/pearl-research-labs/pearl/node/blockchain/indexers"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/limits"
+	"github.com/pearl-research-labs/pearl/node/ossec"
 )
 
 const (
@@ -33,16 +33,16 @@ var (
 	cfg *config
 )
 
-// winServiceMain is only invoked on Windows.  It detects when btcd is running
+// winServiceMain is only invoked on Windows.  It detects when pearld is running
 // as a service and reacts accordingly.
 var winServiceMain func() (bool, error)
 
-// btcdMain is the real main function for btcd.  It is necessary to work around
+// pearldMain is the real main function for pearld.  It is necessary to work around
 // the fact that deferred functions do not run when os.Exit() is called.  The
 // optional serverChan parameter is mainly used by the service code to be
 // notified with the server once it is setup so it can gracefully stop it when
 // requested from the service control manager.
-func btcdMain(serverChan chan<- *server) error {
+func pearldMain(serverChan chan<- *server) error {
 	// Load configuration and parse command line.  This function also
 	// initializes logging and configures it accordingly.
 	tcfg, _, err := loadConfig()
@@ -60,20 +60,20 @@ func btcdMain(serverChan chan<- *server) error {
 	// triggered either from an OS signal such as SIGINT (Ctrl+C) or from
 	// another subsystem such as the RPC server.
 	interrupt := interruptListener()
-	defer btcdLog.Info("Shutdown complete")
+	defer prldLog.Info("Shutdown complete")
 
 	// Show version at startup.
-	btcdLog.Infof("Version %s", version())
+	prldLog.Infof("Version %s", version())
 
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
 		go func() {
 			listenAddr := net.JoinHostPort("", cfg.Profile)
-			btcdLog.Infof("Profile server listening on %s", listenAddr)
+			prldLog.Infof("Profile server listening on %s", listenAddr)
 			profileRedirect := http.RedirectHandler("/debug/pprof",
 				http.StatusSeeOther)
 			http.Handle("/", profileRedirect)
-			btcdLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
+			prldLog.Errorf("%v", http.ListenAndServe(listenAddr, nil))
 		}()
 	}
 
@@ -81,7 +81,7 @@ func btcdMain(serverChan chan<- *server) error {
 	if cfg.CPUProfile != "" {
 		f, err := os.Create(cfg.CPUProfile)
 		if err != nil {
-			btcdLog.Errorf("Unable to create cpu profile: %v", err)
+			prldLog.Errorf("Unable to create cpu profile: %v", err)
 			return err
 		}
 		pprof.StartCPUProfile(f)
@@ -93,7 +93,7 @@ func btcdMain(serverChan chan<- *server) error {
 	if cfg.MemoryProfile != "" {
 		f, err := os.Create(cfg.MemoryProfile)
 		if err != nil {
-			btcdLog.Errorf("Unable to create memory profile: %v", err)
+			prldLog.Errorf("Unable to create memory profile: %v", err)
 			return err
 		}
 		defer f.Close()
@@ -105,18 +105,12 @@ func btcdMain(serverChan chan<- *server) error {
 	if cfg.TraceProfile != "" {
 		f, err := os.Create(cfg.TraceProfile)
 		if err != nil {
-			btcdLog.Errorf("Unable to create execution trace: %v", err)
+			prldLog.Errorf("Unable to create execution trace: %v", err)
 			return err
 		}
 		trace.Start(f)
 		defer f.Close()
 		defer trace.Stop()
-	}
-
-	// Perform upgrades to btcd as new versions require it.
-	if err := doUpgrades(); err != nil {
-		btcdLog.Errorf("%v", err)
-		return err
 	}
 
 	// Return now if an interrupt signal was triggered.
@@ -127,12 +121,12 @@ func btcdMain(serverChan chan<- *server) error {
 	// Load the block database.
 	db, err := loadBlockDB()
 	if err != nil {
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	defer func() {
 		// Ensure the database is sync'd and closed on shutdown.
-		btcdLog.Infof("Gracefully shutting down the database...")
+		prldLog.Infof("Gracefully shutting down the database...")
 		db.Close()
 	}()
 
@@ -147,7 +141,7 @@ func btcdMain(serverChan chan<- *server) error {
 	// drops the address index since it relies on it.
 	if cfg.DropAddrIndex {
 		if err := indexers.DropAddrIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
+			prldLog.Errorf("%v", err)
 			return err
 		}
 
@@ -155,7 +149,7 @@ func btcdMain(serverChan chan<- *server) error {
 	}
 	if cfg.DropTxIndex {
 		if err := indexers.DropTxIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
+			prldLog.Errorf("%v", err)
 			return err
 		}
 
@@ -163,7 +157,7 @@ func btcdMain(serverChan chan<- *server) error {
 	}
 	if cfg.DropCfIndex {
 		if err := indexers.DropCfIndex(db, interrupt); err != nil {
-			btcdLog.Errorf("%v", err)
+			prldLog.Errorf("%v", err)
 			return err
 		}
 
@@ -178,28 +172,28 @@ func btcdMain(serverChan chan<- *server) error {
 		return err
 	})
 	if err != nil {
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	if beenPruned && cfg.Prune == 0 {
 		err = fmt.Errorf("--prune cannot be disabled as the node has been "+
 			"previously pruned. You must delete the files in the datadir: \"%s\" "+
 			"and sync from the beginning to disable pruning", cfg.DataDir)
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	if beenPruned && cfg.TxIndex {
 		err = fmt.Errorf("--txindex cannot be enabled as the node has been "+
 			"previously pruned. You must delete the files in the datadir: \"%s\" "+
 			"and sync from the beginning to enable the desired index", cfg.DataDir)
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	if beenPruned && cfg.AddrIndex {
 		err = fmt.Errorf("--addrindex cannot be enabled as the node has been "+
 			"previously pruned. You must delete the files in the datadir: \"%s\" "+
 			"and sync from the beginning to enable the desired index", cfg.DataDir)
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	// If we've previously been pruned and the cfindex isn't present, it means that the
@@ -211,7 +205,7 @@ func btcdMain(serverChan chan<- *server) error {
 			"and sync from the beginning to enable the desired index. You may "+
 			"use the --nocfilters flag to start the node up without the compact "+
 			"filters", cfg.DataDir)
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	// If the user wants to disable the cfindex and is pruned or has enabled pruning, force
@@ -226,7 +220,7 @@ func btcdMain(serverChan chan<- *server) error {
 			"index completely with the --dropcfindex flag and restart the node. " +
 			"To keep the compact filters, restart the node without the --nocfilters " +
 			"flag")
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 
@@ -241,14 +235,14 @@ func btcdMain(serverChan chan<- *server) error {
 		err = fmt.Errorf("--prune flag may not be given when the address index " +
 			"has been initialized. Please drop the address index with the " +
 			"--dropaddrindex flag before enabling pruning")
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 	if cfg.Prune != 0 && indexers.TxIndexInitialized(db) {
 		err = fmt.Errorf("--prune flag may not be given when the transaction index " +
 			"has been initialized. Please drop the transaction index with the " +
 			"--droptxindex flag before enabling pruning")
-		btcdLog.Errorf("%v", err)
+		prldLog.Errorf("%v", err)
 		return err
 	}
 
@@ -267,12 +261,12 @@ func btcdMain(serverChan chan<- *server) error {
 		cfg.AgentWhitelist, db, activeNetParams.Params, interrupt)
 	if err != nil {
 		// TODO: this logging could do with some beautifying.
-		btcdLog.Errorf("Unable to start server on %v: %v",
+		prldLog.Errorf("Unable to start server on %v: %v",
 			cfg.Listeners, err)
 		return err
 	}
 	defer func() {
-		btcdLog.Infof("Gracefully shutting down the server...")
+		prldLog.Infof("Gracefully shutting down the server...")
 		server.Stop()
 		server.WaitForShutdown()
 		srvrLog.Infof("Server shutdown complete")
@@ -300,7 +294,7 @@ func removeRegressionDB(dbPath string) error {
 	// Remove the old regression test database if it already exists.
 	fi, err := os.Stat(dbPath)
 	if err == nil {
-		btcdLog.Infof("Removing regression test database from '%s'", dbPath)
+		prldLog.Infof("Removing regression test database from '%s'", dbPath)
 		if fi.IsDir() {
 			err := os.RemoveAll(dbPath)
 			if err != nil {
@@ -352,7 +346,7 @@ func warnMultipleDBs() {
 	// Warn if there are extra databases.
 	if len(duplicateDbPaths) > 0 {
 		selectedDbPath := blockDbPath(cfg.DbType)
-		btcdLog.Warnf("WARNING: There are multiple block chain databases "+
+		prldLog.Warnf("WARNING: There are multiple block chain databases "+
 			"using different database types.\nYou probably don't "+
 			"want to waste disk space by having more than one.\n"+
 			"Your current database is located at [%v].\nThe "+
@@ -371,7 +365,7 @@ func loadBlockDB() (database.DB, error) {
 	// handle it uniquely.  We also don't want to worry about the multiple
 	// database type warnings when running with the memory database.
 	if cfg.DbType == "memdb" {
-		btcdLog.Infof("Creating block database in memory.")
+		prldLog.Infof("Creating block database in memory.")
 		db, err := database.Create(cfg.DbType)
 		if err != nil {
 			return nil, err
@@ -388,7 +382,7 @@ func loadBlockDB() (database.DB, error) {
 	// each run, so remove it now if it already exists.
 	removeRegressionDB(dbPath)
 
-	btcdLog.Infof("Loading block database from '%s'", dbPath)
+	prldLog.Infof("Loading block database from '%s'", dbPath)
 	db, err := database.Open(cfg.DbType, dbPath, activeNetParams.Net)
 	if err != nil {
 		// Return the error if it's not because the database doesn't
@@ -410,7 +404,7 @@ func loadBlockDB() (database.DB, error) {
 		}
 	}
 
-	btcdLog.Info("Block database loaded")
+	prldLog.Info("Block database loaded")
 	return db, nil
 }
 
@@ -465,7 +459,7 @@ func main() {
 	}
 
 	// Work around defer not working after os.Exit()
-	if err := btcdMain(nil); err != nil {
+	if err := pearldMain(nil); err != nil {
 		os.Exit(1)
 	}
 }

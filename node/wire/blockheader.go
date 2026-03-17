@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,15 +8,15 @@ import (
 	"io"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // MaxBlockHeaderPayload is the maximum number of bytes a block header can be.
-// Version 4 bytes + Timestamp 4 bytes + Bits 4 bytes + Nonce 4 bytes +
-// PrevBlock and MerkleRoot hashes.
-const MaxBlockHeaderPayload = 16 + (chainhash.HashSize * 2)
+// Version 4 bytes + Timestamp 4 bytes + Bits 4 bytes +
+// PrevBlock, MerkleRoot, and ProofCommitment hashes
+const MaxBlockHeaderPayload = 12 + (chainhash.HashSize * 3)
 
-// BlockHeader defines information about a block and is used in the bitcoin
+// BlockHeader defines information about a block and is used in the
 // block (MsgBlock) and headers (MsgHeaders) messages.
 type BlockHeader struct {
 	// Version of the block.  This is not the same as the protocol version.
@@ -35,13 +35,10 @@ type BlockHeader struct {
 	// Difficulty target for the block.
 	Bits uint32
 
-	// Nonce used to generate the block.
-	Nonce uint32
+	// ProofCommitment is a commitment to the deterministic part of the certificate.
+	// Links the header to its proof and commits the proof as part of the header chain.
+	ProofCommitment chainhash.Hash
 }
-
-// blockHeaderLen is a constant that represents the number of bytes for a block
-// header.
-const blockHeaderLen = 80
 
 // BlockHash computes the block identifier hash for the given block header.
 func (h *BlockHeader) BlockHash() chainhash.Hash {
@@ -50,19 +47,25 @@ func (h *BlockHeader) BlockHash() chainhash.Hash {
 	})
 }
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// SerializeSize returns the number of bytes it would take to serialize the
+// block header.
+func (h *BlockHeader) SerializeSize() int {
+	return MaxBlockHeaderPayload
+}
+
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // This is part of the Message interface implementation.
 // See Deserialize for decoding block headers stored to disk, such as in a
 // database, as opposed to decoding block headers from the wire.
-func (h *BlockHeader) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
+func (h *BlockHeader) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	return readBlockHeader(r, pver, h)
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
 // See Serialize for encoding block headers to be stored to disk, such as in a
 // database, as opposed to encoding block headers for the wire.
-func (h *BlockHeader) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
+func (h *BlockHeader) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	return writeBlockHeader(w, pver, h)
 }
 
@@ -87,10 +90,10 @@ func (h *BlockHeader) Serialize(w io.Writer) error {
 }
 
 // NewBlockHeader returns a new BlockHeader using the provided version, previous
-// block hash, merkle root hash, difficulty bits, and nonce used to generate the
-// block with defaults for the remaining fields.
+// block hash, merkle root hash, and difficulty bits with defaults for the
+// remaining fields.
 func NewBlockHeader(version int32, prevHash, merkleRootHash *chainhash.Hash,
-	bits uint32, nonce uint32) *BlockHeader {
+	bits uint32) *BlockHeader {
 
 	// Limit the timestamp to one second precision since the protocol
 	// doesn't support better.
@@ -100,11 +103,10 @@ func NewBlockHeader(version int32, prevHash, merkleRootHash *chainhash.Hash,
 		MerkleRoot: *merkleRootHash,
 		Timestamp:  time.Unix(time.Now().Unix(), 0),
 		Bits:       bits,
-		Nonce:      nonce,
 	}
 }
 
-// readBlockHeader reads a bitcoin block header from r.  See Deserialize for
+// readBlockHeader reads a block header from r.  See Deserialize for
 // decoding block headers stored to disk, such as in a database, as opposed to
 // decoding from the wire.
 //
@@ -116,7 +118,7 @@ func readBlockHeader(r io.Reader, pver uint32, bh *BlockHeader) error {
 	return err
 }
 
-// readBlockHeaderBuf reads a bitcoin block header from r.  See Deserialize for
+// readBlockHeaderBuf reads a block header from r.  See Deserialize for
 // decoding block headers stored to disk, such as in a database, as opposed to
 // decoding from the wire.
 //
@@ -151,15 +153,14 @@ func readBlockHeaderBuf(r io.Reader, pver uint32, bh *BlockHeader,
 	}
 	bh.Bits = littleEndian.Uint32(buf[:4])
 
-	if _, err := io.ReadFull(r, buf[:4]); err != nil {
+	if _, err := io.ReadFull(r, bh.ProofCommitment[:]); err != nil {
 		return err
 	}
-	bh.Nonce = littleEndian.Uint32(buf[:4])
 
 	return nil
 }
 
-// writeBlockHeader writes a bitcoin block header to w.  See Serialize for
+// writeBlockHeader writes a block header to w.  See Serialize for
 // encoding block headers to be stored to disk, such as in a database, as
 // opposed to encoding for the wire.
 //
@@ -171,7 +172,7 @@ func writeBlockHeader(w io.Writer, pver uint32, bh *BlockHeader) error {
 	return err
 }
 
-// writeBlockHeaderBuf writes a bitcoin block header to w.  See Serialize for
+// writeBlockHeaderBuf writes a block header to w.  See Serialize for
 // encoding block headers to be stored to disk, such as in a database, as
 // opposed to encoding for the wire.
 //
@@ -206,8 +207,7 @@ func writeBlockHeaderBuf(w io.Writer, pver uint32, bh *BlockHeader,
 		return err
 	}
 
-	littleEndian.PutUint32(buf[:4], bh.Nonce)
-	if _, err := w.Write(buf[:4]); err != nil {
+	if _, err := w.Write(bh.ProofCommitment[:]); err != nil {
 		return err
 	}
 

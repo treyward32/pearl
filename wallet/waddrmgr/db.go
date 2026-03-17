@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 const (
@@ -72,9 +72,7 @@ type addressType uint8
 const (
 	adtChain         addressType = 0
 	adtImport        addressType = 1 // not iota as they need to be stable for db
-	adtScript        addressType = 2
-	adtWitnessScript addressType = 3
-	adtTaprootScript addressType = 4
+	adtTaprootScript addressType = 2
 )
 
 // accountType represents a type of address stored in the database.
@@ -137,8 +135,9 @@ type dbAddressRow struct {
 // address in the database.
 type dbChainAddressRow struct {
 	dbAddressRow
-	branch uint32
-	index  uint32
+	branch                 uint32
+	index                  uint32
+	encryptedTapscriptRoot []byte // nil if no tapscript commitment
 }
 
 // dbImportedAddressRow houses additional information stored about an imported
@@ -147,14 +146,6 @@ type dbImportedAddressRow struct {
 	dbAddressRow
 	encryptedPubKey  []byte
 	encryptedPrivKey []byte
-}
-
-// dbImportedAddressRow houses additional information stored about a script
-// address in the database.
-type dbScriptAddressRow struct {
-	dbAddressRow
-	encryptedHash   []byte
-	encryptedScript []byte
 }
 
 // dbWitnessScriptAddressRow houses additional information stored about a
@@ -1215,7 +1206,7 @@ func putAddrAccountIndex(ns walletdb.ReadWriteBucket, scope *KeyScope,
 	// Write account keyed by address hash
 	err = bucket.Put(addrHash, uint32ToBytes(account))
 	if err != nil {
-		return nil
+		return err
 	}
 
 	// TODO(yy): We already saved the addrHash and account above, so this
@@ -1388,10 +1379,11 @@ func serializeAddressRow(row *dbAddressRow) []byte {
 // row as a chained address.
 func deserializeChainedAddress(row *dbAddressRow) (*dbChainAddressRow, error) {
 	// The serialized chain address raw data format is:
-	//   <branch><index>
+	//   <branch><index>[<encryptedTapscriptRoot>]
 	//
-	// 4 bytes branch + 4 bytes address index
-	if len(row.rawData) != 8 {
+	// Legacy format: 4 bytes branch + 4 bytes address index = 8 bytes
+	// New format: 8 bytes + encrypted tapscript root (variable, typically ~48 bytes)
+	if len(row.rawData) < 8 {
 		str := "malformed serialized chained address"
 		return nil, managerError(ErrDatabase, str, nil)
 	}
@@ -1403,19 +1395,29 @@ func deserializeChainedAddress(row *dbAddressRow) (*dbChainAddressRow, error) {
 	retRow.branch = binary.LittleEndian.Uint32(row.rawData[0:4])
 	retRow.index = binary.LittleEndian.Uint32(row.rawData[4:8])
 
+	// Check for tapscript root (new format)
+	if len(row.rawData) > 8 {
+		retRow.encryptedTapscriptRoot = row.rawData[8:]
+	}
+
 	return &retRow, nil
 }
 
 // serializeChainedAddress returns the serialization of the raw data field for
 // a chained address.
-func serializeChainedAddress(branch, index uint32) []byte {
+func serializeChainedAddress(branch, index uint32, encryptedTapscriptRoot []byte) []byte {
 	// The serialized chain address raw data format is:
-	//   <branch><index>
+	//   <branch><index>[<encryptedTapscriptRoot>]
 	//
-	// 4 bytes branch + 4 bytes address index
-	rawData := make([]byte, 8)
+	// 4 bytes branch + 4 bytes address index + optional encrypted tapscript root
+	// Legacy format (no tapscript): 8 bytes
+	// New format (with tapscript): 8 + len(encryptedTapscriptRoot) bytes
+	rawData := make([]byte, 8+len(encryptedTapscriptRoot))
 	binary.LittleEndian.PutUint32(rawData[0:4], branch)
 	binary.LittleEndian.PutUint32(rawData[4:8], index)
+	if len(encryptedTapscriptRoot) > 0 {
+		copy(rawData[8:], encryptedTapscriptRoot)
+	}
 	return rawData
 }
 
@@ -1468,59 +1470,6 @@ func serializeImportedAddress(encryptedPubKey, encryptedPrivKey []byte) []byte {
 	binary.LittleEndian.PutUint32(rawData[offset:offset+4], privLen)
 	offset += 4
 	copy(rawData[offset:offset+privLen], encryptedPrivKey)
-	return rawData
-}
-
-// deserializeScriptAddress deserializes the raw data from the passed address
-// row as a script address.
-func deserializeScriptAddress(row *dbAddressRow) (*dbScriptAddressRow, error) {
-	// The serialized script address raw data format is:
-	//   <encscripthashlen><encscripthash><encscriptlen><encscript>
-	//
-	// 4 bytes encrypted script hash len + encrypted script hash + 4 bytes
-	// encrypted script len + encrypted script
-
-	// Given the above, the length of the entry must be at a minimum
-	// the constant value sizes.
-	if len(row.rawData) < 8 {
-		str := "malformed serialized script address"
-		return nil, managerError(ErrDatabase, str, nil)
-	}
-
-	retRow := dbScriptAddressRow{
-		dbAddressRow: *row,
-	}
-
-	hashLen := binary.LittleEndian.Uint32(row.rawData[0:4])
-	retRow.encryptedHash = make([]byte, hashLen)
-	copy(retRow.encryptedHash, row.rawData[4:4+hashLen])
-	offset := 4 + hashLen
-	scriptLen := binary.LittleEndian.Uint32(row.rawData[offset : offset+4])
-	offset += 4
-	retRow.encryptedScript = make([]byte, scriptLen)
-	copy(retRow.encryptedScript, row.rawData[offset:offset+scriptLen])
-
-	return &retRow, nil
-}
-
-// serializeScriptAddress returns the serialization of the raw data field for
-// a script address.
-func serializeScriptAddress(encryptedHash, encryptedScript []byte) []byte {
-	// The serialized script address raw data format is:
-	//   <encscripthashlen><encscripthash><encscriptlen><encscript>
-	//
-	// 4 bytes encrypted script hash len + encrypted script hash + 4 bytes
-	// encrypted script len + encrypted script
-
-	hashLen := uint32(len(encryptedHash))
-	scriptLen := uint32(len(encryptedScript))
-	rawData := make([]byte, 8+hashLen+scriptLen)
-	binary.LittleEndian.PutUint32(rawData[0:4], hashLen)
-	copy(rawData[4:4+hashLen], encryptedHash)
-	offset := 4 + hashLen
-	binary.LittleEndian.PutUint32(rawData[offset:offset+4], scriptLen)
-	offset += 4
-	copy(rawData[offset:offset+scriptLen], encryptedScript)
 	return rawData
 }
 
@@ -1623,10 +1572,6 @@ func fetchAddressByHash(ns walletdb.ReadBucket, scope *KeyScope,
 		return deserializeChainedAddress(row)
 	case adtImport:
 		return deserializeImportedAddress(row)
-	case adtScript:
-		return deserializeScriptAddress(row)
-	case adtWitnessScript:
-		return deserializeWitnessScriptAddress(row)
 	case adtTaprootScript:
 		// A taproot script address is just a normal script address that
 		// TLV encodes more stuff in the raw script part. But in the
@@ -1721,7 +1666,7 @@ func putAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
 // database.
 func putChainedAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
 	addressID []byte, account uint32, status syncStatus, branch,
-	index uint32, addrType addressType) error {
+	index uint32, addrType addressType, encryptedTapscriptRoot []byte) error {
 
 	scopedBucket, err := fetchWriteScopeBucket(ns, scope)
 	if err != nil {
@@ -1733,7 +1678,7 @@ func putChainedAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
 		account:    account,
 		addTime:    uint64(time.Now().Unix()),
 		syncStatus: status,
-		rawData:    serializeChainedAddress(branch, index),
+		rawData:    serializeChainedAddress(branch, index, encryptedTapscriptRoot),
 	}
 	if err := putAddress(ns, scope, addressID, &addrRow); err != nil {
 		return err
@@ -1828,48 +1773,18 @@ func putImportedAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
 	return putAddress(ns, scope, addressID, &addrRow)
 }
 
-// putScriptAddress stores the provided script address information to the
-// database.
-func putScriptAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
-	addressID []byte, account uint32, status syncStatus,
-	encryptedHash, encryptedScript []byte) error {
-
-	rawData := serializeScriptAddress(encryptedHash, encryptedScript)
-	addrRow := dbAddressRow{
-		addrType:   adtScript,
-		account:    account,
-		addTime:    uint64(time.Now().Unix()),
-		syncStatus: status,
-		rawData:    rawData,
-	}
-	if err := putAddress(ns, scope, addressID, &addrRow); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // putWitnessScriptAddress stores the provided witness script address
 // information to the database.
 func putWitnessScriptAddress(ns walletdb.ReadWriteBucket, scope *KeyScope,
 	addressID []byte, account uint32, status syncStatus,
-	witnessVersion uint8, isSecretScript bool, encryptedHash,
-	encryptedScript []byte) error {
+	isSecretScript bool, encryptedHash, encryptedScript []byte) error {
 
 	rawData := serializeWitnessScriptAddress(
-		witnessVersion, isSecretScript, encryptedHash, encryptedScript,
+		witnessVersionV1, isSecretScript, encryptedHash, encryptedScript,
 	)
 
-	addrType := adtWitnessScript
-	if witnessVersion == witnessVersionV1 {
-		// A taproot script stores a TLV encoded blob of data in the
-		// raw data field. So we only really need to use a different
-		// storage type since all other fields stay the same.
-		addrType = adtTaprootScript
-	}
-
 	addrRow := dbAddressRow{
-		addrType:   addrType,
+		addrType:   adtTaprootScript,
 		account:    account,
 		addTime:    uint64(time.Now().Unix()),
 		syncStatus: status,
@@ -2104,6 +2019,11 @@ func deletePrivateKeys(ns walletdb.ReadWriteBucket) error {
 			}
 
 			switch row.addrType {
+			case adtChain:
+				// Chain addresses derive their private keys from the account
+				// private key, so there's no separate private key material
+				// to delete. Nothing to do here.
+
 			case adtImport:
 				irow, err := deserializeImportedAddress(row)
 				if err != nil {
@@ -2120,23 +2040,7 @@ func deletePrivateKeys(ns walletdb.ReadWriteBucket) error {
 					return managerError(ErrDatabase, str, err)
 				}
 
-			case adtScript:
-				srow, err := deserializeScriptAddress(row)
-				if err != nil {
-					return err
-				}
-
-				// Reserialize the script address without the script
-				// and store it.
-				row.rawData = serializeScriptAddress(srow.encryptedHash,
-					nil)
-				err = bucket.Put(k, serializeAddressRow(row))
-				if err != nil {
-					str := "failed to delete imported script"
-					return managerError(ErrDatabase, str, err)
-				}
-
-			case adtWitnessScript:
+			case adtTaprootScript:
 				srow, err := deserializeWitnessScriptAddress(row)
 				if err != nil {
 					return err
@@ -2159,6 +2063,9 @@ func deletePrivateKeys(ns walletdb.ReadWriteBucket) error {
 					str := "failed to delete imported script"
 					return managerError(ErrDatabase, str, err)
 				}
+
+			default:
+				return fmt.Errorf("unsupported address type: %d", row.addrType)
 			}
 
 			return nil

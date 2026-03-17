@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,17 +11,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcwallet/wallet"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
 	"github.com/jessevdk/go-flags"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 const defaultNet = "mainnet"
 
 var (
-	datadir = btcutil.AppDataDir("btcwallet", false)
+	datadir = btcutil.AppDataDir("oyster", false)
 )
 
 // Flags.
@@ -74,7 +74,7 @@ func mainInt() int {
 	}
 
 	for !opts.Force {
-		fmt.Print("Drop all btcwallet transaction history? [y/N] ")
+		fmt.Print("Drop all Oyster transaction history? [y/N] ")
 
 		scanner := bufio.NewScanner(bufio.NewReader(os.Stdin))
 		if !scanner.Scan() {
@@ -98,14 +98,14 @@ func mainInt() int {
 		fmt.Println("Enter yes or no.")
 	}
 
-	db, err := walletdb.Open("bdb", opts.DbPath, true, opts.Timeout)
+	db, err := walletdb.Open("bdb", opts.DbPath, true, opts.Timeout, false)
 	if err != nil {
 		fmt.Println("Failed to open database:", err)
 		return 1
 	}
 	defer db.Close()
 
-	fmt.Println("Dropping btcwallet transaction history")
+	fmt.Println("Dropping Oyster transaction history")
 
 	err = wallet.DropTransactionHistory(db, !opts.DropLabels)
 	if err != nil {

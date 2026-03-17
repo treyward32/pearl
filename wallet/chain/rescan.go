@@ -1,6 +1,6 @@
 package chain
 
-import "github.com/lightninglabs/neutrino"
+import neutrino "github.com/pearl-research-labs/pearl/spv"
 
 var _ rescanner = (*neutrino.Rescan)(nil)
 

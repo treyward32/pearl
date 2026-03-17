@@ -12,19 +12,20 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/blockntfns"
-	"github.com/lightninglabs/neutrino/chainsync"
-	"github.com/lightninglabs/neutrino/headerfs"
-	"github.com/lightninglabs/neutrino/headerlist"
-	"github.com/lightninglabs/neutrino/query"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/blockntfns"
+	"github.com/pearl-research-labs/pearl/spv/chainsync"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/spv/headerlist"
+	"github.com/pearl-research-labs/pearl/spv/query"
 )
 
 const (
@@ -53,14 +54,14 @@ type newPeerMsg struct {
 	peer *ServerPeer
 }
 
-// invMsg packages a bitcoin inv message and the peer it came from together
+// invMsg packages an inv message and the peer it came from together
 // so the block handler has access to that information.
 type invMsg struct {
 	inv  *wire.MsgInv
 	peer *ServerPeer
 }
 
-// headersMsg packages a bitcoin headers message and the peer it came from
+// headersMsg packages a headers message and the peer it came from
 // together so the block handler has access to that information.
 type headersMsg struct {
 	headers *wire.MsgHeaders
@@ -84,13 +85,13 @@ type blockManagerCfg struct {
 
 	// RegFilterHeaders is the store where filter headers for the regular
 	// compact filters are persistently stored.
-	RegFilterHeaders *headerfs.FilterHeaderStore
+	RegFilterHeaders headerfs.FilterHeaderStore
 
 	// TimeSource is used to access a time estimate based on the clocks of
 	// the connected peers.
 	TimeSource blockchain.MedianTimeSource
 
-	// QueryDispatcher is used to make queries to connected Bitcoin peers.
+	// QueryDispatcher is used to make queries to connected peers.
 	QueryDispatcher query.Dispatcher
 
 	// BanPeer bans and disconnects the given peer.
@@ -202,19 +203,11 @@ type blockManager struct { // nolint:maligned
 	startHeader    *headerlist.Node
 	nextCheckpoint *chaincfg.Checkpoint
 	lastRequested  chainhash.Hash
-
-	minRetargetTimespan int64 // target timespan / adjustment factor
-	maxRetargetTimespan int64 // target timespan * adjustment factor
-	blocksPerRetarget   int32 // target timespan / target time per block
 }
 
-// newBlockManager returns a new bitcoin block manager.  Use Start to begin
+// newBlockManager returns a new block manager.  Use Start to begin
 // processing asynchronous block and inv updates.
 func newBlockManager(cfg *blockManagerCfg) (*blockManager, error) {
-	targetTimespan := int64(cfg.ChainParams.TargetTimespan / time.Second)
-	targetTimePerBlock := int64(cfg.ChainParams.TargetTimePerBlock / time.Second)
-	adjustmentFactor := cfg.ChainParams.RetargetAdjustmentFactor
-
 	bm := blockManager{
 		cfg:           cfg,
 		peerChan:      make(chan interface{}, MaxPeers*3),
@@ -231,10 +224,7 @@ func newBlockManager(cfg *blockManagerCfg) (*blockManager, error) {
 		reorgList: headerlist.NewBoundedMemoryChain(
 			numMaxMemHeaders,
 		),
-		quit:                make(chan struct{}),
-		blocksPerRetarget:   int32(targetTimespan / targetTimePerBlock),
-		minRetargetTimespan: targetTimespan / adjustmentFactor,
-		maxRetargetTimespan: targetTimespan * adjustmentFactor,
+		quit: make(chan struct{}),
 	}
 
 	// Next we'll create the two signals that goroutines will use to wait
@@ -702,7 +692,7 @@ waitForHeaders:
 // network, if it can, and resolves any conflicts between them. It then writes
 // any verified headers to the store.
 func (b *blockManager) getUncheckpointedCFHeaders(
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) error {
+	store headerfs.FilterHeaderStore, fType wire.FilterType) error {
 
 	// Get the filter header store's chain tip.
 	filterTip, filtHeight, err := store.ChainTip()
@@ -928,7 +918,7 @@ func (c *checkpointedCFHeadersQuery) handleResponse(req, resp wire.Message,
 // checkpoints we got from the network. It assumes that the filter header store
 // matches the checkpoints up to the tip of the store.
 func (b *blockManager) getCheckpointedCFHeaders(checkpoints []*chainhash.Hash,
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) {
+	store headerfs.FilterHeaderStore, fType wire.FilterType) {
 
 	// We keep going until we've caught up the filter header store with the
 	// latest known checkpoint.
@@ -1174,7 +1164,7 @@ func (b *blockManager) getCheckpointedCFHeaders(checkpoints []*chainhash.Hash,
 // filter header field in the next message range before writing to disk, and
 // the current height after writing the headers.
 func (b *blockManager) writeCFHeadersMsg(msg *wire.MsgCFHeaders,
-	store *headerfs.FilterHeaderStore) (*chainhash.Hash, uint32, error) {
+	store headerfs.FilterHeaderStore) (*chainhash.Hash, uint32, error) {
 
 	// Check that the PrevFilterHeader is the same as the last stored so we
 	// can prevent misalignment.
@@ -1364,14 +1354,14 @@ func verifyCheckpoint(prevCheckpoint, nextCheckpoint *chainhash.Hash,
 // information.
 func (b *blockManager) resolveConflict(
 	checkpoints map[string][]*chainhash.Hash,
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) (
+	store headerfs.FilterHeaderStore, fType wire.FilterType) (
 	[]*chainhash.Hash, error) {
 
 	// First check the served checkpoints against the hardcoded ones.
 	for peer, cp := range checkpoints {
 		for i, header := range cp {
 			height := uint32((i + 1) * wire.CFCheckptInterval)
-			err := chainsync.ControlCFHeader(
+			err := chainsync.ValidateCFHeader(
 				b.cfg.ChainParams, fType, height, header,
 			)
 			if err == chainsync.ErrCheckpointMismatch {
@@ -1634,7 +1624,7 @@ func resolveFilterMismatchFromBlock(block *wire.MsgBlock,
 	badPeers := make(map[string]struct{})
 
 	log.Infof("Attempting to pinpoint mismatch in cfheaders for block=%v",
-		block.Header.BlockHash())
+		block.BlockHeader().BlockHash())
 
 	// Based on the type of filter, our verification algorithm will differ.
 	// Only regular filters are currently defined.
@@ -1913,7 +1903,7 @@ func (b *blockManager) getCheckpts(lastHash *chainhash.Hash,
 // existing store up to the tip of the store. If all of the peers match but
 // the store doesn't, the height at which the mismatch occurs is returned.
 func checkCFCheckptSanity(cp map[string][]*chainhash.Hash,
-	headerStore *headerfs.FilterHeaderStore) (int, error) {
+	headerStore headerfs.FilterHeaderStore) (int, error) {
 
 	// Get the known best header to compare against checkpoints.
 	_, storeTip, err := headerStore.ChainTip()
@@ -2303,9 +2293,10 @@ func (b *blockManager) handleInvMsg(imsg *invMsg) {
 		}
 	}
 
-	// If this is the sync peer or we're current, get the headers for the
-	// announced blocks and update the last announced block.
-	if lastBlock != -1 && (imsg.peer == b.SyncPeer() || b.BlockHeadersSynced()) {
+	// During IBD progress is driven by handleHeadersMsg; skip inv-driven
+	// getheaders to avoid duplicate requests serializing behind real
+	// progress on the sync peer's uplink.
+	if lastBlock != -1 && b.BlockHeadersSynced() {
 		lastEl := b.headerList.Back()
 		var lastHash chainhash.Hash
 		if lastEl != nil {
@@ -2375,10 +2366,57 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 	// Explicitly check that each header in msg.Headers builds off of the
 	// previous one. This is a quick sanity check to avoid doing the more
 	// expensive checks below if we know the headers are invalid.
-	if !areHeadersConnected(msg.Headers) {
+	if !areHeadersConnected(extractBlockHeaders(msg.Headers)) {
 		log.Warnf("Headers received from peer don't connect")
 		hmsg.peer.Disconnect()
 		return
+	}
+
+	// Drop stale speculative responses whose producing batch was
+	// soft-skipped locally, so our tip never advanced to pipelinedLocator.
+	if prevEl := b.headerList.Back(); prevEl != nil {
+		prevTipHash := prevEl.Header.BlockHash()
+		firstPrev := msg.Headers[0].BlockHeader.PrevBlock
+		if hmsg.peer == b.SyncPeer() &&
+			!prevTipHash.IsEqual(&firstPrev) &&
+			!hmsg.peer.pipelinedLocator.IsEqual(&zeroHash) &&
+			firstPrev.IsEqual(&hmsg.peer.pipelinedLocator) {
+
+			hmsg.peer.pipelinedLocator = zeroHash
+			return
+		}
+	}
+
+	// IBD pipelining: if the batch extends our tip and stays below the
+	// next checkpoint, prefetch batch N+1 while we verify batch N.
+	sentSpeculative := false
+	if prevEl := b.headerList.Back(); prevEl != nil && !b.BlockHeadersSynced() &&
+		hmsg.peer == b.SyncPeer() {
+
+		prevTipHash := prevEl.Header.BlockHash()
+		firstPrev := msg.Headers[0].BlockHeader.PrevBlock
+		batchTipHeight := prevEl.Height + int32(len(msg.Headers))
+		crossesCheckpoint := b.nextCheckpoint != nil &&
+			batchTipHeight >= b.nextCheckpoint.Height
+		if prevTipHash.IsEqual(&firstPrev) && !crossesCheckpoint {
+			specTip := msg.Headers[len(msg.Headers)-1].BlockHeader.BlockHash()
+			locator := blockchain.BlockLocator(
+				[]*chainhash.Hash{&specTip},
+			)
+			stopHash := zeroHash
+			if b.nextCheckpoint != nil {
+				stopHash = *b.nextCheckpoint.Hash
+			}
+			err := hmsg.peer.PushGetHeadersMsg(locator, &stopHash)
+			if err != nil {
+				log.Warnf("Failed to send speculative "+
+					"getheaders to peer %s: %s",
+					hmsg.peer.Addr(), err)
+			} else {
+				hmsg.peer.pipelinedLocator = specTip
+				sentSpeculative = true
+			}
+		}
 	}
 
 	// Process all of the received headers ensuring each one connects to
@@ -2388,7 +2426,9 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 		finalHash   *chainhash.Hash
 		finalHeight int32
 	)
-	for i, blockHeader := range msg.Headers {
+	for i, msgHeader := range msg.Headers {
+		blockHeader := &msgHeader.BlockHeader
+		cert := msgHeader.BlockCertificate()
 		blockHash := blockHeader.BlockHash()
 		finalHash = &blockHash
 
@@ -2412,7 +2452,7 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 			prevNodeHeight := prevNode.Height
 			prevNodeHeader := prevNode.Header
 			err := b.checkHeaderSanity(
-				blockHeader, false, prevNodeHeight,
+				blockHeader, cert, false, prevNodeHeight,
 				&prevNodeHeader,
 			)
 			if err != nil {
@@ -2523,7 +2563,8 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 				Height: int32(backHeight),
 			})
 			totalWork := big.NewInt(0)
-			for j, reorgHeader := range msg.Headers[i:] {
+			for j, reorgMsgHeader := range msg.Headers[i:] {
+				reorgHeader := &reorgMsgHeader.BlockHeader
 				// We have to get the parent's height and
 				// header to be able to contextually validate
 				// this header.
@@ -2538,11 +2579,13 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 					// We can find the parent in the
 					// Headers slice by getting the header
 					// at index i+j-1.
-					prevNodeHeader = msg.Headers[i+j-1]
+					prevNodeHeader = &msg.Headers[i+j-1].BlockHeader
 				}
 
+				reorgCert := msg.Headers[i+j].BlockCertificate()
+
 				err = b.checkHeaderSanity(
-					reorgHeader, true,
+					reorgHeader, reorgCert, true,
 					int32(prevNodeHeight), prevNodeHeader,
 				)
 				if err != nil {
@@ -2592,20 +2635,22 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 
 			log.Tracef("Total work from known chain: %v", knownWork)
 
-			// Compare the two work totals and reject the new chain
-			// if it doesn't have more work than the previously
-			// known chain. Disconnect if it's actually less than
-			// the known chain.
-			switch knownWork.Cmp(totalWork) {
-			case 1:
-				log.Warnf("Reorg attempt that has less work "+
-					"than known chain from peer %s -- "+
-					"disconnecting", hmsg.peer.Addr())
+			// Use the tip-selection policy to decide whether
+			// the proposed chain warrants a reorganization.
+			currentTipWork := blockchain.CalcWork(prevNode.Header.Bits)
+			proposedTipWork := blockchain.CalcWork(
+				msg.Headers[len(msg.Headers)-1].BlockHeader.Bits,
+			)
+			if !blockchain.ShouldChangeTip(knownWork, totalWork,
+				currentTipWork, proposedTipWork) {
+
+				log.Warnf("Reorg attempt that has "+
+					"less work than known "+
+					"chain from peer %s -- "+
+					"disconnecting",
+					hmsg.peer.Addr())
 				hmsg.peer.Disconnect()
-				fallthrough
-			case 0:
 				return
-			default:
 			}
 
 			// At this point, we have a valid reorg, so we roll
@@ -2616,6 +2661,7 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 			b.syncPeerMutex.Lock()
 			b.syncPeer = hmsg.peer
 			b.syncPeerMutex.Unlock()
+			hmsg.peer.pipelinedLocator = zeroHash
 			err = b.rollBackToHeight(backHeight)
 			if err != nil {
 				panic(fmt.Sprintf("Rollback failed: %s", err))
@@ -2704,8 +2750,10 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 	}
 
 	// If not current, request the next batch of headers starting from the
-	// latest known header and ending with the next checkpoint.
-	if b.cfg.ChainParams.Net == chaincfg.SimNetParams.Net || !b.BlockHeadersSynced() {
+	// latest known header and ending with the next checkpoint. Skip if
+	// we already prefetched above.
+	needTailFetch := !sentSpeculative
+	if (b.cfg.ChainParams.Net == chaincfg.SimNetParams.Net || !b.BlockHeadersSynced()) && needTailFetch {
 		locator := blockchain.BlockLocator([]*chainhash.Hash{finalHash})
 		nextHash := zeroHash
 		if b.nextCheckpoint != nil {
@@ -2719,6 +2767,12 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 		}
 	}
 
+	// Clear when not speculating so a stale value cannot swallow a
+	// future unconnectable batch.
+	if !sentSpeculative {
+		hmsg.peer.pipelinedLocator = zeroHash
+	}
+
 	// Since we have a new set of headers written to disk, we'll send out a
 	// new signal to notify any waiting sub-systems that they can now maybe
 	// proceed do to us extending the header chain.
@@ -2727,6 +2781,15 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 	b.headerTipHash = *finalHash
 	b.newHeadersMtx.Unlock()
 	b.newHeadersSignal.Broadcast()
+}
+
+// extractBlockHeaders converts a slice of MsgHeader to a slice of BlockHeader.
+func extractBlockHeaders(msgHeaders []wire.MsgHeader) []*wire.BlockHeader {
+	headers := make([]*wire.BlockHeader, len(msgHeaders))
+	for i := range msgHeaders {
+		headers[i] = &msgHeaders[i].BlockHeader
+	}
+	return headers
 }
 
 // areHeadersConnected returns true if the passed block headers are connected to
@@ -2758,11 +2821,11 @@ func areHeadersConnected(headers []*wire.BlockHeader) bool {
 }
 
 // checkHeaderSanity performs contextual and context-less checks on the passed
-// wire.BlockHeader. This function calls blockchain.CheckBlockHeaderContext for
+// wire.BlockHeader and wire.BlockCertificate. This function calls blockchain.CheckBlockHeaderContext for
 // the contextual check and blockchain.CheckBlockHeaderSanity for context-less
 // checks.
 func (b *blockManager) checkHeaderSanity(blockHeader *wire.BlockHeader,
-	reorgAttempt bool, prevNodeHeight int32,
+	cert wire.BlockCertificate, reorgAttempt bool, prevNodeHeight int32,
 	prevNodeHeader *wire.BlockHeader) error {
 
 	// Create the lightHeaderCtx for the blockHeader's parent.
@@ -2777,21 +2840,24 @@ func (b *blockManager) checkHeaderSanity(blockHeader *wire.BlockHeader,
 
 	// Create a lightChainCtx as well.
 	chainCtx := newLightChainCtx(
-		&b.cfg.ChainParams, b.blocksPerRetarget, b.minRetargetTimespan,
-		b.maxRetargetTimespan,
+		&b.cfg.ChainParams,
 	)
 
-	var emptyFlags blockchain.BehaviorFlags
+	var flags blockchain.BehaviorFlags
+	if b.cfg.ChainParams.Net == wire.SimNet {
+		flags |= blockchain.BFNoPoWCheck
+	}
+
 	err := blockchain.CheckBlockHeaderContext(
-		blockHeader, parentHeaderCtx, emptyFlags, chainCtx, true,
+		blockHeader, parentHeaderCtx, flags, chainCtx, true,
 	)
 	if err != nil {
 		return err
 	}
 
 	return blockchain.CheckBlockHeaderSanity(
-		blockHeader, b.cfg.ChainParams.PowLimit, b.cfg.TimeSource,
-		emptyFlags,
+		blockHeader, cert, b.cfg.ChainParams.PowLimit, b.cfg.TimeSource,
+		b.cfg.ChainParams.MaxTimeOffsetMinutes, flags,
 	)
 }
 
@@ -2871,22 +2937,15 @@ func (b *blockManager) NotificationsSinceHeight(
 // gives a neutrino node the ability to contextually validate headers it
 // receives.
 type lightChainCtx struct {
-	params              *chaincfg.Params
-	blocksPerRetarget   int32
-	minRetargetTimespan int64
-	maxRetargetTimespan int64
+	params *chaincfg.Params
 }
 
 // newLightChainCtx returns a new lightChainCtx instance from the passed
 // arguments.
-func newLightChainCtx(params *chaincfg.Params, blocksPerRetarget int32,
-	minRetargetTimespan, maxRetargetTimespan int64) *lightChainCtx {
+func newLightChainCtx(params *chaincfg.Params) *lightChainCtx {
 
 	return &lightChainCtx{
-		params:              params,
-		blocksPerRetarget:   blocksPerRetarget,
-		minRetargetTimespan: minRetargetTimespan,
-		maxRetargetTimespan: maxRetargetTimespan,
+		params: params,
 	}
 }
 
@@ -2895,29 +2954,6 @@ func newLightChainCtx(params *chaincfg.Params, blocksPerRetarget int32,
 // NOTE: Part of the blockchain.ChainCtx interface.
 func (l *lightChainCtx) ChainParams() *chaincfg.Params {
 	return l.params
-}
-
-// BlocksPerRetarget returns the number of blocks before retargeting occurs.
-//
-// NOTE: Part of the blockchain.ChainCtx interface.
-func (l *lightChainCtx) BlocksPerRetarget() int32 {
-	return l.blocksPerRetarget
-}
-
-// MinRetargetTimespan returns the minimum amount of time used in the
-// difficulty calculation.
-//
-// NOTE: Part of the blockchain.ChainCtx interface.
-func (l *lightChainCtx) MinRetargetTimespan() int64 {
-	return l.minRetargetTimespan
-}
-
-// MaxRetargetTimespan returns the maximum amount of time used in the
-// difficulty calculation.
-//
-// NOTE: Part of the blockchain.ChainCtx interface.
-func (l *lightChainCtx) MaxRetargetTimespan() int64 {
-	return l.maxRetargetTimespan
 }
 
 // VerifyCheckpoint returns false as the lightChainCtx does not need to validate
@@ -2933,13 +2969,14 @@ func (l *lightChainCtx) VerifyCheckpoint(int32, *chainhash.Hash) bool {
 // handleHeadersMsg function.
 //
 // NOTE: Part of the blockchain.ChainCtx interface.
-func (l *lightChainCtx) FindPreviousCheckpoint() (blockchain.HeaderCtx, error) {
+func (l *lightChainCtx) FindPreviousCheckpoint() (chaincfg.HeaderCtx, error) {
 	return nil, nil
 }
 
 // lightHeaderCtx is an implementation of the blockchain.HeaderCtx interface.
 // It is used so neutrino can perform contextual header validation checks.
 type lightHeaderCtx struct {
+	hash      chainhash.Hash
 	height    int32
 	bits      uint32
 	timestamp int64
@@ -2955,12 +2992,21 @@ func newLightHeaderCtx(height int32, header *wire.BlockHeader,
 	headerList headerlist.Chain) *lightHeaderCtx {
 
 	return &lightHeaderCtx{
+		hash:       header.BlockHash(),
 		height:     height,
 		bits:       header.Bits,
 		timestamp:  header.Timestamp.Unix(),
 		store:      store,
 		headerList: headerList,
 	}
+}
+
+// Hash returns the hash for the underlying header this context was created
+// from.
+//
+// NOTE: Part of the chaincfg.HeaderCtx interface.
+func (l *lightHeaderCtx) Hash() chainhash.Hash {
+	return l.hash
 }
 
 // Height returns the height for the underlying header this context was created
@@ -2991,7 +3037,7 @@ func (l *lightHeaderCtx) Timestamp() int64 {
 // from.
 //
 // NOTE: Part of the blockchain.HeaderCtx interface.
-func (l *lightHeaderCtx) Parent() blockchain.HeaderCtx {
+func (l *lightHeaderCtx) Parent() chaincfg.HeaderCtx {
 	// The parent is just an ancestor with distance 1.
 	return l.RelativeAncestorCtx(1)
 }
@@ -3001,7 +3047,7 @@ func (l *lightHeaderCtx) Parent() blockchain.HeaderCtx {
 //
 // NOTE: Part of the blockchain.HeaderCtx interface.
 func (l *lightHeaderCtx) RelativeAncestorCtx(
-	distance int32) blockchain.HeaderCtx {
+	distance int32) chaincfg.HeaderCtx {
 
 	ancestorHeight := l.height - distance
 

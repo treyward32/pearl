@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -6,93 +6,29 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/internal/legacy/keystore"
-	"github.com/btcsuite/btcwallet/internal/prompt"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	bip39 "github.com/tyler-smith/go-bip39"
+
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/wallet/internal/prompt"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 // networkDir returns the directory name of a network directory to hold wallet
 // files.
 func networkDir(dataDir string, chainParams *chaincfg.Params) string {
-	netname := chainParams.Name
-
-	// For now, we must always name the testnet data directory as "testnet"
-	// and not "testnet3" or any other version, as the chaincfg testnet3
-	// parameters will likely be switched to being named "testnet3" in the
-	// future.  This is done to future proof that change, and an upgrade
-	// plan to move the testnet3 data directory can be worked out later.
-	if chainParams.Net == wire.TestNet3 {
-		netname = "testnet"
-	}
-
-	return filepath.Join(dataDir, netname)
-}
-
-// convertLegacyKeystore converts all of the addresses in the passed legacy
-// key store to the new waddrmgr.Manager format.  Both the legacy keystore and
-// the new manager must be unlocked.
-func convertLegacyKeystore(legacyKeyStore *keystore.Store, w *wallet.Wallet) {
-	netParams := legacyKeyStore.Net()
-	blockStamp := waddrmgr.BlockStamp{
-		Height: 0,
-		Hash:   *netParams.GenesisHash,
-	}
-	for _, walletAddr := range legacyKeyStore.ActiveAddresses() {
-		switch addr := walletAddr.(type) {
-		case keystore.PubKeyAddress:
-			privKey, err := addr.PrivKey()
-			if err != nil {
-				fmt.Printf("WARN: Failed to obtain private key "+
-					"for address %v: %v\n", addr.Address(),
-					err)
-				continue
-			}
-
-			wif, err := btcutil.NewWIF(
-				privKey, netParams, addr.Compressed(),
-			)
-			if err != nil {
-				fmt.Printf("WARN: Failed to create wallet "+
-					"import format for address %v: %v\n",
-					addr.Address(), err)
-				continue
-			}
-
-			_, err = w.ImportPrivateKey(waddrmgr.KeyScopeBIP0044,
-				wif, &blockStamp, false)
-			if err != nil {
-				fmt.Printf("WARN: Failed to import private "+
-					"key for address %v: %v\n",
-					addr.Address(), err)
-				continue
-			}
-
-		case keystore.ScriptAddress:
-			_, err := w.ImportP2SHRedeemScript(addr.Script())
-			if err != nil {
-				fmt.Printf("WARN: Failed to import "+
-					"pay-to-script-hash script for "+
-					"address %v: %v\n", addr.Address(), err)
-				continue
-			}
-
-		default:
-			fmt.Printf("WARN: Skipping unrecognized legacy "+
-				"keystore type: %T\n", addr)
-			continue
-		}
-	}
+	return filepath.Join(dataDir, chainParams.Name)
 }
 
 // createWallet prompts the user for information needed to generate a new wallet
@@ -104,70 +40,11 @@ func createWallet(cfg *config) error {
 		activeNet.Params, dbDir, true, cfg.DBTimeout, 250,
 	)
 
-	// When there is a legacy keystore, open it now to ensure any errors
-	// don't end up exiting the process after the user has spent time
-	// entering a bunch of information.
-	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
-	keystorePath := filepath.Join(netDir, keystore.Filename)
-	var legacyKeyStore *keystore.Store
-	_, err := os.Stat(keystorePath)
-	if err != nil && !os.IsNotExist(err) {
-		// A stat error not due to a non-existent file should be
-		// returned to the caller.
-		return err
-	} else if err == nil {
-		// Keystore file exists.
-		legacyKeyStore, err = keystore.OpenDir(netDir)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Start by prompting for the private passphrase.  When there is an
-	// existing keystore, the user will be promped for that passphrase,
-	// otherwise they will be prompted for a new one.
+	// Start by prompting for the private passphrase
 	reader := bufio.NewReader(os.Stdin)
-	privPass, err := prompt.PrivatePass(reader, legacyKeyStore)
+	privPass, err := prompt.PrivatePass(reader)
 	if err != nil {
 		return err
-	}
-
-	// When there exists a legacy keystore, unlock it now and set up a
-	// callback to import all keystore keys into the new walletdb
-	// wallet
-	if legacyKeyStore != nil {
-		err = legacyKeyStore.Unlock(privPass)
-		if err != nil {
-			return err
-		}
-
-		// Import the addresses in the legacy keystore to the new wallet if
-		// any exist, locking each wallet again when finished.
-		loader.RunAfterLoad(func(w *wallet.Wallet) {
-			defer func() { _ = legacyKeyStore.Lock() }()
-
-			fmt.Println("Importing addresses from existing wallet...")
-
-			lockChan := make(chan time.Time, 1)
-			defer func() {
-				lockChan <- time.Time{}
-			}()
-			err := w.Unlock(privPass, lockChan)
-			if err != nil {
-				fmt.Printf("ERR: Failed to unlock new wallet "+
-					"during old wallet key import: %v", err)
-				return
-			}
-
-			convertLegacyKeystore(legacyKeyStore, w)
-
-			// Remove the legacy key store.
-			err = os.Remove(keystorePath)
-			if err != nil {
-				fmt.Printf("WARN: Failed to remove legacy wallet "+
-					"from'%s'\n", keystorePath)
-			}
-		})
 	}
 
 	// Ascertain the public passphrase.  This will either be a value
@@ -214,7 +91,7 @@ func createSimulationWallet(cfg *config) error {
 	fmt.Println("Creating the wallet...")
 
 	// Create the wallet database backed by bolt db.
-	db, err := walletdb.Create("bdb", dbPath, true, cfg.DBTimeout)
+	db, err := walletdb.Create("bdb", dbPath, true, cfg.DBTimeout, false)
 	if err != nil {
 		return err
 	}
@@ -228,6 +105,94 @@ func createSimulationWallet(cfg *config) error {
 
 	fmt.Println("The wallet has been created successfully.")
 	return nil
+}
+
+// createWalletFromJSON reads a JSON blob with fields:
+//
+//	{
+//	  PrivatePassphrase: string (required)
+//	  PublicPassphrase: string (optional)
+//	  Seed: string (hex, optional)
+//	  Bday: string (unix seconds, optional)
+//	}
+//
+// and creates a wallet accordingly. Returns the hex-encoded seed used.
+func createWalletFromJSON(cfg *config, data []byte) (string, error) {
+	var input struct {
+		PrivatePassphrase string  `json:"PrivatePassphrase"`
+		PublicPassphrase  *string `json:"PublicPassphrase"`
+		Seed              *string `json:"Seed"`
+		Bday              *string `json:"Bday"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return "", fmt.Errorf("invalid JSON in createfromfile: %w", err)
+	}
+
+	dbDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
+	loader := wallet.NewLoader(
+		activeNet.Params, dbDir, true, cfg.DBTimeout, 250,
+	)
+
+	// Validate required fields.
+	if strings.TrimSpace(input.PrivatePassphrase) == "" {
+		return "", fmt.Errorf("PrivatePassphrase is required in createfromfile input")
+	}
+
+	privPass := []byte(input.PrivatePassphrase)
+
+	pubPass := []byte(wallet.InsecurePubPassphrase)
+	if input.PublicPassphrase != nil && strings.TrimSpace(*input.PublicPassphrase) != "" {
+		pubPass = []byte(*input.PublicPassphrase)
+	}
+
+	// Decode optional seed (mnemonic or hex) if provided.
+	var seedStr string
+	if input.Seed != nil {
+		seedStr = strings.TrimSpace(*input.Seed)
+	}
+	var seed []byte
+	if seedStr == "" {
+		// Generate a new 16-byte (128-bit) entropy → 12-word BIP39 mnemonic.
+		// Use PBKDF2 (standard BIP39) to derive the 64-byte BIP32 master seed.
+		gen, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate seed: %w", err)
+		}
+		mnemonic, err := bip39.NewMnemonic(gen)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate mnemonic: %w", err)
+		}
+		seedStr = mnemonic
+		seed = bip39.NewSeed(mnemonic, "")
+	} else if bip39.IsMnemonicValid(seedStr) {
+		// Input is a BIP39 mnemonic phrase — derive the 64-byte BIP32 seed via PBKDF2.
+		// This matches the standard BIP39 derivation.
+		seed = bip39.NewSeed(seedStr, "")
+	} else {
+		// Fall back to hex for backward compatibility.
+		dec, err := hex.DecodeString(strings.ToLower(seedStr))
+		if err != nil || len(dec) < hdkeychain.MinSeedBytes || len(dec) > hdkeychain.MaxSeedBytes {
+			return "", fmt.Errorf("invalid seed: must be a BIP39 mnemonic or hex string (%d-%d bits)", hdkeychain.MinSeedBytes*8, hdkeychain.MaxSeedBytes*8)
+		}
+		seed = dec
+	}
+
+	// Parse optional birthday (unix seconds) if provided; default now.
+	birthday := time.Now()
+	if input.Bday != nil && strings.TrimSpace(*input.Bday) != "" {
+		secs, err := strconv.ParseInt(strings.TrimSpace(*input.Bday), 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("Bday must be unix timestamp in seconds")
+		}
+		birthday = time.Unix(secs, 0)
+	}
+
+	// Create the wallet via loader.
+	if _, err := loader.CreateNewWallet(pubPass, privPass, seed, birthday); err != nil {
+		return "", fmt.Errorf("unable to create wallet: %w", err)
+	}
+
+	return seedStr, nil
 }
 
 // checkCreateDir checks that the path exists and is a directory.

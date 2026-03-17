@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -21,12 +21,6 @@ const (
 	// public key script, the outpoint is serialized and inserted into the
 	// filter.
 	BloomUpdateAll BloomUpdateType = 1
-
-	// BloomUpdateP2PubkeyOnly indicates if the filter matches a data
-	// element in a public key script and the script is of the standard
-	// pay-to-pubkey or multisig, the outpoint is serialized and inserted
-	// into the filter.
-	BloomUpdateP2PubkeyOnly BloomUpdateType = 2
 )
 
 const (
@@ -38,7 +32,7 @@ const (
 	MaxFilterLoadFilterSize = 36000
 )
 
-// MsgFilterLoad implements the Message interface and represents a bitcoin
+// MsgFilterLoad implements the Message interface and represents a
 // filterload message which is used to reset a Bloom filter.
 //
 // This message was not added until protocol version BIP0037Version.
@@ -49,15 +43,9 @@ type MsgFilterLoad struct {
 	Flags     BloomUpdateType
 }
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // This is part of the Message interface implementation.
-func (msg *MsgFilterLoad) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	if pver < BIP0037Version {
-		str := fmt.Sprintf("filterload message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgFilterLoad.BtcDecode", str)
-	}
-
+func (msg *MsgFilterLoad) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	var err error
 	msg.Filter, err = ReadVarBytes(r, pver, MaxFilterLoadFilterSize,
 		"filterload filter size")
@@ -73,32 +61,26 @@ func (msg *MsgFilterLoad) BtcDecode(r io.Reader, pver uint32, enc MessageEncodin
 	if msg.HashFuncs > MaxFilterLoadHashFuncs {
 		str := fmt.Sprintf("too many filter hash functions for message "+
 			"[count %v, max %v]", msg.HashFuncs, MaxFilterLoadHashFuncs)
-		return messageError("MsgFilterLoad.BtcDecode", str)
+		return messageError("MsgFilterLoad.PrlDecode", str)
 	}
 
 	return nil
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
-func (msg *MsgFilterLoad) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	if pver < BIP0037Version {
-		str := fmt.Sprintf("filterload message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgFilterLoad.BtcEncode", str)
-	}
-
+func (msg *MsgFilterLoad) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	size := len(msg.Filter)
 	if size > MaxFilterLoadFilterSize {
 		str := fmt.Sprintf("filterload filter size too large for message "+
 			"[size %v, max %v]", size, MaxFilterLoadFilterSize)
-		return messageError("MsgFilterLoad.BtcEncode", str)
+		return messageError("MsgFilterLoad.PrlEncode", str)
 	}
 
 	if msg.HashFuncs > MaxFilterLoadHashFuncs {
 		str := fmt.Sprintf("too many filter hash functions for message "+
 			"[count %v, max %v]", msg.HashFuncs, MaxFilterLoadHashFuncs)
-		return messageError("MsgFilterLoad.BtcEncode", str)
+		return messageError("MsgFilterLoad.PrlEncode", str)
 	}
 
 	err := WriteVarBytes(w, pver, msg.Filter)
@@ -124,7 +106,7 @@ func (msg *MsgFilterLoad) MaxPayloadLength(pver uint32) uint32 {
 		MaxFilterLoadFilterSize + 9
 }
 
-// NewMsgFilterLoad returns a new bitcoin filterload message that conforms to
+// NewMsgFilterLoad returns a new filterload message that conforms to
 // the Message interface.  See MsgFilterLoad for details.
 func NewMsgFilterLoad(filter []byte, hashFuncs uint32, tweak uint32, flags BloomUpdateType) *MsgFilterLoad {
 	return &MsgFilterLoad{

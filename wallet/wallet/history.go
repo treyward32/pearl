@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,10 +7,10 @@ package wallet
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 // a full chain rescan of all wallet transaction and UTXO data. User-defined
 // transaction labels can optionally be kept by setting keepLabels to true.
 func DropTransactionHistory(db walletdb.DB, keepLabels bool) error {
-	log.Infof("Dropping btcwallet transaction history")
+	log.Infof("Dropping wallet transaction history")
 
 	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		// If we want to keep our tx labels, we read them out so we

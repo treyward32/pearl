@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // TestGetBlocks tests the MsgGetBlocks API.
@@ -166,75 +166,75 @@ func TestGetBlocksWire(t *testing.T) {
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version with no block locators.
+		// Protocol version ProtocolVersion with no block locators.
 		{
 			noLocators,
 			noLocators,
 			noLocatorsEncoded,
-			BIP0035Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version with multiple block locators.
+		// Protocol version ProtocolVersion with multiple block locators.
 		{
 			multiLocators,
 			multiLocators,
 			multiLocatorsEncoded,
-			BIP0035Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Version with no block locators.
+		// Protocol version ProtocolVersion with no block locators.
 		{
 			noLocators,
 			noLocators,
 			noLocatorsEncoded,
-			BIP0031Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Versionwith multiple block locators.
+		// Protocol version ProtocolVersionwith multiple block locators.
 		{
 			multiLocators,
 			multiLocators,
 			multiLocatorsEncoded,
-			BIP0031Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion with no block locators.
+		// Protocol version ProtocolVersion with no block locators.
 		{
 			noLocators,
 			noLocators,
 			noLocatorsEncoded,
-			NetAddressTimeVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion multiple block locators.
+		// Protocol version ProtocolVersion multiple block locators.
 		{
 			multiLocators,
 			multiLocators,
 			multiLocatorsEncoded,
-			NetAddressTimeVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion with no block locators.
+		// Protocol version ProtocolVersion with no block locators.
 		{
 			noLocators,
 			noLocators,
 			noLocatorsEncoded,
-			MultipleAddressVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion multiple block locators.
+		// Protocol version ProtocolVersion multiple block locators.
 		{
 			multiLocators,
 			multiLocators,
 			multiLocatorsEncoded,
-			MultipleAddressVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 	}
@@ -243,13 +243,13 @@ func TestGetBlocksWire(t *testing.T) {
 	for i, test := range tests {
 		// Encode the message to wire format.
 		var buf bytes.Buffer
-		err := test.in.BtcEncode(&buf, test.pver, test.enc)
+		err := test.in.PrlEncode(&buf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcEncode #%d error %v", i, err)
+			t.Errorf("PrlEncode #%d error %v", i, err)
 			continue
 		}
 		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("BtcEncode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlEncode #%d\n got: %s want: %s", i,
 				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
 			continue
 		}
@@ -257,13 +257,13 @@ func TestGetBlocksWire(t *testing.T) {
 		// Decode the message from wire format.
 		var msg MsgGetBlocks
 		rbuf := bytes.NewReader(test.buf)
-		err = msg.BtcDecode(rbuf, test.pver, test.enc)
+		err = msg.PrlDecode(rbuf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcDecode #%d error %v", i, err)
+			t.Errorf("PrlDecode #%d error %v", i, err)
 			continue
 		}
 		if !reflect.DeepEqual(&msg, test.out) {
-			t.Errorf("BtcDecode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlDecode #%d\n got: %s want: %s", i,
 				spew.Sdump(&msg), spew.Sdump(test.out))
 			continue
 		}
@@ -360,9 +360,9 @@ func TestGetBlocksWireErrors(t *testing.T) {
 	for i, test := range tests {
 		// Encode to wire format.
 		w := newFixedWriter(test.max)
-		err := test.in.BtcEncode(w, test.pver, test.enc)
+		err := test.in.PrlEncode(w, test.pver, test.enc)
 		if reflect.TypeOf(err) != reflect.TypeOf(test.writeErr) {
-			t.Errorf("BtcEncode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlEncode #%d wrong error got: %v, want: %v",
 				i, err, test.writeErr)
 			continue
 		}
@@ -371,7 +371,7 @@ func TestGetBlocksWireErrors(t *testing.T) {
 		// equality.
 		if _, ok := err.(*MessageError); !ok {
 			if err != test.writeErr {
-				t.Errorf("BtcEncode #%d wrong error got: %v, "+
+				t.Errorf("PrlEncode #%d wrong error got: %v, "+
 					"want: %v", i, err, test.writeErr)
 				continue
 			}
@@ -380,9 +380,9 @@ func TestGetBlocksWireErrors(t *testing.T) {
 		// Decode from wire format.
 		var msg MsgGetBlocks
 		r := newFixedReader(test.max, test.buf)
-		err = msg.BtcDecode(r, test.pver, test.enc)
+		err = msg.PrlDecode(r, test.pver, test.enc)
 		if reflect.TypeOf(err) != reflect.TypeOf(test.readErr) {
-			t.Errorf("BtcDecode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlDecode #%d wrong error got: %v, want: %v",
 				i, err, test.readErr)
 			continue
 		}
@@ -391,7 +391,7 @@ func TestGetBlocksWireErrors(t *testing.T) {
 		// equality.
 		if _, ok := err.(*MessageError); !ok {
 			if err != test.readErr {
-				t.Errorf("BtcDecode #%d wrong error got: %v, "+
+				t.Errorf("PrlDecode #%d wrong error got: %v, "+
 					"want: %v", i, err, test.readErr)
 				continue
 			}

@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,10 @@ import (
 	"bytes"
 	"io"
 	"net"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNetAddress tests the NetAddress API.
@@ -20,59 +19,23 @@ func TestNetAddress(t *testing.T) {
 	ip := net.ParseIP("127.0.0.1")
 	port := 8333
 
-	// Test NewNetAddress.
 	na := NewNetAddress(&net.TCPAddr{IP: ip, Port: port}, 0)
 
-	// Ensure we get the same ip, port, and services back out.
-	if !na.IP.Equal(ip) {
-		t.Errorf("NetNetAddress: wrong ip - got %v, want %v", na.IP, ip)
-	}
-	if na.Port != uint16(port) {
-		t.Errorf("NetNetAddress: wrong port - got %v, want %v", na.Port,
-			port)
-	}
-	if na.Services != 0 {
-		t.Errorf("NetNetAddress: wrong services - got %v, want %v",
-			na.Services, 0)
-	}
-	if na.HasService(SFNodeNetwork) {
-		t.Errorf("HasService: SFNodeNetwork service is set")
-	}
+	require.True(t, na.IP.Equal(ip))
+	require.Equal(t, uint16(port), na.Port)
+	require.Equal(t, ServiceFlag(0), na.Services)
+	require.False(t, na.HasService(SFNodeNetwork))
 
-	// Ensure adding the full service node flag works.
 	na.AddService(SFNodeNetwork)
-	if na.Services != SFNodeNetwork {
-		t.Errorf("AddService: wrong services - got %v, want %v",
-			na.Services, SFNodeNetwork)
-	}
-	if !na.HasService(SFNodeNetwork) {
-		t.Errorf("HasService: SFNodeNetwork service not set")
-	}
+	require.Equal(t, SFNodeNetwork, na.Services)
+	require.True(t, na.HasService(SFNodeNetwork))
 
-	// Ensure max payload is expected value for latest protocol version.
-	pver := ProtocolVersion
-	wantPayload := uint32(30)
-	maxPayload := maxNetAddressPayload(ProtocolVersion)
-	if maxPayload != wantPayload {
-		t.Errorf("maxNetAddressPayload: wrong max payload length for "+
-			"protocol version %d - got %v, want %v", pver,
-			maxPayload, wantPayload)
-	}
-
-	// Protocol version before NetAddressTimeVersion when timestamp was
-	// added.  Ensure max payload is expected value for it.
-	pver = NetAddressTimeVersion - 1
-	wantPayload = 26
-	maxPayload = maxNetAddressPayload(pver)
-	if maxPayload != wantPayload {
-		t.Errorf("maxNetAddressPayload: wrong max payload length for "+
-			"protocol version %d - got %v, want %v", pver,
-			maxPayload, wantPayload)
-	}
+	// Payload: timestamp (4) + services (8) + ip (16) + port (2) = 30 bytes.
+	require.Equal(t, uint32(30), maxNetAddressPayload(ProtocolVersion))
 }
 
 // TestNetAddressWire tests the NetAddress wire encode and decode for various
-// protocol versions and timestamp flag combinations.
+// timestamp flag combinations.
 func TestNetAddressWire(t *testing.T) {
 	// baseNetAddr is used in the various tests as a baseline NetAddress.
 	baseNetAddr := NetAddress{
@@ -97,7 +60,6 @@ func TestNetAddressWire(t *testing.T) {
 
 	// baseNetAddrNoTSEncoded is the wire encoded bytes of baseNetAddrNoTS.
 	baseNetAddrNoTSEncoded := []byte{
-		// No timestamp
 		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // SFNodeNetwork
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0xff, 0xff, 0x7f, 0x00, 0x00, 0x01, // IP 127.0.0.1
@@ -105,98 +67,29 @@ func TestNetAddressWire(t *testing.T) {
 	}
 
 	tests := []struct {
-		in   NetAddress // NetAddress to encode
-		out  NetAddress // Expected decoded NetAddress
-		ts   bool       // Include timestamp?
-		buf  []byte     // Wire encoding
-		pver uint32     // Protocol version for wire encoding
+		in   NetAddress
+		out  NetAddress
+		ts   bool // Include timestamp?
+		buf  []byte
+		pver uint32
 	}{
-		// Latest protocol version without ts flag.
-		{
-			baseNetAddr,
-			baseNetAddrNoTS,
-			false,
-			baseNetAddrNoTSEncoded,
-			ProtocolVersion,
-		},
-
-		// Latest protocol version with ts flag.
-		{
-			baseNetAddr,
-			baseNetAddr,
-			true,
-			baseNetAddrEncoded,
-			ProtocolVersion,
-		},
-
-		// Protocol version NetAddressTimeVersion without ts flag.
-		{
-			baseNetAddr,
-			baseNetAddrNoTS,
-			false,
-			baseNetAddrNoTSEncoded,
-			NetAddressTimeVersion,
-		},
-
-		// Protocol version NetAddressTimeVersion with ts flag.
-		{
-			baseNetAddr,
-			baseNetAddr,
-			true,
-			baseNetAddrEncoded,
-			NetAddressTimeVersion,
-		},
-
-		// Protocol version NetAddressTimeVersion-1 without ts flag.
-		{
-			baseNetAddr,
-			baseNetAddrNoTS,
-			false,
-			baseNetAddrNoTSEncoded,
-			NetAddressTimeVersion - 1,
-		},
-
-		// Protocol version NetAddressTimeVersion-1 with timestamp.
-		// Even though the timestamp flag is set, this shouldn't have a
-		// timestamp since it is a protocol version before it was
-		// added.
-		{
-			baseNetAddr,
-			baseNetAddrNoTS,
-			true,
-			baseNetAddrNoTSEncoded,
-			NetAddressTimeVersion - 1,
-		},
+		// Without ts flag (timestamp not included in wire format).
+		{baseNetAddr, baseNetAddrNoTS, false, baseNetAddrNoTSEncoded, ProtocolVersion},
+		// With ts flag (timestamp included in wire format).
+		{baseNetAddr, baseNetAddr, true, baseNetAddrEncoded, ProtocolVersion},
 	}
 
-	t.Logf("Running %d tests", len(tests))
 	for i, test := range tests {
-		// Encode to wire format.
 		var buf bytes.Buffer
 		err := writeNetAddress(&buf, test.pver, &test.in, test.ts)
-		if err != nil {
-			t.Errorf("writeNetAddress #%d error %v", i, err)
-			continue
-		}
-		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("writeNetAddress #%d\n got: %s want: %s", i,
-				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
-			continue
-		}
+		require.NoError(t, err, "test #%d", i)
+		require.Equal(t, test.buf, buf.Bytes(), "test #%d", i)
 
-		// Decode the message from wire format.
 		var na NetAddress
 		rbuf := bytes.NewReader(test.buf)
 		err = readNetAddress(rbuf, test.pver, &na, test.ts)
-		if err != nil {
-			t.Errorf("readNetAddress #%d error %v", i, err)
-			continue
-		}
-		if !reflect.DeepEqual(na, test.out) {
-			t.Errorf("readNetAddress #%d\n got: %s want: %s", i,
-				spew.Sdump(na), spew.Sdump(test.out))
-			continue
-		}
+		require.NoError(t, err, "test #%d", i)
+		require.Equal(t, test.out, na, "test #%d", i)
 	}
 }
 
@@ -204,7 +97,6 @@ func TestNetAddressWire(t *testing.T) {
 // decode NetAddress to confirm error paths work correctly.
 func TestNetAddressWireErrors(t *testing.T) {
 	pver := ProtocolVersion
-	pverNAT := NetAddressTimeVersion - 1
 
 	// baseNetAddr is used in the various tests as a baseline NetAddress.
 	baseNetAddr := NetAddress{
@@ -215,64 +107,31 @@ func TestNetAddressWireErrors(t *testing.T) {
 	}
 
 	tests := []struct {
-		in       *NetAddress // Value to encode
-		buf      []byte      // Wire encoding
-		pver     uint32      // Protocol version for wire encoding
-		ts       bool        // Include timestamp flag
-		max      int         // Max size of fixed buffer to induce errors
-		writeErr error       // Expected write error
-		readErr  error       // Expected read error
+		in       *NetAddress
+		ts       bool
+		max      int
+		writeErr error
+		readErr  error
 	}{
-		// Latest protocol version with timestamp and intentional
-		// read/write errors.
-		// Force errors on timestamp.
-		{&baseNetAddr, []byte{}, pver, true, 0, io.ErrShortWrite, io.EOF},
-		// Force errors on services.
-		{&baseNetAddr, []byte{}, pver, true, 4, io.ErrShortWrite, io.EOF},
-		// Force errors on ip.
-		{&baseNetAddr, []byte{}, pver, true, 12, io.ErrShortWrite, io.EOF},
-		// Force errors on port.
-		{&baseNetAddr, []byte{}, pver, true, 28, io.ErrShortWrite, io.EOF},
-
-		// Latest protocol version with no timestamp and intentional
-		// read/write errors.
-		// Force errors on services.
-		{&baseNetAddr, []byte{}, pver, false, 0, io.ErrShortWrite, io.EOF},
-		// Force errors on ip.
-		{&baseNetAddr, []byte{}, pver, false, 8, io.ErrShortWrite, io.EOF},
-		// Force errors on port.
-		{&baseNetAddr, []byte{}, pver, false, 24, io.ErrShortWrite, io.EOF},
-
-		// Protocol version before NetAddressTimeVersion with timestamp
-		// flag set (should not have timestamp due to old protocol
-		// version) and  intentional read/write errors.
-		// Force errors on services.
-		{&baseNetAddr, []byte{}, pverNAT, true, 0, io.ErrShortWrite, io.EOF},
-		// Force errors on ip.
-		{&baseNetAddr, []byte{}, pverNAT, true, 8, io.ErrShortWrite, io.EOF},
-		// Force errors on port.
-		{&baseNetAddr, []byte{}, pverNAT, true, 24, io.ErrShortWrite, io.EOF},
+		// With timestamp - force errors on timestamp, services, ip, port.
+		{&baseNetAddr, true, 0, io.ErrShortWrite, io.EOF},
+		{&baseNetAddr, true, 4, io.ErrShortWrite, io.EOF},
+		{&baseNetAddr, true, 12, io.ErrShortWrite, io.EOF},
+		{&baseNetAddr, true, 28, io.ErrShortWrite, io.EOF},
+		// Without timestamp - force errors on services, ip, port.
+		{&baseNetAddr, false, 0, io.ErrShortWrite, io.EOF},
+		{&baseNetAddr, false, 8, io.ErrShortWrite, io.EOF},
+		{&baseNetAddr, false, 24, io.ErrShortWrite, io.EOF},
 	}
 
-	t.Logf("Running %d tests", len(tests))
 	for i, test := range tests {
-		// Encode to wire format.
 		w := newFixedWriter(test.max)
-		err := writeNetAddress(w, test.pver, test.in, test.ts)
-		if err != test.writeErr {
-			t.Errorf("writeNetAddress #%d wrong error got: %v, want: %v",
-				i, err, test.writeErr)
-			continue
-		}
+		err := writeNetAddress(w, pver, test.in, test.ts)
+		require.ErrorIs(t, err, test.writeErr, "write test #%d", i)
 
-		// Decode from wire format.
 		var na NetAddress
-		r := newFixedReader(test.max, test.buf)
-		err = readNetAddress(r, test.pver, &na, test.ts)
-		if err != test.readErr {
-			t.Errorf("readNetAddress #%d wrong error got: %v, want: %v",
-				i, err, test.readErr)
-			continue
-		}
+		r := newFixedReader(test.max, []byte{})
+		err = readNetAddress(r, pver, &na, test.ts)
+		require.ErrorIs(t, err, test.readErr, "read test #%d", i)
 	}
 }

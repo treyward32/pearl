@@ -1,28 +1,24 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package chaincfg
 
 import (
-	"bytes"
 	"encoding/hex"
 	"math/big"
 	"testing"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
 // TestInvalidHashStr ensures the newShaHashFromStr function panics when used to
 // with an invalid hash string.
 func TestInvalidHashStr(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Expected panic for invalid hash, got nil")
-		}
-	}()
-	newHashFromStr("banana")
+	require.Panics(t, func() {
+		newHashFromStr("banana")
+	}, "Expected panic for invalid hash")
 }
 
 // TestMustRegisterPanic ensures the mustRegister function panics when used to
@@ -30,16 +26,10 @@ func TestInvalidHashStr(t *testing.T) {
 func TestMustRegisterPanic(t *testing.T) {
 	t.Parallel()
 
-	// Setup a defer to catch the expected panic to ensure it actually
-	// paniced.
-	defer func() {
-		if err := recover(); err == nil {
-			t.Error("mustRegister did not panic as expected")
-		}
-	}()
-
 	// Intentionally try to register duplicate params to force a panic.
-	mustRegister(&MainNetParams)
+	require.Panics(t, func() {
+		mustRegister(&MainNetParams)
+	}, "mustRegister did not panic as expected")
 }
 
 func TestRegisterHDKeyID(t *testing.T) {
@@ -49,19 +39,12 @@ func TestRegisterHDKeyID(t *testing.T) {
 	hdKeyIDZprv := []byte{0x02, 0xaa, 0x7a, 0x99}
 	hdKeyIDZpub := []byte{0x02, 0xaa, 0x7e, 0xd3}
 
-	if err := RegisterHDKeyID(hdKeyIDZpub, hdKeyIDZprv); err != nil {
-		t.Fatalf("RegisterHDKeyID: expected no error, got %v", err)
-	}
+	err := RegisterHDKeyID(hdKeyIDZpub, hdKeyIDZprv)
+	require.NoError(t, err, "RegisterHDKeyID")
 
 	got, err := HDPrivateKeyToPublicKeyID(hdKeyIDZprv)
-	if err != nil {
-		t.Fatalf("HDPrivateKeyToPublicKeyID: expected no error, got %v", err)
-	}
-
-	if !bytes.Equal(got, hdKeyIDZpub) {
-		t.Fatalf("HDPrivateKeyToPublicKeyID: expected result %v, got %v",
-			hdKeyIDZpub, got)
-	}
+	require.NoError(t, err, "HDPrivateKeyToPublicKeyID")
+	require.Equal(t, hdKeyIDZpub, got, "HDPrivateKeyToPublicKeyID result mismatch")
 }
 
 func TestInvalidHDKeyID(t *testing.T) {
@@ -72,42 +55,46 @@ func TestInvalidHDKeyID(t *testing.T) {
 	prvInvalid := []byte{0x00}
 	pubInvalid := []byte{0x00}
 
-	if err := RegisterHDKeyID(pubInvalid, prvValid); err != ErrInvalidHDKeyID {
-		t.Fatalf("RegisterHDKeyID: want err ErrInvalidHDKeyID, got %v", err)
-	}
+	err := RegisterHDKeyID(pubInvalid, prvValid)
+	require.ErrorIs(t, err, ErrInvalidHDKeyID)
 
-	if err := RegisterHDKeyID(pubValid, prvInvalid); err != ErrInvalidHDKeyID {
-		t.Fatalf("RegisterHDKeyID: want err ErrInvalidHDKeyID, got %v", err)
-	}
+	err = RegisterHDKeyID(pubValid, prvInvalid)
+	require.ErrorIs(t, err, ErrInvalidHDKeyID)
 
-	if err := RegisterHDKeyID(pubInvalid, prvInvalid); err != ErrInvalidHDKeyID {
-		t.Fatalf("RegisterHDKeyID: want err ErrInvalidHDKeyID, got %v", err)
-	}
+	err = RegisterHDKeyID(pubInvalid, prvInvalid)
+	require.ErrorIs(t, err, ErrInvalidHDKeyID)
 
 	// FIXME: The error type should be changed to ErrInvalidHDKeyID.
-	if _, err := HDPrivateKeyToPublicKeyID(prvInvalid); err != ErrUnknownHDKeyID {
-		t.Fatalf("HDPrivateKeyToPublicKeyID: want err ErrUnknownHDKeyID, got %v", err)
-	}
+	_, err = HDPrivateKeyToPublicKeyID(prvInvalid)
+	require.ErrorIs(t, err, ErrUnknownHDKeyID)
 }
 
 func TestSigNetPowLimit(t *testing.T) {
-	sigNetPowLimitHex, _ := hex.DecodeString(
-		"00000377ae000000000000000000000000000000000000000000000000000000",
+	// sigNetPowLimit should be 2^228 - 1 (7 leading hex zeros followed by 57 f's)
+	expectedPowLimitHex, err := hex.DecodeString(
+		"0000000fffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 	)
-	powLimit := new(big.Int).SetBytes(sigNetPowLimitHex)
-	if sigNetPowLimit.Cmp(powLimit) != 0 {
-		t.Fatalf("Signet PoW limit bits (%s) not equal to big int (%s)",
-			sigNetPowLimit.Text(16), powLimit.Text(16))
-	}
+	require.NoError(t, err)
+	expectedPowLimit := new(big.Int).SetBytes(expectedPowLimitHex)
+	require.Equal(t, 0, sigNetPowLimit.Cmp(expectedPowLimit),
+		"Signet PoW limit (%s) not equal to expected 2^228-1 (%s)",
+		sigNetPowLimit.Text(16), expectedPowLimit.Text(16))
 
-	if compactToBig(sigNetGenesisBlock.Header.Bits).Cmp(powLimit) != 0 {
-		t.Fatalf("Signet PoW limit header bits (%d) not equal to big "+
-			"int (%s)", sigNetGenesisBlock.Header.Bits,
-			powLimit.Text(16))
-	}
+	// The genesis block Bits (0x1d0fffff) is the compact representation.
+	// Compact format has limited precision (24-bit mantissa), so it yields
+	// 0x0fffff000... rather than 0x0ffff...fff. Verify the expected compact value.
+	expectedBitsTargetHex, err := hex.DecodeString(
+		"0000000fffff0000000000000000000000000000000000000000000000000000",
+	)
+	require.NoError(t, err)
+	expectedBitsTarget := new(big.Int).SetBytes(expectedBitsTargetHex)
+	actualBitsTarget := compactToBig(sigNetGenesisBlock.BlockHeader().Bits)
+	require.Equal(t, 0, actualBitsTarget.Cmp(expectedBitsTarget),
+		"Signet genesis Bits target (%s) not equal to expected (%s)",
+		actualBitsTarget.Text(16), expectedBitsTarget.Text(16))
 }
 
-// TestSigNetMagic makes sure that the default signet has the expected bitcoin
+// TestSigNetMagic makes sure that the default signet has the expected Pearl
 // network magic.
 func TestSigNetMagic(t *testing.T) {
 	require.Equal(t, wire.SigNet, SigNetParams.Net)

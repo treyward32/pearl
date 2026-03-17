@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -41,10 +41,6 @@ const (
 	// maximum allowed size.
 	ErrBlockTooBig
 
-	// ErrBlockWeightTooHigh indicates that the block's computed weight
-	// metric exceeds the maximum allowed value.
-	ErrBlockWeightTooHigh
-
 	// ErrBlockVersionTooOld indicates the block version is too old and is
 	// no longer accepted since the majority of the network has upgraded
 	// to a newer version.
@@ -77,6 +73,17 @@ const (
 	// ErrHighHash indicates the block does not hash to a value which is
 	// lower than the required target difficultly.
 	ErrHighHash
+
+	// ErrCertificateTooLarge indicates the block certificate exceeds the
+	// maximum allowed size.
+	ErrCertificateTooLarge
+
+	// ErrCertificateMissing indicates the block certificate is missing.
+	ErrCertificateMissing
+
+	// ErrDisallowedCertVersion indicates the block certificate version is
+	// not allowed on this network.
+	ErrDisallowedCertVersion
 
 	// ErrBadMerkleRoot indicates the calculated merkle root does not match
 	// the expected value.
@@ -154,9 +161,8 @@ const (
 	// exceeding the maximum possible value.
 	ErrBadFees
 
-	// ErrTooManySigOps indicates the total number of signature operations
-	// for a transaction or block exceed the maximum allowed limits.
-	ErrTooManySigOps
+	// ErrInsufficientFee indicates a transaction does not pay enough fee.
+	ErrInsufficientFee
 
 	// ErrFirstTxNotCoinbase indicates the first transaction in a block
 	// is not a coinbase transaction.
@@ -220,6 +226,10 @@ const (
 	// current chain tip. This is not a block validation rule, but is required
 	// for block proposals submitted via getblocktemplate RPC.
 	ErrPrevBlockNotBest
+
+	// ErrTimewarpAttack indicates a timewarp attack i.e.
+	// when block's timestamp is too early on diff adjustment block.
+	ErrTimewarpAttack
 )
 
 // Map of ErrorCode values back to their constant names for pretty printing.
@@ -227,13 +237,14 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrDuplicateBlock:            "ErrDuplicateBlock",
 	ErrBlockTooBig:               "ErrBlockTooBig",
 	ErrBlockVersionTooOld:        "ErrBlockVersionTooOld",
-	ErrBlockWeightTooHigh:        "ErrBlockWeightTooHigh",
 	ErrInvalidTime:               "ErrInvalidTime",
 	ErrTimeTooOld:                "ErrTimeTooOld",
 	ErrTimeTooNew:                "ErrTimeTooNew",
 	ErrDifficultyTooLow:          "ErrDifficultyTooLow",
 	ErrUnexpectedDifficulty:      "ErrUnexpectedDifficulty",
 	ErrHighHash:                  "ErrHighHash",
+	ErrCertificateTooLarge:       "ErrCertificateTooLarge",
+	ErrDisallowedCertVersion:     "ErrDisallowedCertVersion",
 	ErrBadMerkleRoot:             "ErrBadMerkleRoot",
 	ErrBadCheckpoint:             "ErrBadCheckpoint",
 	ErrForkTooOld:                "ErrForkTooOld",
@@ -252,7 +263,7 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrImmatureSpend:             "ErrImmatureSpend",
 	ErrSpendTooHigh:              "ErrSpendTooHigh",
 	ErrBadFees:                   "ErrBadFees",
-	ErrTooManySigOps:             "ErrTooManySigOps",
+	ErrInsufficientFee:           "ErrInsufficientFee",
 	ErrFirstTxNotCoinbase:        "ErrFirstTxNotCoinbase",
 	ErrMultipleCoinbases:         "ErrMultipleCoinbases",
 	ErrBadCoinbaseScriptLen:      "ErrBadCoinbaseScriptLen",

@@ -3,16 +3,15 @@ package chain
 import (
 	"errors"
 	"fmt"
-	"math"
 	"net"
-	"runtime"
-	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // setupConnPair initiates a tcp connection between two peers.
@@ -83,7 +82,7 @@ func setupConnPair() (net.Conn, net.Conn, error) {
 //
 // This function was copied from:
 //
-//	https://github.com/btcsuite/btcd/blob/36a96f6a0025b6aeaebe4106821c2d46ee4be8d4/blockchain/fullblocktests/generate.go#L303
+//	https://github.com/pearl-research-labs/pearl/node/blob/36a96f6a0025b6aeaebe4106821c2d46ee4be8d4/blockchain/fullblocktests/generate.go#L303
 //
 //nolint:lll
 func calcMerkleRoot(txns []*wire.MsgTx) chainhash.Hash {
@@ -99,94 +98,10 @@ func calcMerkleRoot(txns []*wire.MsgTx) chainhash.Hash {
 	return *merkles[len(merkles)-1]
 }
 
-// solveBlock attempts to find a nonce which makes the passed block header hash
-// to a value less than the target difficulty.  When a successful solution is
-// found true is returned and the nonce field of the passed header is updated
-// with the solution.  False is returned if no solution exists.
-//
-// This function was copied from:
-//
-//	https://github.com/btcsuite/btcd/blob/36a96f6a0025b6aeaebe4106821c2d46ee4be8d4/blockchain/fullblocktests/generate.go#L324
-//
-//nolint:lll
-func solveBlock(header *wire.BlockHeader) bool {
-	// sbResult is used by the solver goroutines to send results.
-	type sbResult struct {
-		found bool
-		nonce uint32
-	}
-
-	// Make sure all spawned goroutines finish executing before returning.
-	var wg sync.WaitGroup
-	defer func() {
-		wg.Wait()
-	}()
-
-	// solver accepts a block header and a nonce range to test. It is
-	// intended to be run as a goroutine.
-	targetDifficulty := blockchain.CompactToBig(header.Bits)
-	quit := make(chan bool)
-	results := make(chan sbResult)
-	solver := func(hdr wire.BlockHeader, startNonce, stopNonce uint32) {
-		defer wg.Done()
-
-		// We need to modify the nonce field of the header, so make sure
-		// we work with a copy of the original header.
-		for i := startNonce; i >= startNonce && i <= stopNonce; i++ {
-			select {
-			case <-quit:
-				return
-			default:
-				hdr.Nonce = i
-				hash := hdr.BlockHash()
-				if blockchain.HashToBig(&hash).Cmp(
-					targetDifficulty) <= 0 {
-
-					select {
-					case results <- sbResult{true, i}:
-					case <-quit:
-					}
-
-					return
-				}
-			}
-		}
-
-		select {
-		case results <- sbResult{false, 0}:
-		case <-quit:
-		}
-	}
-
-	startNonce := uint32(1)
-	stopNonce := uint32(math.MaxUint32)
-	numCores := uint32(runtime.NumCPU())
-	noncesPerCore := (stopNonce - startNonce) / numCores
-	wg.Add(int(numCores))
-	for i := uint32(0); i < numCores; i++ {
-		rangeStart := startNonce + (noncesPerCore * i)
-		rangeStop := startNonce + (noncesPerCore * (i + 1)) - 1
-		if i == numCores-1 {
-			rangeStop = stopNonce
-		}
-		go solver(*header, rangeStart, rangeStop)
-	}
-	for i := uint32(0); i < numCores; i++ {
-		result := <-results
-		if result.found {
-			close(quit)
-			header.Nonce = result.nonce
-			return true
-		}
-	}
-
-	return false
-}
-
 // genBlockChain generates a test chain with the given number of blocks.
 func genBlockChain(numBlocks uint32) ([]*chainhash.Hash, map[chainhash.Hash]*wire.MsgBlock) {
 	prevHash := chainParams.GenesisHash
-	prevHeader := &chainParams.GenesisBlock.Header
+	prevHeader := chainParams.GenesisBlock.BlockHeader()
 
 	hashes := make([]*chainhash.Hash, numBlocks)
 	blocks := make(map[chainhash.Hash]*wire.MsgBlock, numBlocks)
@@ -195,35 +110,42 @@ func genBlockChain(numBlocks uint32) ([]*chainhash.Hash, map[chainhash.Hash]*wir
 	// transaction. Each non-coinbase transaction spends outputs from
 	// the previous block. We also need to produce blocks that succeed
 	// validation through blockchain.CheckBlockSanity.
-	script := []byte{0x01, 0x01}
-	createTx := func(prevOut wire.OutPoint) *wire.MsgTx {
+	privKey, _ := btcec.PrivKeyFromBytes([]byte{0x01})
+	taprootKey := txscript.ComputeTaprootKeyNoScript(privKey.PubKey())
+	taprootScript, _ := txscript.PayToTaprootScript(taprootKey)
+	coinbaseScript := []byte{0x01, 0x01}
+	createTx := func(prevOut wire.OutPoint, isCoinbase bool) *wire.MsgTx {
+		sigScript := []byte{}
+		if isCoinbase {
+			sigScript = coinbaseScript
+		}
 		return &wire.MsgTx{
 			TxIn: []*wire.TxIn{{
 				PreviousOutPoint: prevOut,
-				SignatureScript:  script,
+				SignatureScript:  sigScript,
 			}},
-			TxOut: []*wire.TxOut{{PkScript: script}},
+			TxOut: []*wire.TxOut{{PkScript: taprootScript}},
 		}
 	}
 	for i := uint32(0); i < numBlocks; i++ {
 		txs := []*wire.MsgTx{
-			createTx(wire.OutPoint{Index: wire.MaxPrevOutIndex}),
-			createTx(wire.OutPoint{Hash: *prevHash, Index: 0}),
-			createTx(wire.OutPoint{Hash: *prevHash, Index: 1}),
+			createTx(wire.OutPoint{Index: wire.MaxPrevOutIndex}, true),
+			createTx(wire.OutPoint{Hash: *prevHash, Index: 0}, false),
+			createTx(wire.OutPoint{Hash: *prevHash, Index: 1}, false),
 		}
 		header := &wire.BlockHeader{
 			Version:    1,
 			PrevBlock:  *prevHash,
 			MerkleRoot: calcMerkleRoot(txs),
-			Timestamp:  prevHeader.Timestamp.Add(10 * time.Minute),
+			Timestamp:  prevHeader.Timestamp.Add(chainParams.TargetTimePerBlock),
 			Bits:       chainParams.PowLimitBits,
-			Nonce:      0,
 		}
-		if !solveBlock(header) {
-			panic(fmt.Sprintf("could not solve block at idx %v", i))
+		cert, err := blockchain.SolveBlock(header, chainParams.Net)
+		if err != nil {
+			panic(fmt.Sprintf("could not solve block at idx %v: %v", i, err))
 		}
 		block := &wire.MsgBlock{
-			Header:       *header,
+			MsgHeader:    wire.MsgHeader{MsgCertificate: wire.MsgCertificate{Certificate: cert}, BlockHeader: *header},
 			Transactions: txs,
 		}
 
@@ -245,7 +167,7 @@ func produceInvalidBlock(block *wire.MsgBlock) *wire.MsgBlock {
 	numTxs := len(block.Transactions)
 	lastTx := block.Transactions[numTxs-1]
 	blockCopy := &wire.MsgBlock{
-		Header:       block.Header,
+		MsgHeader:    block.MsgHeader,
 		Transactions: make([]*wire.MsgTx, numTxs),
 	}
 	copy(blockCopy.Transactions, block.Transactions)

@@ -1,23 +1,28 @@
 package chain
 
 import (
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"context"
+
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
 )
 
 // NeutrinoChainService is an interface that encapsulates all the public
 // methods of a *neutrino.ChainService
 type NeutrinoChainService interface {
-	Start() error
+	Start(ctx context.Context) error
 	GetBlock(chainhash.Hash, ...neutrino.QueryOption) (*btcutil.Block, error)
 	GetBlockHeight(*chainhash.Hash) (int32, error)
 	BestBlock() (*headerfs.BlockStamp, error)
+	BlockHeaderTipHeight() (int32, error)
+	FilterHeaderTipHeight() (int32, error)
+	BestPeerHeight() int32
 	GetBlockHash(int64) (*chainhash.Hash, error)
 	GetBlockHeader(*chainhash.Hash) (*wire.BlockHeader, error)
 	IsCurrent() bool

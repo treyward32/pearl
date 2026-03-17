@@ -1,14 +1,16 @@
 package wallet
 
 import (
+	"context"
+	"errors"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/chain"
-	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/chain"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
 )
 
 type mockChainClient struct {
@@ -19,7 +21,7 @@ type mockChainClient struct {
 
 var _ chain.Interface = (*mockChainClient)(nil)
 
-func (m *mockChainClient) Start() error {
+func (m *mockChainClient) Start(_ context.Context) error {
 	return nil
 }
 
@@ -89,6 +91,10 @@ func (m *mockChainClient) Notifications() <-chan interface{} {
 
 func (m *mockChainClient) BackEnd() string {
 	return "mock"
+}
+
+func (m *mockChainClient) SyncProgress() (*chain.SyncProgress, error) {
+	return nil, errors.New("not supported")
 }
 
 // TestMempoolAcceptCmd returns result of mempool acceptance tests indicating

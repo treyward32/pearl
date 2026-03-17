@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -56,39 +56,39 @@ func TestVerAckWire(t *testing.T) {
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version.
+		// Protocol version ProtocolVersion.
 		{
 			msgVerAck,
 			msgVerAck,
 			msgVerAckEncoded,
-			BIP0035Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Version.
+		// Protocol version ProtocolVersion.
 		{
 			msgVerAck,
 			msgVerAck,
 			msgVerAckEncoded,
-			BIP0031Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion.
+		// Protocol version ProtocolVersion.
 		{
 			msgVerAck,
 			msgVerAck,
 			msgVerAckEncoded,
-			NetAddressTimeVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion.
+		// Protocol version ProtocolVersion.
 		{
 			msgVerAck,
 			msgVerAck,
 			msgVerAckEncoded,
-			MultipleAddressVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 	}
@@ -97,13 +97,13 @@ func TestVerAckWire(t *testing.T) {
 	for i, test := range tests {
 		// Encode the message to wire format.
 		var buf bytes.Buffer
-		err := test.in.BtcEncode(&buf, test.pver, test.enc)
+		err := test.in.PrlEncode(&buf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcEncode #%d error %v", i, err)
+			t.Errorf("PrlEncode #%d error %v", i, err)
 			continue
 		}
 		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("BtcEncode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlEncode #%d\n got: %s want: %s", i,
 				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
 			continue
 		}
@@ -111,13 +111,13 @@ func TestVerAckWire(t *testing.T) {
 		// Decode the message from wire format.
 		var msg MsgVerAck
 		rbuf := bytes.NewReader(test.buf)
-		err = msg.BtcDecode(rbuf, test.pver, test.enc)
+		err = msg.PrlDecode(rbuf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcDecode #%d error %v", i, err)
+			t.Errorf("PrlDecode #%d error %v", i, err)
 			continue
 		}
 		if !reflect.DeepEqual(&msg, test.out) {
-			t.Errorf("BtcDecode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlDecode #%d\n got: %s want: %s", i,
 				spew.Sdump(msg), spew.Sdump(test.out))
 			continue
 		}

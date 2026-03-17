@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +18,7 @@ func createTestDatabase(t *testing.T) FilterDatabase {
 	tempDir := t.TempDir()
 
 	db, err := walletdb.Create(
-		"bdb", tempDir+"/test.db", true, time.Second*10,
+		"bdb", tempDir+"/test.db", true, time.Second*10, false,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {

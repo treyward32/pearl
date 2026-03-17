@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2024 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,54 +10,9 @@ import (
 	"strings"
 )
 
-// XXX pedro: we will probably need to bump this.
 const (
 	// ProtocolVersion is the latest protocol version this package supports.
-	ProtocolVersion uint32 = 70016
-
-	// MultipleAddressVersion is the protocol version which added multiple
-	// addresses per message (pver >= MultipleAddressVersion).
-	MultipleAddressVersion uint32 = 209
-
-	// NetAddressTimeVersion is the protocol version which added the
-	// timestamp field (pver >= NetAddressTimeVersion).
-	NetAddressTimeVersion uint32 = 31402
-
-	// BIP0031Version is the protocol version AFTER which a pong message
-	// and nonce field in ping were added (pver > BIP0031Version).
-	BIP0031Version uint32 = 60000
-
-	// BIP0035Version is the protocol version which added the mempool
-	// message (pver >= BIP0035Version).
-	BIP0035Version uint32 = 60002
-
-	// BIP0037Version is the protocol version which added new connection
-	// bloom filtering related messages and extended the version message
-	// with a relay flag (pver >= BIP0037Version).
-	BIP0037Version uint32 = 70001
-
-	// RejectVersion is the protocol version which added a new reject
-	// message.
-	RejectVersion uint32 = 70002
-
-	// BIP0111Version is the protocol version which added the SFNodeBloom
-	// service flag.
-	BIP0111Version uint32 = 70011
-
-	// SendHeadersVersion is the protocol version which added a new
-	// sendheaders message.
-	SendHeadersVersion uint32 = 70012
-
-	// FeeFilterVersion is the protocol version which added a new
-	// feefilter message.
-	FeeFilterVersion uint32 = 70013
-
-	// AddrV2Version is the protocol version which added two new messages.
-	// sendaddrv2 is sent during the version-verack handshake and signals
-	// support for sending and receiving the addrv2 message. In the future,
-	// new messages that occur during the version-verack handshake will not
-	// come with a protocol version bump.
-	AddrV2Version uint32 = 70016
+	ProtocolVersion uint32 = 1
 )
 
 const (
@@ -66,7 +21,7 @@ const (
 	NodeNetworkLimitedBlockThreshold = 288
 )
 
-// ServiceFlag identifies services supported by a bitcoin peer.
+// ServiceFlag identifies services supported by a peer.
 type ServiceFlag uint64
 
 const (
@@ -103,6 +58,10 @@ const (
 	// SFNodeNetWorkLimited is a flag used to indicate a peer supports serving
 	// the last 288 blocks.
 	SFNodeNetworkLimited = 1 << 10
+
+	// SFNodeP2PV2 is a flag used to indicate a peer supports BIP324 v2
+	// connections.
+	SFNodeP2PV2 = 1 << 11
 )
 
 // Map of service flags back to their constant names for pretty printing.
@@ -116,6 +75,7 @@ var sfStrings = map[ServiceFlag]string{
 	SFNodeCF:             "SFNodeCF",
 	SFNode2X:             "SFNode2X",
 	SFNodeNetworkLimited: "SFNodeNetworkLimited",
+	SFNodeP2PV2:          "SFNodeP2PV2",
 }
 
 // orderedSFStrings is an ordered list of service flags from highest to
@@ -130,6 +90,7 @@ var orderedSFStrings = []ServiceFlag{
 	SFNodeCF,
 	SFNode2X,
 	SFNodeNetworkLimited,
+	SFNodeP2PV2,
 }
 
 // HasFlag returns a bool indicating if the service has the given flag.
@@ -162,46 +123,50 @@ func (f ServiceFlag) String() string {
 	return s
 }
 
-// BitcoinNet represents which bitcoin network a message belongs to.
-type BitcoinNet uint32
+// PearlNet represents which network a message belongs to.
+type PearlNet uint32
 
-// Constants used to indicate the message bitcoin network. They can also be
+// Constants used to indicate the message network. They can also be
 // used to seek to the next message when a stream's state is unknown, but
 // this package does not provide that functionality since it's generally a
 // better idea to simply disconnect clients that are misbehaving over TCP.
 const (
-	// MainNet represents the main bitcoin network.
-	MainNet BitcoinNet = 0xd9b4bef9
+	// MainNet represents the main network.
+	MainNet PearlNet = 0x50524C4D // "PRLM" in ASCII
 
-	// TestNet represents the regression test network.
-	TestNet BitcoinNet = 0xdab5bffa
+	// RegTest represents the regression test network.
+	RegTest PearlNet = 0x50524C52 // "PRLR" in ASCII
 
-	// TestNet3 represents the test network (version 3).
-	TestNet3 BitcoinNet = 0x0709110b
+	// TestNet represents the Pearl test network.
+	TestNet PearlNet = 0x50524C31 // "PRL1" in ASCII
+
+	// TestNet2 represents the Pearl test network v2 (fresh genesis).
+	TestNet2 PearlNet = 0x50524C32 // "PRL2" in ASCII
 
 	// SigNet represents the public default SigNet. For custom signets,
-	// see CustomSignetParams.
-	SigNet BitcoinNet = 0x40CF030A
+	// see CustomSignetParams. Derived from SHA256d of the default challenge script.
+	SigNet PearlNet = 0x40CF030A
 
 	// SimNet represents the simulation test network.
-	SimNet BitcoinNet = 0x12141c16
+	SimNet PearlNet = 0x50524C53 // "PRLS" in ASCII
 )
 
-// bnStrings is a map of bitcoin networks back to their constant names for
+// netStrings is a map of networks back to their constant names for
 // pretty printing.
-var bnStrings = map[BitcoinNet]string{
+var netStrings = map[PearlNet]string{
 	MainNet:  "MainNet",
+	RegTest:  "RegTest",
 	TestNet:  "TestNet",
-	TestNet3: "TestNet3",
+	TestNet2: "TestNet2",
 	SigNet:   "SigNet",
 	SimNet:   "SimNet",
 }
 
-// String returns the BitcoinNet in human-readable form.
-func (n BitcoinNet) String() string {
-	if s, ok := bnStrings[n]; ok {
+// String returns the PearlNet in human-readable form.
+func (n PearlNet) String() string {
+	if s, ok := netStrings[n]; ok {
 		return s
 	}
 
-	return fmt.Sprintf("Unknown BitcoinNet (%d)", uint32(n))
+	return fmt.Sprintf("Unknown PearlNet (%d)", uint32(n))
 }

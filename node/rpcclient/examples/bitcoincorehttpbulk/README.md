@@ -1,14 +1,14 @@
-Bitcoin Core Batch HTTP POST Example
-==============================
+Batch HTTP POST Example
+=======================
 
-This example shows how to use the rpclient package to connect to a Bitcoin Core RPC server using HTTP POST and batch JSON-RPC mode with TLS disabled.
+This example shows how to use the rpcclient package to connect to an RPC server using HTTP POST and batch JSON-RPC mode with TLS disabled.
 
 ## Running the Example
 
-The first step is to use `go get` to download and install the rpcclient package:
+The first step is to ensure the module is available. From the project root:
 
 ```bash
-$ go get github.com/btcsuite/btcd/rpcclient
+$ go mod download
 ```
 
 Next, modify the `main.go` source to specify the correct RPC username and
@@ -22,8 +22,8 @@ password for the RPC server:
 Finally, navigate to the example's directory and run it with:
 
 ```bash
-$ cd $GOPATH/src/github.com/btcsuite/btcd/rpcclient/examples/bitcoincorehttp
-$ go run *.go
+$ cd node/rpcclient/examples/bitcoincorehttpbulk
+$ go run .
 ```
 
 ## License

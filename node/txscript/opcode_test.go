@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ import (
 func TestOpcodeDisabled(t *testing.T) {
 	t.Parallel()
 
-	tests := []byte{OP_CAT, OP_SUBSTR, OP_LEFT, OP_RIGHT, OP_INVERT,
+	tests := []byte{OP_SUBSTR, OP_LEFT, OP_RIGHT, OP_INVERT,
 		OP_AND, OP_OR, OP_2MUL, OP_2DIV, OP_MUL, OP_DIV, OP_MOD,
 		OP_LSHIFT, OP_RSHIFT,
 	}
@@ -124,7 +124,13 @@ func TestOpcodeDisasm(t *testing.T) {
 
 		// OP_UNKNOWN#.
 		case opcodeVal >= 0xbb && opcodeVal <= 0xf9 || opcodeVal == 0xfc:
-			expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
+			switch opcodeVal {
+			// OP_CHECKXMSSSIG
+			case 0xde:
+				expectedStr = "OP_CHECKXMSSSIG"
+			default:
+				expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
+			}
 		}
 
 		var buf strings.Builder
@@ -195,6 +201,9 @@ func TestOpcodeDisasm(t *testing.T) {
 			// OP_UNKNOWN186 a.k.a 0xba is now OP_CHECKSIGADD.
 			case 0xba:
 				expectedStr = "OP_CHECKSIGADD"
+			// 0xde is OP_CHECKXMSSSIG.
+			case 0xde:
+				expectedStr = "OP_CHECKXMSSSIG"
 			default:
 				expectedStr = "OP_UNKNOWN" + strconv.Itoa(opcodeVal)
 			}

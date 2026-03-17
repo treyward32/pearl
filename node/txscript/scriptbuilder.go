@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -64,14 +64,11 @@ func (e ErrScriptNotCanonical) Error() string {
 // are therefore guaranteed not to execute will not be pushed and will result in
 // the Script function returning an error.
 //
-// For example, the following would build a 2-of-3 multisig script for usage in
-// a pay-to-script-hash (although in this situation MultiSigScript() would be a
-// better choice to generate the script):
+// For example, the following would build a simple Pay-to-Taproot
+// (P2TR) output script:
 //
 //	builder := txscript.NewScriptBuilder()
-//	builder.AddOp(txscript.OP_2).AddData(pubKey1).AddData(pubKey2)
-//	builder.AddData(pubKey3).AddOp(txscript.OP_3)
-//	builder.AddOp(txscript.OP_CHECKMULTISIG)
+//	builder.AddOp(txscript.OP_1).AddData(taprootOutputKey)
 //	script, err := builder.Script()
 //	if err != nil {
 //		// Handle the error.

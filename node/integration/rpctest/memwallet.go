@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,17 +8,19 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"sync"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 var (
@@ -140,7 +142,7 @@ func newMemWallet(net *chaincfg.Params, harnessID uint32) (*memWallet, error) {
 	}
 
 	// Track the coinbase generation address to ensure we properly track
-	// newly generated bitcoin we can spend.
+	// newly generated coins we can spend.
 	addrs := make(map[uint32]btcutil.Address)
 	addrs[0] = coinbaseAddr
 
@@ -171,7 +173,7 @@ func (m *memWallet) SyncedHeight() int32 {
 	return m.currentHeight
 }
 
-// SetRPCClient saves the passed rpc connection to btcd as the wallet's
+// SetRPCClient saves the passed rpc connection to pearld as the wallet's
 // personal rpc connection.
 func (m *memWallet) SetRPCClient(rpcClient *rpcclient.Client) {
 	m.rpc = rpcClient
@@ -325,9 +327,7 @@ func (m *memWallet) unwindBlock(update *chainUpdate) {
 		delete(m.utxos, utxo)
 	}
 
-	for outPoint, utxo := range undo.utxosDestroyed {
-		m.utxos[outPoint] = utxo
-	}
+	maps.Copy(m.utxos, undo.utxosDestroyed)
 
 	delete(m.reorgJournal, update.blockHeight)
 }
@@ -374,10 +374,10 @@ func (m *memWallet) NewAddress() (btcutil.Address, error) {
 	return m.newAddress()
 }
 
-// fundTx attempts to fund a transaction sending amt bitcoin. The coins are
+// fundTx attempts to fund a transaction sending amt pearls. The coins are
 // selected such that the final amount spent pays enough fees as dictated by the
 // passed fee rate. The passed fee rate should be expressed in
-// satoshis-per-byte. The transaction being funded can optionally include a
+// grains-per-byte. The transaction being funded can optionally include a
 // change output indicated by the change boolean.
 //
 // NOTE: The memWallet's mutex must be held when this function is called.
@@ -449,7 +449,7 @@ func (m *memWallet) fundTx(tx *wire.MsgTx, amt btcutil.Amount,
 
 // SendOutputs creates, then sends a transaction paying to the specified output
 // while observing the passed fee rate. The passed fee rate should be expressed
-// in satoshis-per-byte.
+// in grains-per-byte.
 func (m *memWallet) SendOutputs(outputs []*wire.TxOut,
 	feeRate btcutil.Amount) (*chainhash.Hash, error) {
 
@@ -477,7 +477,7 @@ func (m *memWallet) SendOutputsWithoutChange(outputs []*wire.TxOut,
 
 // CreateTransaction returns a fully signed transaction paying to the specified
 // outputs while observing the desired fee rate. The passed fee rate should be
-// expressed in satoshis-per-byte. The transaction being created can optionally
+// expressed in grains-per-byte. The transaction being created can optionally
 // include a change output indicated by the change boolean.
 //
 // This function is safe for concurrent access.
@@ -506,6 +506,23 @@ func (m *memWallet) CreateTransaction(outputs []*wire.TxOut,
 	// Along the way record all outputs being spent in order to avoid a
 	// potential double spend.
 	spentOutputs := make([]*utxo, 0, len(tx.TxIn))
+
+	// First, create a map of all previous outputs that will be spent
+	prevOuts := make(map[wire.OutPoint]*wire.TxOut)
+	for _, txIn := range tx.TxIn {
+		outPoint := txIn.PreviousOutPoint
+		utxo := m.utxos[outPoint]
+		prevOuts[outPoint] = &wire.TxOut{
+			PkScript: utxo.pkScript,
+			Value:    int64(utxo.value),
+		}
+	}
+
+	// Create the output fetcher and sighashes with all inputs
+	outFetcher := txscript.NewMultiPrevOutFetcher(prevOuts)
+	sigHashes := txscript.NewTxSigHashes(tx, outFetcher)
+
+	// Now sign each input
 	for i, txIn := range tx.TxIn {
 		outPoint := txIn.PreviousOutPoint
 		utxo := m.utxos[outPoint]
@@ -522,13 +539,12 @@ func (m *memWallet) CreateTransaction(outputs []*wire.TxOut,
 
 		privKey, _ := btcec.PrivKeyFromBytes(privKeyOld.Serialize())
 
-		sigScript, err := txscript.SignatureScript(tx, i, utxo.pkScript,
-			txscript.SigHashAll, privKey, true)
+		witness, err := txscript.TaprootWitnessSignature(tx, sigHashes, i, int64(utxo.value), utxo.pkScript, txscript.SigHashDefault, privKey)
 		if err != nil {
 			return nil, err
 		}
 
-		txIn.SignatureScript = sigScript
+		txIn.Witness = witness
 
 		spentOutputs = append(spentOutputs, utxo)
 	}
@@ -583,12 +599,11 @@ func (m *memWallet) ConfirmedBalance() btcutil.Amount {
 	return balance
 }
 
-// keyToAddr maps the passed private to corresponding p2pkh address.
+// keyToAddr maps the passed private to corresponding P2TR address (SegWit v1).
 func keyToAddr(key *btcec.PrivateKey, net *chaincfg.Params) (btcutil.Address, error) {
-	serializedKey := key.PubKey().SerializeCompressed()
-	pubKeyAddr, err := btcutil.NewAddressPubKey(serializedKey, net)
-	if err != nil {
-		return nil, err
-	}
-	return pubKeyAddr.AddressPubKeyHash(), nil
+	pubKey := key.PubKey()
+	tapKey := txscript.ComputeTaprootKeyNoScript(pubKey)
+	tapKeyBytes := schnorr.SerializePubKey(tapKey)
+
+	return btcutil.NewAddressTaproot(tapKeyBytes, net)
 }

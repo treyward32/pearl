@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/integration/rpctest"
-	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
 )
 
 func testGetBestBlock(r *rpctest.Harness, t *testing.T) {
@@ -130,7 +130,7 @@ func testBulkClient(r *rpctest.Harness, t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		blockHash := msgBlock.Header.BlockHash()
+		blockHash := msgBlock.BlockHeader().BlockHash()
 		if !isKnownBlockHash(blockHash) {
 			t.Fatalf("expected hash %s  to be in generated hash list", blockHash)
 		}
@@ -183,6 +183,7 @@ func testGetNetworkHashPS(r *rpctest.Harness, t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// With WTEMA, default is 120 blocks: startHeight = 148 - 120 = 28
 	expectedNetworkHashPS := calculateHashesPerSecBetweenBlockHeights(r, t, 28, 148)
 
 	if networkHashPS != expectedNetworkHashPS {
@@ -191,20 +192,21 @@ func testGetNetworkHashPS(r *rpctest.Harness, t *testing.T) {
 }
 
 func testGetNetworkHashPS2(r *rpctest.Harness, t *testing.T) {
+	// With WTEMA, negative or zero blocks default to 120
 	networkHashPS2BlockTests := []struct {
 		blocks              int
 		expectedStartHeight int64
 		expectedEndHeight   int64
 	}{
-		// Test receiving command for negative blocks
-		{blocks: -200, expectedStartHeight: 0, expectedEndHeight: 148},
-		// Test receiving command for 0 blocks
-		{blocks: 0, expectedStartHeight: 0, expectedEndHeight: 148},
+		// Test receiving command for negative blocks -> defaults to 120: startHeight = 148 - 120 = 28
+		{blocks: -200, expectedStartHeight: 28, expectedEndHeight: 148},
+		// Test receiving command for 0 blocks -> defaults to 120: startHeight = 148 - 120 = 28
+		{blocks: 0, expectedStartHeight: 28, expectedEndHeight: 148},
 		// Test receiving command for less than total blocks -> expectedStartHeight = 148 - 100 = 48
 		{blocks: 100, expectedStartHeight: 48, expectedEndHeight: 148},
 		// Test receiving command for exact total blocks -> expectedStartHeight = 148 - 148 = 0
 		{blocks: 148, expectedStartHeight: 0, expectedEndHeight: 148},
-		// Test receiving command for greater than total blocks
+		// Test receiving command for greater than total blocks -> startHeight = 148 - 200 = -52 -> 0
 		{blocks: 200, expectedStartHeight: 0, expectedEndHeight: 148},
 	}
 
@@ -228,22 +230,23 @@ func testGetNetworkHashPS2(r *rpctest.Harness, t *testing.T) {
 }
 
 func testGetNetworkHashPS3(r *rpctest.Harness, t *testing.T) {
+	// With WTEMA, negative or zero blocks default to 120
 	networkHashPS3BlockTests := []struct {
 		height              int
 		blocks              int
 		expectedStartHeight int64
 		expectedEndHeight   int64
 	}{
-		// Test receiving command for negative height -> expectedEndHeight force to 148
-		// - And negative blocks -> expectedStartHeight = 148 - ((148 % 2016) + 1) =  -1 -> forced to 0
-		{height: -200, blocks: -120, expectedStartHeight: 0, expectedEndHeight: 148},
-		// - And zero blocks -> expectedStartHeight = 148 - ((148 % 2016) + 1) = -1 -> forced to 0
-		{height: -200, blocks: 0, expectedStartHeight: 0, expectedEndHeight: 148},
+		// Test receiving command for negative height -> expectedEndHeight = best (148)
+		// - And negative blocks -> defaults to 120: startHeight = 148 - 120 = 28
+		{height: -200, blocks: -120, expectedStartHeight: 28, expectedEndHeight: 148},
+		// - And zero blocks -> defaults to 120: startHeight = 148 - 120 = 28
+		{height: -200, blocks: 0, expectedStartHeight: 28, expectedEndHeight: 148},
 		// - And positive blocks less than total blocks -> expectedStartHeight = 148 - 100 = 48
 		{height: -200, blocks: 100, expectedStartHeight: 48, expectedEndHeight: 148},
 		// - And positive blocks equal to total blocks
 		{height: -200, blocks: 148, expectedStartHeight: 0, expectedEndHeight: 148},
-		// - And positive blocks greater than total blocks
+		// - And positive blocks greater than total blocks -> startHeight = 148 - 250 = -102 -> 0
 		{height: -200, blocks: 250, expectedStartHeight: 0, expectedEndHeight: 148},
 
 		// Test receiving command for zero height
@@ -252,15 +255,15 @@ func testGetNetworkHashPS3(r *rpctest.Harness, t *testing.T) {
 		{height: 0, blocks: 120, expectedStartHeight: 0, expectedEndHeight: 0},
 
 		// Tests for valid block height -> expectedEndHeight set as height
-		// - And negative blocks -> expectedStartHeight = 148 - ((148 % 2016) + 1) = -1 -> forced to 0
+		// - And negative blocks -> defaults to 120: startHeight = 100 - 120 = -20 -> 0
 		{height: 100, blocks: -120, expectedStartHeight: 0, expectedEndHeight: 100},
-		// - And zero blocks -> expectedStartHeight = 148 - ((148 % 2016) + 1) = -1 -> forced to 0
+		// - And zero blocks -> defaults to 120: startHeight = 100 - 120 = -20 -> 0
 		{height: 100, blocks: 0, expectedStartHeight: 0, expectedEndHeight: 100},
 		// - And positive blocks less than command blocks -> expectedStartHeight = 100 - 70 = 30
 		{height: 100, blocks: 70, expectedStartHeight: 30, expectedEndHeight: 100},
 		// - And positive blocks equal to command blocks -> expectedStartHeight = 100 - 100 = 0
 		{height: 100, blocks: 100, expectedStartHeight: 0, expectedEndHeight: 100},
-		// - And positive blocks greater than command blocks -> expectedStartHeight = 100 - 200 = -100 -> forced to 0
+		// - And positive blocks greater than command blocks -> expectedStartHeight = 100 - 200 = -100 -> 0
 		{height: 100, blocks: 200, expectedStartHeight: 0, expectedEndHeight: 100},
 
 		// Test receiving command for height greater than block height
@@ -307,9 +310,9 @@ func TestMain(m *testing.M) {
 	// In order to properly test scenarios on as if we were on mainnet,
 	// ensure that non-standard transactions aren't accepted into the
 	// mempool or relayed.
-	btcdCfg := []string{"--rejectnonstd"}
+	pearldCfg := []string{"--rejectnonstd"}
 	primaryHarness, err = rpctest.New(
-		&chaincfg.SimNetParams, nil, btcdCfg, "",
+		&chaincfg.SimNetParams, nil, pearldCfg, "",
 	)
 	if err != nil {
 		fmt.Println("unable to create primary harness: ", err)
@@ -349,7 +352,7 @@ func TestRpcServer(t *testing.T) {
 	defer func() {
 		// If one of the integration tests caused a panic within the main
 		// goroutine, then tear down all the harnesses in order to avoid
-		// any leaked btcd processes.
+		// any leaked pearld processes.
 		if r := recover(); r != nil {
 			fmt.Println("recovering from test panic: ", r)
 			if err := rpctest.TearDownAll(); err != nil {

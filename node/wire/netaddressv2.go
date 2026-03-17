@@ -25,10 +25,10 @@ var (
 	ErrInvalidAddressSize = fmt.Errorf("invalid address size")
 
 	// ErrSkippedNetworkID is returned when the cjdns, i2p, or unknown
-	// networks are encountered during decoding. btcd does not support i2p
+	// networks are encountered during decoding. pearld does not support i2p
 	// or cjdns addresses. In the case of an unknown networkID, this is so
 	// that a future BIP reserving a new networkID does not cause older
-	// addrv2-supporting btcd software to disconnect upon receiving the new
+	// addrv2-supporting pearld software to disconnect upon receiving the new
 	// addresses. This error can also be returned when an OnionCat-encoded
 	// torv2 address is received with the ipv6 networkID. This error
 	// signals to the caller to continue reading.
@@ -76,7 +76,7 @@ func isOnionCatTor(ip net.IP) bool {
 type NetAddressV2 struct {
 	// Last time the address was seen. This is, unfortunately, encoded as a
 	// uint32 on the wire and therefore is limited to 2106. This field is
-	// not present in the bitcoin version message (MsgVersion) nor was it
+	// not present in the version message (MsgVersion) nor was it
 	// added until protocol version >= NetAddressTimeVersion.
 	Timestamp time.Time
 

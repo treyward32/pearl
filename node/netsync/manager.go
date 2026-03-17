@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/mempool"
-	peerpkg "github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	peerpkg "github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
@@ -57,29 +57,29 @@ type newPeerMsg struct {
 	peer *peerpkg.Peer
 }
 
-// blockMsg packages a bitcoin block message and the peer it came from together
+// blockMsg packages a block message and the peer it came from together
 // so the block handler has access to that information.
 type blockMsg struct {
 	block *btcutil.Block
 	peer  *peerpkg.Peer
-	reply chan struct{}
+	reply chan error
 }
 
-// invMsg packages a bitcoin inv message and the peer it came from together
+// invMsg packages an inv message and the peer it came from together
 // so the block handler has access to that information.
 type invMsg struct {
 	inv  *wire.MsgInv
 	peer *peerpkg.Peer
 }
 
-// headersMsg packages a bitcoin headers message and the peer it came from
+// headersMsg packages a headers message and the peer it came from
 // together so the block handler has access to that information.
 type headersMsg struct {
 	headers *wire.MsgHeaders
 	peer    *peerpkg.Peer
 }
 
-// notFoundMsg packages a bitcoin notfound message and the peer it came from
+// notFoundMsg packages a notfound message and the peer it came from
 // together so the block handler has access to that information.
 type notFoundMsg struct {
 	notFound *wire.MsgNotFound
@@ -91,7 +91,7 @@ type donePeerMsg struct {
 	peer *peerpkg.Peer
 }
 
-// txMsg packages a bitcoin tx message and the peer it came from together
+// txMsg packages a tx message and the peer it came from together
 // so the block handler has access to that information.
 type txMsg struct {
 	tx    *btcutil.Tx
@@ -262,24 +262,10 @@ func (sm *SyncManager) startSync() {
 		return
 	}
 
-	// Once the segwit soft-fork package has activated, we only
-	// want to sync from peers which are witness enabled to ensure
-	// that we fully validate all blockchain data.
-	segwitActive, err := sm.chain.IsDeploymentActive(chaincfg.DeploymentSegwit)
-	if err != nil {
-		log.Errorf("Unable to query for segwit soft-fork state: %v", err)
-		return
-	}
-
 	best := sm.chain.BestSnapshot()
 	var higherPeers, equalPeers []*peerpkg.Peer
 	for peer, state := range sm.peerStates {
 		if !state.syncCandidate {
-			continue
-		}
-
-		if segwitActive && !peer.IsWitnessEnabled() {
-			log.Debugf("peer %v not witness enabled, skipping", peer)
 			continue
 		}
 
@@ -307,6 +293,11 @@ func (sm *SyncManager) startSync() {
 		// it in the set of better peers from which we'll randomly
 		// select.
 		higherPeers = append(higherPeers, peer)
+	}
+
+	if sm.chain.IsCurrent() && len(higherPeers) == 0 {
+		log.Infof("Caught up to block %s(%d)", best.Hash.String(), best.Height)
+		return
 	}
 
 	// Pick randomly from the set of peers greater than our block height,
@@ -400,20 +391,6 @@ func (sm *SyncManager) isSyncCandidate(peer *peerpkg.Peer) bool {
 
 		// Candidate if all checks passed.
 		return true
-	}
-
-	// If the segwit soft-fork package has activated, then the peer must
-	// also be upgraded.
-	segwitActive, err := sm.chain.IsDeploymentActive(
-		chaincfg.DeploymentSegwit,
-	)
-	if err != nil {
-		log.Errorf("Unable to query for segwit soft-fork state: %v",
-			err)
-	}
-
-	if segwitActive && !peer.IsWitnessEnabled() {
-		return false
 	}
 
 	var (
@@ -686,12 +663,13 @@ func (sm *SyncManager) current() bool {
 }
 
 // handleBlockMsg handles block messages from all peers.
-func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
+// Returns error if Block violates consensus rules.
+func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) error {
 	peer := bmsg.peer
 	state, exists := sm.peerStates[peer]
 	if !exists {
 		log.Warnf("Received block message from unknown peer %s", peer)
-		return
+		return nil
 	}
 
 	// If we didn't ask for this block then the peer is misbehaving.
@@ -706,7 +684,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 			log.Warnf("Got unrequested block %v from %s -- "+
 				"disconnecting", blockHash, peer.Addr())
 			peer.Disconnect()
-			return
+			return nil
 		}
 	}
 
@@ -764,7 +742,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 		// send it.
 		code, reason := mempool.ErrToRejectErr(err)
 		peer.PushRejectMsg(wire.CmdBlock, code, reason, blockHash, false)
-		return
+		return err
 	}
 
 	// Meta-data about the new block this peer is reporting. We use this
@@ -784,21 +762,16 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 		// We've just received an orphan block from a peer. In order
 		// to update the height of the peer, we try to extract the
 		// block height from the scriptSig of the coinbase transaction.
-		// Extraction is only attempted if the block's version is
-		// high enough (ver 2+).
-		header := &bmsg.block.MsgBlock().Header
-		if blockchain.ShouldHaveSerializedBlockHeight(header) {
-			coinbaseTx := bmsg.block.Transactions()[0]
-			cbHeight, err := blockchain.ExtractCoinbaseHeight(coinbaseTx)
-			if err != nil {
-				log.Warnf("Unable to extract height from "+
-					"coinbase tx: %v", err)
-			} else {
-				log.Debugf("Extracted height of %v from "+
-					"orphan block", cbHeight)
-				heightUpdate = cbHeight
-				blkHashUpdate = blockHash
-			}
+		coinbaseTx := bmsg.block.Transactions()[0]
+		cbHeight, err := blockchain.ExtractCoinbaseHeight(coinbaseTx)
+		if err != nil {
+			log.Warnf("Unable to extract height from "+
+				"coinbase tx: %v", err)
+		} else {
+			log.Debugf("Extracted height of %v from "+
+				"orphan block", cbHeight)
+			heightUpdate = cbHeight
+			blkHashUpdate = blockHash
 		}
 
 		orphanRoot := sm.chain.GetOrphanRoot(blockHash)
@@ -847,7 +820,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 		if err := sm.chain.FlushUtxoCache(blockchain.FlushPeriodic); err != nil {
 			log.Errorf("Error while flushing the blockchain cache: %v", err)
 		}
-		return
+		return nil
 	}
 
 	// This is headers-first mode, so if the block is not a checkpoint
@@ -858,7 +831,7 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 			len(state.requestedBlocks) < minInFlightBlocks {
 			sm.fetchHeaderBlocks()
 		}
-		return
+		return nil
 	}
 
 	// This is headers-first mode and the block is a checkpoint.  When
@@ -874,12 +847,12 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 		if err != nil {
 			log.Warnf("Failed to send getheaders message to "+
 				"peer %s: %v", peer.Addr(), err)
-			return
+			return nil
 		}
 		log.Infof("Downloading headers for blocks %d to %d from "+
 			"peer %s", prevHeight+1, sm.nextCheckpoint.Height,
 			sm.syncPeer.Addr())
-		return
+		return nil
 	}
 
 	// This is headers-first mode, the block is a checkpoint, and there are
@@ -893,8 +866,9 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) {
 	if err != nil {
 		log.Warnf("Failed to send getblocks message to peer %s: %v",
 			peer.Addr(), err)
-		return
+		return nil
 	}
+	return nil
 }
 
 // fetchHeaderBlocks creates and sends a request to the syncPeer for the next
@@ -931,12 +905,8 @@ func (sm *SyncManager) fetchHeaderBlocks() {
 			sm.requestedBlocks[*node.hash] = struct{}{}
 			syncPeerState.requestedBlocks[*node.hash] = struct{}{}
 
-			// If we're fetching from a witness enabled peer
-			// post-fork, then ensure that we receive all the
-			// witness data in the blocks.
-			if sm.syncPeer.IsWitnessEnabled() {
-				iv.Type = wire.InvTypeWitnessBlock
-			}
+			// SegWit is always active; request full witness blocks.
+			iv.Type = wire.InvTypeWitnessBlock
 
 			gdmsg.AddInvVect(iv)
 			numRequested++
@@ -980,7 +950,8 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) {
 	// previous and that checkpoints match.
 	receivedCheckpoint := false
 	var finalHash *chainhash.Hash
-	for _, blockHeader := range msg.Headers {
+	for _, msgHeader := range msg.Headers {
+		blockHeader := &msgHeader.BlockHeader
 		blockHash := blockHeader.BlockHash()
 		finalHash = &blockHash
 
@@ -1227,14 +1198,6 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				}
 			}
 
-			// Ignore invs block invs from non-witness enabled
-			// peers, as after segwit activation we only want to
-			// download from peers that can provide us full witness
-			// data for blocks.
-			if !peer.IsWitnessEnabled() && iv.Type == wire.InvTypeBlock {
-				continue
-			}
-
 			// Add it to the request queue.
 			state.requestQueue = append(state.requestQueue, iv)
 			continue
@@ -1271,10 +1234,20 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 			// inventory message, so force a request for more.  This
 			// should only happen if we're on a really long side
 			// chain.
+			//
+			// Skip the request when the block is our current tip.
+			// Two peers that accept the same block at roughly the
+			// same time will each send inv to the other; without
+			// this guard the getblocks triggers an inv-response
+			// stall timeout because the remote peer has nothing
+			// to reply with.  See btcsuite/btcd#725.
 			if i == lastBlock {
-				// Request blocks after this one up to the
-				// final one the remote peer knows about (zero
-				// stop hash).
+				best := sm.chain.BestSnapshot()
+				if iv.Hash.IsEqual(&best.Hash) {
+					log.Debugf("Skipping getblocks for inv from "+
+						"%s: block %s is current tip", peer, iv.Hash)
+					continue
+				}
 				locator := sm.chain.BlockLocatorFromHash(&iv.Hash)
 				peer.PushGetBlocksMsg(locator, &zeroHash)
 			}
@@ -1301,10 +1274,7 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				limitAdd(sm.requestedBlocks, iv.Hash, maxRequestedBlocks)
 				limitAdd(state.requestedBlocks, iv.Hash, maxRequestedBlocks)
 
-				if peer.IsWitnessEnabled() {
-					iv.Type = wire.InvTypeWitnessBlock
-				}
-
+				iv.Type = wire.InvTypeWitnessBlock
 				gdmsg.AddInvVect(iv)
 				numRequested++
 			}
@@ -1318,12 +1288,7 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				limitAdd(sm.requestedTxns, iv.Hash, maxRequestedTxns)
 				limitAdd(state.requestedTxns, iv.Hash, maxRequestedTxns)
 
-				// If the peer is capable, request the txn
-				// including all witness data.
-				if peer.IsWitnessEnabled() {
-					iv.Type = wire.InvTypeWitnessTx
-				}
-
+				iv.Type = wire.InvTypeWitnessTx
 				gdmsg.AddInvVect(iv)
 				numRequested++
 			}
@@ -1339,6 +1304,66 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 	}
 }
 
+// processMessage handles a single message from the block handler queue.
+func (sm *SyncManager) processMessage(m interface{}) {
+	switch msg := m.(type) {
+	case *newPeerMsg:
+		sm.handleNewPeerMsg(msg.peer)
+
+	case *txMsg:
+		sm.handleTxMsg(msg)
+		msg.reply <- struct{}{}
+
+	case *blockMsg:
+		msg.reply <- sm.handleBlockMsg(msg)
+
+	case *invMsg:
+		sm.handleInvMsg(msg)
+
+	case *headersMsg:
+		sm.handleHeadersMsg(msg)
+
+	case *notFoundMsg:
+		sm.handleNotFoundMsg(msg)
+
+	case *donePeerMsg:
+		sm.handleDonePeerMsg(msg.peer)
+
+	case getSyncPeerMsg:
+		var peerID int32
+		if sm.syncPeer != nil {
+			peerID = sm.syncPeer.ID()
+		}
+		msg.reply <- peerID
+
+	case processBlockMsg:
+		_, isOrphan, err := sm.chain.ProcessBlock(
+			msg.block, msg.flags)
+		if err != nil {
+			msg.reply <- processBlockResponse{
+				isOrphan: false,
+				err:      err,
+			}
+		}
+
+		msg.reply <- processBlockResponse{
+			isOrphan: isOrphan,
+			err:      nil,
+		}
+
+	case isCurrentMsg:
+		msg.reply <- sm.current()
+
+	case pauseMsg:
+		// Wait until the sender unpauses the manager.
+		<-msg.unpause
+
+	default:
+		log.Warnf("Invalid message type in block "+
+			"handler: %T", msg)
+	}
+}
+
 // blockHandler is the main handler for the sync manager.  It must be run as a
 // goroutine.  It processes block and inv messages in a separate goroutine
 // from the peer handlers so the block (MsgBlock) messages are handled by a
@@ -1349,73 +1374,57 @@ func (sm *SyncManager) blockHandler() {
 	stallTicker := time.NewTicker(stallSampleInterval)
 	defer stallTicker.Stop()
 
+	maxQueueSize := cap(sm.msgChan)
+	queue := list.New()
+
+	// How often (in messages processed) to check for a high-priority block to process out of order.
+	oooPeriod := 2 + maxQueueSize/30
+	counter := 0
+
 out:
 	for {
-		select {
-		case m := <-sm.msgChan:
-			switch msg := m.(type) {
-			case *newPeerMsg:
-				sm.handleNewPeerMsg(msg.peer)
-
-			case *txMsg:
-				sm.handleTxMsg(msg)
-				msg.reply <- struct{}{}
-
-			case *blockMsg:
-				sm.handleBlockMsg(msg)
-				msg.reply <- struct{}{}
-
-			case *invMsg:
-				sm.handleInvMsg(msg)
-
-			case *headersMsg:
-				sm.handleHeadersMsg(msg)
-
-			case *notFoundMsg:
-				sm.handleNotFoundMsg(msg)
-
-			case *donePeerMsg:
-				sm.handleDonePeerMsg(msg.peer)
-
-			case getSyncPeerMsg:
-				var peerID int32
-				if sm.syncPeer != nil {
-					peerID = sm.syncPeer.ID()
-				}
-				msg.reply <- peerID
-
-			case processBlockMsg:
-				_, isOrphan, err := sm.chain.ProcessBlock(
-					msg.block, msg.flags)
-				if err != nil {
-					msg.reply <- processBlockResponse{
-						isOrphan: false,
-						err:      err,
-					}
-				}
-
-				msg.reply <- processBlockResponse{
-					isOrphan: isOrphan,
-					err:      nil,
-				}
-
-			case isCurrentMsg:
-				msg.reply <- sm.current()
-
-			case pauseMsg:
-				// Wait until the sender unpauses the manager.
-				<-msg.unpause
-
-			default:
-				log.Warnf("Invalid message type in block "+
-					"handler: %T", msg)
+		// If the queue is empty, block until a message arrives.
+		if queue.Len() == 0 {
+			counter = 0
+			select {
+			case m := <-sm.msgChan:
+				queue.PushBack(m)
+			case <-stallTicker.C:
+				sm.handleStallSample()
+				continue
+			case <-sm.quit:
+				break out
 			}
+		}
 
+		// Drain pending messages from the channel into the queue.
+	drain:
+		for queue.Len() < maxQueueSize {
+			select {
+			case m := <-sm.msgChan:
+				queue.PushBack(m)
+			default:
+				break drain
+			}
+		}
+
+		// Every tipPeriod messages, check for a priority block.
+		elem := queue.Front()
+		if counter == 0 {
+			elem = findBestBlockMsg(sm.chain, queue)
+		}
+		counter = (counter + 1) % oooPeriod
+
+		msg := queue.Remove(elem)
+
+		sm.processMessage(msg)
+
+		select {
 		case <-stallTicker.C:
 			sm.handleStallSample()
-
 		case <-sm.quit:
 			break out
+		default:
 		}
 	}
 
@@ -1450,7 +1459,7 @@ func (sm *SyncManager) handleBlockchainNotification(notification *blockchain.Not
 
 		// Generate the inventory vector and relay it.
 		iv := wire.NewInvVect(wire.InvTypeBlock, block.Hash())
-		sm.peerNotifier.RelayInventory(iv, block.MsgBlock().Header)
+		sm.peerNotifier.RelayInventory(iv, block.MsgBlock().MsgHeader)
 
 	// A block has been connected to the main block chain.
 	case blockchain.NTBlockConnected:
@@ -1550,10 +1559,10 @@ func (sm *SyncManager) QueueTx(tx *btcutil.Tx, peer *peerpkg.Peer, done chan str
 // QueueBlock adds the passed block message and peer to the block handling
 // queue. Responds to the done channel argument after the block message is
 // processed.
-func (sm *SyncManager) QueueBlock(block *btcutil.Block, peer *peerpkg.Peer, done chan struct{}) {
+func (sm *SyncManager) QueueBlock(block *btcutil.Block, peer *peerpkg.Peer, done chan error) {
 	// Don't accept more blocks if we're shutting down.
 	if atomic.LoadInt32(&sm.shutdown) != 0 {
-		done <- struct{}{}
+		done <- nil
 		return
 	}
 

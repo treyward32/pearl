@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -13,12 +13,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
-// BTCPerkvB is the units used to represent Bitcoin transaction fees.
-// This unit represents the fee in BTC for a transaction size of 1 kB.
-type BTCPerkvB = float64
+// PRLPerkvB is the units used to represent transaction fees.
+// This unit represents the fee in PRL for a transaction size of 1 kB.
+type PRLPerkvB = float64
 
 // AddNodeSubCmd defines the type used in the addnode JSON-RPC command for the
 // sub command field.
@@ -62,14 +62,14 @@ type TransactionInput struct {
 // CreateRawTransactionCmd defines the createrawtransaction JSON-RPC command.
 type CreateRawTransactionCmd struct {
 	Inputs   []TransactionInput
-	Amounts  map[string]float64 `jsonrpcusage:"{\"address\":amount,...}"` // In BTC
+	Amounts  map[string]float64 `jsonrpcusage:"{\"address\":amount,...}"` // In PRL
 	LockTime *int64
 }
 
 // NewCreateRawTransactionCmd returns a new instance which can be used to issue
 // a createrawtransaction JSON-RPC command.
 //
-// Amounts are in BTC. Passing in nil and the empty slice as inputs is equivalent,
+// Amounts are in PRL. Passing in nil and the empty slice as inputs is equivalent,
 // both gets interpreted as the empty slice.
 func NewCreateRawTransactionCmd(inputs []TransactionInput, amounts map[string]float64,
 	lockTime *int64) *CreateRawTransactionCmd {
@@ -146,7 +146,7 @@ type FundRawTransactionOpts struct {
 	ChangeType             *ChangeType           `json:"change_type,omitempty"`
 	IncludeWatching        *bool                 `json:"includeWatching,omitempty"`
 	LockUnspents           *bool                 `json:"lockUnspents,omitempty"`
-	FeeRate                *BTCPerkvB            `json:"feeRate,omitempty"` // BTC/kB
+	FeeRate                *PRLPerkvB            `json:"feeRate,omitempty"` // PRL/kB
 	SubtractFeeFromOutputs []int                 `json:"subtractFeeFromOutputs,omitempty"`
 	Replaceable            *bool                 `json:"replaceable,omitempty"`
 	ConfTarget             *int                  `json:"conf_target,omitempty"`
@@ -343,10 +343,8 @@ type TemplateRequest struct {
 	// Optional long polling.
 	LongPollID string `json:"longpollid,omitempty"`
 
-	// Optional template tweaking.  SigOpLimit and SizeLimit can be int64
-	// or bool.
-	SigOpLimit interface{} `json:"sigoplimit,omitempty"`
-	SizeLimit  interface{} `json:"sizelimit,omitempty"`
+	// Optional template tweaking.  VsizeLimit can be int64 or bool.
+	VsizeLimit interface{} `json:"vsizelimit,omitempty"`
 	MaxVersion uint32      `json:"maxversion,omitempty"`
 
 	// Basic pool extension from BIP 0023.
@@ -382,8 +380,7 @@ func convertTemplateRequestField(fieldName string, iface interface{}) (interface
 }
 
 // UnmarshalJSON provides a custom Unmarshal method for TemplateRequest.  This
-// is necessary because the SigOpLimit and SizeLimit fields can only be specific
-// types.
+// is necessary because the VsizeLimit field can only be specific types.
 func (t *TemplateRequest) UnmarshalJSON(data []byte) error {
 	type templateRequest TemplateRequest
 
@@ -392,19 +389,12 @@ func (t *TemplateRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// The SigOpLimit field can only be nil, bool, or int64.
-	val, err := convertTemplateRequestField("sigoplimit", request.SigOpLimit)
+	// The VsizeLimit field can only be nil, bool, or int64.
+	val, err := convertTemplateRequestField("vsizelimit", request.VsizeLimit)
 	if err != nil {
 		return err
 	}
-	request.SigOpLimit = val
-
-	// The SizeLimit field can only be nil, bool, or int64.
-	val, err = convertTemplateRequestField("sizelimit", request.SizeLimit)
-	if err != nil {
-		return err
-	}
-	request.SizeLimit = val
+	request.VsizeLimit = val
 
 	return nil
 }
@@ -521,15 +511,6 @@ type GetGenerateCmd struct{}
 // getgenerate JSON-RPC command.
 func NewGetGenerateCmd() *GetGenerateCmd {
 	return &GetGenerateCmd{}
-}
-
-// GetHashesPerSecCmd defines the gethashespersec JSON-RPC command.
-type GetHashesPerSecCmd struct{}
-
-// NewGetHashesPerSecCmd returns a new instance which can be used to issue a
-// gethashespersec JSON-RPC command.
-func NewGetHashesPerSecCmd() *GetHashesPerSecCmd {
-	return &GetHashesPerSecCmd{}
 }
 
 // GetInfoCmd defines the getinfo JSON-RPC command.
@@ -651,7 +632,7 @@ func NewGetRawMempoolCmd(verbose *bool) *GetRawMempoolCmd {
 
 // GetRawTransactionCmd defines the getrawtransaction JSON-RPC command.
 //
-// NOTE: This field is an int versus a bool to remain compatible with Bitcoin
+// NOTE: This field is an int versus a bool to remain compatible with Bitcoin Core
 // Core even though it really should be a bool.
 type GetRawTransactionCmd struct {
 	Txid    string
@@ -895,12 +876,12 @@ func NewSendRawTransactionCmd(hexTx string, allowHighFees *bool) *SendRawTransac
 	}
 }
 
-// NewSendRawTransactionCmd returns a new instance which can be used to issue a
-// sendrawtransaction JSON-RPC command to a bitcoind node.
-// maxFeeRate is the maximum fee rate for the transaction in BTC/kvB.
+// NewSendRawTransactionCmdWithMaxFeeRate returns a new instance which can be
+// used to issue a sendrawtransaction JSON-RPC command with a maxfeerate param.
+// maxFeeRate is the maximum fee rate for the transaction in PRL/kvB.
 //
 // A 0 maxFeeRate indicates that a maximum fee rate won't be enforced.
-func NewBitcoindSendRawTransactionCmd(hexTx string, maxFeeRate BTCPerkvB) *SendRawTransactionCmd {
+func NewSendRawTransactionCmdWithMaxFeeRate(hexTx string, maxFeeRate PRLPerkvB) *SendRawTransactionCmd {
 	return &SendRawTransactionCmd{
 		HexTx: hexTx,
 		FeeSetting: &AllowHighFeesOrMaxFeeRate{
@@ -1054,14 +1035,14 @@ type TestMempoolAcceptCmd struct {
 	RawTxns []string
 
 	// Reject transactions whose fee rate is higher than the specified
-	// value, expressed in BTC/kvB, optional, default="0.10".
-	MaxFeeRate BTCPerkvB `json:"omitempty"`
+	// value, expressed in PRL/kvB, optional, default="0.10".
+	MaxFeeRate PRLPerkvB `json:"omitempty"`
 }
 
 // NewTestMempoolAcceptCmd returns a new instance which can be used to issue a
 // testmempoolaccept JSON-RPC command.
 func NewTestMempoolAcceptCmd(rawTxns []string,
-	maxFeeRate BTCPerkvB) *TestMempoolAcceptCmd {
+	maxFeeRate PRLPerkvB) *TestMempoolAcceptCmd {
 
 	return &TestMempoolAcceptCmd{
 		RawTxns:    rawTxns,
@@ -1129,7 +1110,6 @@ func init() {
 	MustRegisterCmd("getdescriptorinfo", (*GetDescriptorInfoCmd)(nil), flags)
 	MustRegisterCmd("getdifficulty", (*GetDifficultyCmd)(nil), flags)
 	MustRegisterCmd("getgenerate", (*GetGenerateCmd)(nil), flags)
-	MustRegisterCmd("gethashespersec", (*GetHashesPerSecCmd)(nil), flags)
 	MustRegisterCmd("getinfo", (*GetInfoCmd)(nil), flags)
 	MustRegisterCmd("getmempoolentry", (*GetMempoolEntryCmd)(nil), flags)
 	MustRegisterCmd("getmempoolinfo", (*GetMempoolInfoCmd)(nil), flags)
@@ -1152,6 +1132,7 @@ func init() {
 	MustRegisterCmd("reconsiderblock", (*ReconsiderBlockCmd)(nil), flags)
 	MustRegisterCmd("searchrawtransactions", (*SearchRawTransactionsCmd)(nil), flags)
 	MustRegisterCmd("sendrawtransaction", (*SendRawTransactionCmd)(nil), flags)
+	MustRegisterCmd("submitpackage", (*JsonSubmitPackageCmd)(nil), flags)
 	MustRegisterCmd("setgenerate", (*SetGenerateCmd)(nil), flags)
 	MustRegisterCmd("signmessagewithprivkey", (*SignMessageWithPrivKeyCmd)(nil), flags)
 	MustRegisterCmd("stop", (*StopCmd)(nil), flags)

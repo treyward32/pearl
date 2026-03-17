@@ -10,17 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/blockntfns"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/blockntfns"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
 )
 
 var (
@@ -422,7 +422,7 @@ func newRescanState(chain ChainSource, options ...RescanOption) (*rescanState,
 				rs.curStamp.Hash = rs.curHeader.BlockHash()
 			} else {
 				chainParams := chain.ChainParams()
-				rs.curHeader = chainParams.GenesisBlock.Header
+				rs.curHeader = *chainParams.GenesisBlock.BlockHeader()
 				rs.curStamp.Hash = *chainParams.GenesisHash
 				rs.curStamp.Height = 0
 			}
@@ -1010,7 +1010,7 @@ func extractBlockMatches(chain ChainSource, ro *rescanOptions,
 			err)
 	}
 
-	blockHeader := block.MsgBlock().Header
+	blockHeader := block.MsgBlock().BlockHeader()
 	blockDetails := btcjson.BlockDetails{
 		Height: block.Height(),
 		Hash:   block.Hash().String(),
@@ -1348,7 +1348,7 @@ txOutLoop:
 
 // Rescan is an object that represents a long-running rescan/notification
 // client with updateable filters. It's meant to be close to a drop-in
-// replacement for the btcd rescan and notification functionality used in
+// replacement for the pearld rescan and notification functionality used in
 // wallets. It only contains information about whether a goroutine is running.
 type Rescan struct { // nolint:maligned
 	started uint32 // To be used atomically.

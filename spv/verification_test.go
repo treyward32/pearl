@@ -1,34 +1,24 @@
 package neutrino
 
 import (
-	"crypto/sha256"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
 var (
 	chainParams = &chaincfg.RegressionNetParams
 
-	dummySignaturePush = []byte{
-		txscript.OP_DATA_72,
-		0x30, 0x45, 0x02, 0x21, 0x00, 0xad, 0x08, 0x51,
-		0xc6, 0x9d, 0xd7, 0x56, 0xb4, 0x51, 0x90, 0xb5,
-		0xa8, 0xe9, 0x7c, 0xb4, 0xac, 0x3c, 0x2b, 0x0f,
-		0xa2, 0xf2, 0xaa, 0xe2, 0x3a, 0xed, 0x6c, 0xa9,
-		0x7a, 0xb3, 0x3b, 0xf8, 0x83, 0x02, 0x20, 0x0b,
-		0x24, 0x85, 0x93, 0xab, 0xc1, 0x25, 0x95, 0x12,
-		0x79, 0x3e, 0x7d, 0xea, 0x61, 0x03, 0x6c, 0x60,
-		0x17, 0x75, 0xeb, 0xb2, 0x36, 0x40, 0xa0, 0x12,
-		0x0b, 0x0d, 0xba, 0x2c, 0x34, 0xb7, 0x90, 0x01,
-	}
+	// Dummy Schnorr signature for Taproot (64 bytes)
+	dummySchnorrSignature = make([]byte, 64)
 )
 
 // TestVerifyBlockFilter tests that a filter is correctly inspected for validity
@@ -37,75 +27,56 @@ func TestVerifyBlockFilter(t *testing.T) {
 	privKey, err := btcec.NewPrivateKey()
 	require.NoError(t, err)
 
-	pubKey := privKey.PubKey()
-	pubKey2 := doubleKey(pubKey)
+	privKey2, err := btcec.NewPrivateKey()
+	require.NoError(t, err)
 
-	// We'll create an initial block with just one TX that spends to all
-	// currently known standard output types (P2PKH, P2SH, NP2WKH, P2WKH and
-	// P2WSH). All those outputs are then spent in the next block in a
-	// single TX that references all of them.
+	pubKey := privKey.PubKey()
+	pubKey2 := privKey2.PubKey()
+
+	// We'll create an initial block with Taproot outputs only.
+	// For Taproot-only wallet, we only test P2TR address types.
 	prevTx := &wire.MsgTx{
 		Version: 2,
 		TxIn:    []*wire.TxIn{},
 		TxOut: []*wire.TxOut{{
 			Value:    999,
-			PkScript: makeP2PK(t, pubKey),
+			PkScript: makeP2TR(t, pubKey),
 		}, {
 			Value:    999,
-			PkScript: makeP2PKH(t, pubKey),
-		}, {
-			Value:    999,
-			PkScript: makeP2SH(t, pubKey),
-		}, {
-			Value:    999,
-			PkScript: makeNP2WKH(t, pubKey),
-		}, {
-			Value:    999,
-			PkScript: makeP2WKH(t, pubKey),
-		}, {
-			Value:    999,
-			PkScript: makeP2WSH(t, pubKey),
+			PkScript: makeP2TR(t, pubKey2),
 		}},
 	}
 	prevBlock := &wire.MsgBlock{
-		Header: wire.BlockHeader{
+		MsgHeader: wire.MsgHeader{BlockHeader: wire.BlockHeader{
 			PrevBlock:  [32]byte{1, 2, 3},
 			MerkleRoot: [32]byte{3, 2, 1},
-		},
+		}},
 		Transactions: []*wire.MsgTx{
 			{}, // Fake coinbase TX.
 			prevTx,
 		},
 	}
 
-	// The spend TX is the transaction that has an input to spend each of
-	// the different output types we created in the previous block/TX.
+	// The spend TX is the transaction that has inputs to spend the Taproot outputs.
 	spendTx := &wire.MsgTx{
 		Version: 2,
 		TxIn: []*wire.TxIn{
-			spendP2PK(t, pubKey, prevTx, 0),
-			spendP2PKH(t, pubKey, prevTx, 1),
-			spendP2SH(t, pubKey, prevTx, 2),
-			spendNP2WKH(t, pubKey, prevTx, 3),
-			spendP2WKH(t, pubKey, prevTx, 4),
-			spendP2WSH(t, pubKey, prevTx, 5),
+			spendP2TR(t, privKey, prevTx, 0),
+			spendP2TR(t, privKey2, prevTx, 1), // Use different private key for pubKey2
 		},
 		TxOut: []*wire.TxOut{{
 			Value:    999,
-			PkScript: makeP2WKH(t, pubKey2),
-		}, {
-			Value:    999,
-			PkScript: makeP2WSH(t, pubKey2),
+			PkScript: makeP2TR(t, pubKey2),
 		}, {
 			Value:    999,
 			PkScript: []byte{txscript.OP_RETURN},
 		}},
 	}
 	spendBlock := &wire.MsgBlock{
-		Header: wire.BlockHeader{
+		MsgHeader: wire.MsgHeader{BlockHeader: wire.BlockHeader{
 			PrevBlock:  prevBlock.BlockHash(),
 			MerkleRoot: [32]byte{3, 2, 1},
-		},
+		}},
 		Transactions: []*wire.MsgTx{
 			{}, // Fake coinbase TX.
 			spendTx,
@@ -174,190 +145,35 @@ func locateUtxo(t *testing.T, utxoSet []*wire.MsgTx, in *wire.TxIn) *wire.TxOut 
 	return nil
 }
 
-func spendP2PK(_ *testing.T, _ *btcec.PublicKey, prevTx *wire.MsgTx,
+func spendP2TR(t *testing.T, privKey *btcec.PrivateKey, prevTx *wire.MsgTx,
 	idx uint32) *wire.TxIn {
+
+	// Create a dummy Schnorr signature for Taproot spending
+	// In a real scenario, this would be a valid signature
+	dummySchnorrSig := make([]byte, 64) // Schnorr signatures are 64 bytes
+	for i := range dummySchnorrSig {
+		dummySchnorrSig[i] = byte(i % 256)
+	}
 
 	return &wire.TxIn{
 		PreviousOutPoint: wire.OutPoint{
 			Hash:  prevTx.TxHash(),
 			Index: idx,
 		},
-		SignatureScript: dummySignaturePush,
+		SignatureScript: nil,                             // Taproot uses empty signature script
+		Witness:         [][]byte{dummySchnorrSignature}, // Single witness item for key-path spending
 	}
 }
 
-func spendP2PKH(_ *testing.T, pubKey *btcec.PublicKey, prevTx *wire.MsgTx,
-	idx uint32) *wire.TxIn {
-
-	return &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  prevTx.TxHash(),
-			Index: idx,
-		},
-		SignatureScript: append(
-			dummySignaturePush, pubKey.SerializeCompressed()...,
-		),
-	}
-}
-
-func spendP2SH(t *testing.T, pubKey *btcec.PublicKey, prevTx *wire.MsgTx,
-	idx uint32) *wire.TxIn {
-
-	return &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  prevTx.TxHash(),
-			Index: idx,
-		},
-		SignatureScript: append(
-			dummySignaturePush, scriptP2PKH(t, pubKey)...,
-		),
-	}
-}
-
-func spendNP2WKH(t *testing.T, pubKey *btcec.PublicKey, prevTx *wire.MsgTx,
-	idx uint32) *wire.TxIn {
-
-	pkHash := btcutil.Hash160(pubKey.SerializeCompressed())
-
-	witAddr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, chainParams)
-	require.NoError(t, err)
-
-	witnessProgram, err := txscript.PayToAddrScript(witAddr)
-	require.NoError(t, err)
-
-	return &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  prevTx.TxHash(),
-			Index: idx,
-		},
-		SignatureScript: witAddr.ScriptAddress(),
-		Witness:         [][]byte{dummySignaturePush, witnessProgram},
-	}
-}
-
-func spendP2WKH(_ *testing.T, pubKey *btcec.PublicKey, prevTx *wire.MsgTx,
-	idx uint32) *wire.TxIn {
-
-	return &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  prevTx.TxHash(),
-			Index: idx,
-		},
-		Witness: [][]byte{
-			dummySignaturePush, pubKey.SerializeCompressed(),
-		},
-	}
-}
-
-func spendP2WSH(t *testing.T, pubKey *btcec.PublicKey, prevTx *wire.MsgTx,
-	idx uint32) *wire.TxIn {
-
-	script := scriptP2PKH(t, pubKey)
-
-	return &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  prevTx.TxHash(),
-			Index: idx,
-		},
-		Witness: [][]byte{dummySignaturePush, script},
-	}
-}
-
-func makeP2PK(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	addr, err := btcutil.NewAddressPubKey(
-		pubKey.SerializeCompressed(), chainParams,
+func makeP2TR(t *testing.T, pubKey *btcec.PublicKey) []byte {
+	// Create Taproot address from the public key
+	tapKey := txscript.ComputeTaprootKeyNoScript(pubKey)
+	addr, err := btcutil.NewAddressTaproot(
+		schnorr.SerializePubKey(tapKey), chainParams,
 	)
 	require.NoError(t, err)
 
 	pkScript, err := txscript.PayToAddrScript(addr)
 	require.NoError(t, err)
 	return pkScript
-}
-
-func makeP2PKH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	pkHash := btcutil.Hash160(pubKey.SerializeCompressed())
-	addr, err := btcutil.NewAddressPubKeyHash(pkHash, chainParams)
-	require.NoError(t, err)
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	require.NoError(t, err)
-	return pkScript
-}
-
-func makeP2SH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	script := scriptP2PKH(t, pubKey)
-
-	addr, err := btcutil.NewAddressScriptHash(script, chainParams)
-	require.NoError(t, err)
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	require.NoError(t, err)
-	return pkScript
-}
-
-func makeNP2WKH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	pkHash := btcutil.Hash160(pubKey.SerializeCompressed())
-
-	witAddr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, chainParams)
-	require.NoError(t, err)
-
-	witnessProgram, err := txscript.PayToAddrScript(witAddr)
-	require.NoError(t, err)
-
-	addr, err := btcutil.NewAddressScriptHash(witnessProgram, chainParams)
-	require.NoError(t, err)
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	require.NoError(t, err)
-	return pkScript
-}
-
-func makeP2WKH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	pkHash := btcutil.Hash160(pubKey.SerializeCompressed())
-
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pkHash, chainParams)
-	require.NoError(t, err)
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	require.NoError(t, err)
-	return pkScript
-}
-
-func makeP2WSH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	witnessScript := scriptP2PKH(t, pubKey)
-	scriptHash := sha256.Sum256(witnessScript)
-
-	addr, err := btcutil.NewAddressWitnessScriptHash(
-		scriptHash[:], chainParams,
-	)
-	require.NoError(t, err)
-
-	pkScript, err := txscript.PayToAddrScript(addr)
-	require.NoError(t, err)
-	return pkScript
-}
-
-func scriptP2PKH(t *testing.T, pubKey *btcec.PublicKey) []byte {
-	// A simple P2PKH script but wrapped as P2SH.
-	// <pubKey> OP_CHECKSIG
-	b := txscript.NewScriptBuilder()
-
-	b.AddData(pubKey.SerializeCompressed())
-	b.AddOp(txscript.OP_CHECKSIG)
-
-	script, err := b.Script()
-	require.NoError(t, err)
-
-	return script
-}
-
-func doubleKey(key *btcec.PublicKey) *btcec.PublicKey {
-	var keyJacobian btcec.JacobianPoint
-	key.AsJacobian(&keyJacobian)
-
-	btcec.DoubleNonConst(&keyJacobian, &keyJacobian)
-
-	keyJacobian.ToAffine()
-
-	return btcec.NewPublicKey(&keyJacobian.X, &keyJacobian.Y)
 }

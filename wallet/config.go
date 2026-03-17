@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -16,33 +16,33 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcwallet/internal/cfgutil"
-	"github.com/btcsuite/btcwallet/internal/legacy/keystore"
-	"github.com/btcsuite/btcwallet/netparams"
-	"github.com/btcsuite/btcwallet/wallet"
 	flags "github.com/jessevdk/go-flags"
-	"github.com/lightninglabs/neutrino"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/wallet/internal/cfgutil"
+	"github.com/pearl-research-labs/pearl/wallet/netparams"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
 )
 
 const (
-	defaultCAFilename       = "btcd.cert"
-	defaultConfigFilename   = "btcwallet.conf"
+	defaultCAFilename       = "pearld.cert"
+	defaultConfigFilename   = "oyster.conf"
 	defaultLogLevel         = "info"
 	defaultLogDirname       = "logs"
-	defaultLogFilename      = "btcwallet.log"
+	defaultLogFilename      = "oyster.log"
 	defaultRPCMaxClients    = 10
 	defaultRPCMaxWebsockets = 25
 )
 
 var (
-	btcdDefaultCAFile  = filepath.Join(btcutil.AppDataDir("btcd", false), "rpc.cert")
-	defaultAppDataDir  = btcutil.AppDataDir("btcwallet", false)
-	defaultConfigFile  = filepath.Join(defaultAppDataDir, defaultConfigFilename)
-	defaultRPCKeyFile  = filepath.Join(defaultAppDataDir, "rpc.key")
-	defaultRPCCertFile = filepath.Join(defaultAppDataDir, "rpc.cert")
-	defaultLogDir      = filepath.Join(defaultAppDataDir, defaultLogDirname)
+	pearldDefaultCAFile = filepath.Join(btcutil.AppDataDir("pearld", false), "rpc.cert")
+	defaultAppDataDir   = btcutil.AppDataDir("oyster", false)
+	defaultConfigFile   = filepath.Join(defaultAppDataDir, defaultConfigFilename)
+	defaultRPCKeyFile   = filepath.Join(defaultAppDataDir, "rpc.key")
+	defaultRPCCertFile  = filepath.Join(defaultAppDataDir, "rpc.cert")
+	defaultLogDir       = filepath.Join(defaultAppDataDir, defaultLogDirname)
 )
 
 //nolint:lll
@@ -52,9 +52,10 @@ type config struct {
 	ShowVersion     bool                    `short:"V" long:"version" description:"Display version information and exit"`
 	Create          bool                    `long:"create" description:"Create the wallet if it does not exist"`
 	CreateTemp      bool                    `long:"createtemp" description:"Create a temporary simulation wallet (pass=password) in the data directory indicated; must call with --datadir"`
+	CreateFromFile  string                  `long:"createfromfile" description:"Create a wallet from a JSON file with PrivatePassphrase, optional PublicPassphrase, Seed (hex), and Bday (unix seconds as string). Prints the seed to the console."`
 	AppDataDir      *cfgutil.ExplicitString `short:"A" long:"appdata" description:"Application data directory for wallet config, databases and logs"`
-	TestNet3        bool                    `long:"testnet" description:"Use the test Bitcoin network (version 3) (default mainnet)"`
-	TestNet4        bool                    `long:"testnet4" description:"Use the test Bitcoin network (version 4) (default mainnet)"`
+	TestNet         bool                    `long:"testnet" description:"Use the test network (default mainnet)"`
+	TestNet2        bool                    `long:"testnet2" description:"Use the test network v2 (default mainnet)"`
 	SimNet          bool                    `long:"simnet" description:"Use the simulation test network (default mainnet)"`
 	SigNet          bool                    `long:"signet" description:"Use the signet test network (default mainnet)"`
 	SigNetChallenge string                  `long:"signetchallenge" description:"Connect to a custom signet network defined by this challenge instead of using the global default signet test network -- Can be specified multiple times"`
@@ -70,11 +71,11 @@ type config struct {
 	WalletPass string `long:"walletpass" default-mask:"-" description:"The public wallet password -- Only required if the wallet was created with one"`
 
 	// RPC client options
-	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of btcd RPC server to connect to (default localhost:8334, testnet: localhost:18334, testnet4: localhost:48334, simnet: localhost:18556, regtest: localhost:18334)"`
-	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"File containing root certificates to authenticate a TLS connections with btcd"`
-	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for the RPC client -- NOTE: This is only allowed if the RPC client is connecting to localhost"`
-	BtcdUsername     string                  `long:"btcdusername" description:"Username for btcd authentication"`
-	BtcdPassword     string                  `long:"btcdpassword" default-mask:"-" description:"Password for btcd authentication"`
+	RPCConnect       string                  `short:"c" long:"rpcconnect" description:"Hostname/IP and port of pearld RPC server to connect to (default localhost:44107, testnet: localhost:44109, testnet2: localhost:44111, simnet: localhost:18556, regtest: localhost:18334)"`
+	CAFile           *cfgutil.ExplicitString `long:"cafile" description:"File containing root certificates to authenticate a TLS connection with pearld"`
+	DisableClientTLS bool                    `long:"noclienttls" description:"Disable TLS for the RPC client"`
+	PearldUsername   string                  `long:"pearldusername" description:"Username for pearld authentication"`
+	PearldPassword   string                  `long:"pearldpassword" default-mask:"-" description:"Password for pearld authentication"`
 	Proxy            string                  `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
 	ProxyUser        string                  `long:"proxyuser" description:"Username for proxy server"`
 	ProxyPass        string                  `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
@@ -98,12 +99,12 @@ type config struct {
 	RPCCert                *cfgutil.ExplicitString `long:"rpccert" description:"File containing the certificate file"`
 	RPCKey                 *cfgutil.ExplicitString `long:"rpckey" description:"File containing the certificate key"`
 	OneTimeTLSKey          bool                    `long:"onetimetlskey" description:"Generate a new TLS certpair at startup, but only write the certificate to disk"`
-	DisableServerTLS       bool                    `long:"noservertls" description:"Disable TLS for the RPC server -- NOTE: This is only allowed if the RPC server is bound to localhost"`
-	LegacyRPCListeners     []string                `long:"rpclisten" description:"Listen for legacy RPC connections on this interface/port (default port: 8332, testnet: 18332, testnet4: 48332, simnet: 18554, regtest: 18332)"`
+	DisableServerTLS       bool                    `long:"noservertls" description:"Disable TLS for the RPC server"`
+	LegacyRPCListeners     []string                `long:"rpclisten" description:"Listen for legacy RPC connections on this interface/port (default port: 44207, testnet: 44209, testnet2: 44211, simnet: 18554, regtest: 18332)"`
 	LegacyRPCMaxClients    int64                   `long:"rpcmaxclients" description:"Max number of legacy RPC clients for standard connections"`
 	LegacyRPCMaxWebsockets int64                   `long:"rpcmaxwebsockets" description:"Max number of legacy RPC websocket connections"`
-	Username               string                  `short:"u" long:"username" description:"Username for legacy RPC and btcd authentication (if btcdusername is unset)"`
-	Password               string                  `short:"P" long:"password" default-mask:"-" description:"Password for legacy RPC and btcd authentication (if btcdpassword is unset)"`
+	Username               string                  `short:"u" long:"username" description:"Username for legacy RPC and pearld authentication (if pearldusername is unset)"`
+	Password               string                  `short:"P" long:"password" default-mask:"-" description:"Password for legacy RPC and pearld authentication (if pearldpassword is unset)"`
 
 	// EXPERIMENTAL RPC server options
 	//
@@ -197,6 +198,10 @@ func supportedSubsystems() []string {
 	return subsystems
 }
 
+func isMainnet(cfg *config) bool {
+	return !(cfg.RegressionNet || cfg.SimNet || cfg.SigNet || cfg.TestNet || cfg.TestNet2)
+}
+
 // parseAndSetDebugLevels attempts to parse the specified debug level and set
 // the levels accordingly.  An appropriate error is returned if anything is
 // invalid.
@@ -257,7 +262,7 @@ func parseAndSetDebugLevels(debugLevel string) error {
 //  3. Load configuration file overwriting defaults with any specified options
 //  4. Parse CLI options and overwrite/add any specified options
 //
-// The above results in btcwallet functioning properly without any config
+// The above results in Oyster functioning properly without any config
 // settings while still allowing the user to override settings with config files
 // and command line options.  Command line options always take precedence.
 func loadConfig() (*config, []string, error) {
@@ -365,12 +370,12 @@ func loadConfig() (*config, []string, error) {
 	// Choose the active network params based on the selected network.
 	// Multiple networks can't be selected simultaneously.
 	numNets := 0
-	if cfg.TestNet3 {
-		activeNet = &netparams.TestNet3Params
+	if cfg.TestNet {
+		activeNet = &netparams.TestNetParams
 		numNets++
 	}
-	if cfg.TestNet4 {
-		activeNet = &netparams.TestNet4Params
+	if cfg.TestNet2 {
+		activeNet = &netparams.TestNet2Params
 		numNets++
 	}
 	if cfg.SimNet {
@@ -421,13 +426,19 @@ func loadConfig() (*config, []string, error) {
 		numNets++
 	}
 	if numNets > 1 {
-		str := "%s: The testnet, testnet4, signet, simnet, and " +
+		str := "%s: The testnet, testnet2, signet, simnet, and " +
 			"regtest params can't be used together -- choose one"
 		err := fmt.Errorf(str, "loadConfig")
 		fmt.Fprintln(os.Stderr, err)
 		parser.WriteHelp(os.Stderr)
 		return nil, nil, err
 	}
+
+	// Initialise key scopes to match the active network's coin type so that
+	// wallet creation (--createfromfile / --create) uses the correct BIP-86
+	// derivation path.  This must be done before any wallet is created or
+	// opened; walletMain also calls this for the normal (non-create) path.
+	waddrmgr.InitKeyScopes(activeNet.Params.HDCoinType)
 
 	// Append the network type to the log directory so it is "namespaced"
 	// per network.
@@ -472,10 +483,22 @@ func loadConfig() (*config, []string, error) {
 	netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 	dbPath := filepath.Join(netDir, wallet.WalletDBName)
 
-	if cfg.CreateTemp && cfg.Create {
-		err := fmt.Errorf("the flags --create and --createtemp can not " +
-			"be specified together. Use --help for more information")
+	createFlagsCount := 0
+	if cfg.Create {
+		createFlagsCount++
+	}
+	if cfg.CreateTemp {
+		createFlagsCount++
+	}
+	if cfg.CreateFromFile != "" {
+		createFlagsCount++
+	}
+	if createFlagsCount > 1 {
+		str := "%s: The create, createtemp, and createfromfile params can't be " +
+			"used together -- choose one of the three"
+		err := fmt.Errorf(str, funcName)
 		fmt.Fprintln(os.Stderr, err)
+		parser.WriteHelp(os.Stderr)
 		return nil, nil, err
 	}
 
@@ -532,20 +555,39 @@ func loadConfig() (*config, []string, error) {
 
 		// Created successfully, so exit now with success.
 		os.Exit(0)
-	} else if !dbFileExists && !cfg.NoInitialLoad {
-		keystorePath := filepath.Join(netDir, keystore.Filename)
-		keystoreExists, err := cfgutil.FileExists(keystorePath)
-		if err != nil {
+	} else if cfg.CreateFromFile != "" {
+		// Error if the create flag is set and the wallet already
+		// exists.
+		if dbFileExists {
+			err := fmt.Errorf("the wallet database file `%v` "+
+				"already exists", dbPath)
 			fmt.Fprintln(os.Stderr, err)
 			return nil, nil, err
 		}
-		if !keystoreExists {
-			err = fmt.Errorf("the wallet does not exist, run with " +
-				"the --create option to initialize and create it")
-		} else {
-			err = fmt.Errorf("the wallet is in legacy format, run " +
-				"with the --create option to import it")
+
+		// Ensure the data directory for the network exists.
+		if err := checkCreateDir(netDir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return nil, nil, err
 		}
+
+		// Read the JSON file that contains the wallet creation data.
+		filePath := cleanAndExpandPath(cfg.CreateFromFile)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to read wallet create file: %v\n", err)
+			return nil, nil, err
+		}
+		seedHex, err := createWalletFromJSON(&cfg, data)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Unable to create wallet:", err)
+			return nil, nil, err
+		}
+		// Print the seed so the operator can back it up.
+		fmt.Println(seedHex)
+		os.Exit(0)
+	} else if !dbFileExists && !cfg.NoInitialLoad {
+		err := fmt.Errorf("the wallet does not exist, run with the --create option or --createfromfile to initialize and create it")
 		fmt.Fprintln(os.Stderr, err)
 		return nil, nil, err
 	}
@@ -578,23 +620,18 @@ func loadConfig() (*config, []string, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+
 		if cfg.DisableClientTLS {
-			if _, ok := localhostListeners[RPCHost]; !ok {
-				str := "%s: the --noclienttls option may not be used " +
-					"when connecting RPC to non localhost " +
-					"addresses: %s"
-				err := fmt.Errorf(str, funcName, cfg.RPCConnect)
-				fmt.Fprintln(os.Stderr, err)
-				fmt.Fprintln(os.Stderr, usageMessage)
-				return nil, nil, err
+			if isMainnet(&cfg) {
+				fmt.Fprintln(os.Stderr, "Warning: Running on mainnet with --noclienttls is not recommended")
 			}
 		} else {
-			// If CAFile is unset, choose either the copy or local btcd cert.
+			// If CAFile is unset, choose either the copy or local pearld cert.
 			if !cfg.CAFile.ExplicitlySet() {
 				cfg.CAFile.Value = filepath.Join(cfg.AppDataDir.Value, defaultCAFilename)
 
 				// If the CA copy does not exist, check if we're connecting to
-				// a local btcd and switch to its RPC cert if it exists.
+				// a local pearld and switch to its RPC cert if it exists.
 				certExists, err := cfgutil.FileExists(cfg.CAFile.Value)
 				if err != nil {
 					fmt.Fprintln(os.Stderr, err)
@@ -603,13 +640,13 @@ func loadConfig() (*config, []string, error) {
 				if !certExists {
 					if _, ok := localhostListeners[RPCHost]; ok {
 						btcdCertExists, err := cfgutil.FileExists(
-							btcdDefaultCAFile)
+							pearldDefaultCAFile)
 						if err != nil {
 							fmt.Fprintln(os.Stderr, err)
 							return nil, nil, err
 						}
 						if btcdCertExists {
-							cfg.CAFile.Value = btcdDefaultCAFile
+							cfg.CAFile.Value = pearldDefaultCAFile
 						}
 					}
 				}
@@ -669,26 +706,19 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
-	// Only allow server TLS to be disabled if the RPC server is bound to
-	// localhost addresses.
 	if cfg.DisableServerTLS {
+		if isMainnet(&cfg) {
+			fmt.Fprintln(os.Stderr, "Warning: Running on mainnet with --noservertls is not recommended")
+		}
+
 		allListeners := append(cfg.LegacyRPCListeners,
 			cfg.ExperimentalRPCListeners...)
 		for _, addr := range allListeners {
-			host, _, err := net.SplitHostPort(addr)
+			_, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				str := "%s: RPC listen interface '%s' is " +
 					"invalid: %v"
 				err := fmt.Errorf(str, funcName, addr, err)
-				fmt.Fprintln(os.Stderr, err)
-				fmt.Fprintln(os.Stderr, usageMessage)
-				return nil, nil, err
-			}
-			if _, ok := localhostListeners[host]; !ok {
-				str := "%s: the --noservertls option may not be used " +
-					"when binding RPC to non localhost " +
-					"addresses: %s"
-				err := fmt.Errorf(str, funcName, addr)
 				fmt.Fprintln(os.Stderr, err)
 				fmt.Fprintln(os.Stderr, usageMessage)
 				return nil, nil, err
@@ -701,15 +731,15 @@ func loadConfig() (*config, []string, error) {
 	cfg.RPCCert.Value = cleanAndExpandPath(cfg.RPCCert.Value)
 	cfg.RPCKey.Value = cleanAndExpandPath(cfg.RPCKey.Value)
 
-	// If the btcd username or password are unset, use the same auth as for
-	// the client.  The two settings were previously shared for btcd and
+	// If the pearld username or password are unset, use the same auth as for
+	// the client.  The two settings were previously shared for pearld and
 	// client auth, so this avoids breaking backwards compatibility while
-	// allowing users to use different auth settings for btcd and wallet.
-	if cfg.BtcdUsername == "" {
-		cfg.BtcdUsername = cfg.Username
+	// allowing users to use different auth settings for pearld and wallet.
+	if cfg.PearldUsername == "" {
+		cfg.PearldUsername = cfg.Username
 	}
-	if cfg.BtcdPassword == "" {
-		cfg.BtcdPassword = cfg.Password
+	if cfg.PearldPassword == "" {
+		cfg.PearldPassword = cfg.Password
 	}
 
 	// Warn about missing config file after the final command line parse

@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -16,9 +16,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mining"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mining"
 )
 
 // TODO incorporate Alex Morcos' modifications to Gavin's initial model
@@ -47,7 +48,7 @@ const (
 
 	bytePerKb = 1000
 
-	btcPerSatoshi = 1e-8
+	prlPerGrain = 1e-8
 )
 
 var (
@@ -56,38 +57,38 @@ var (
 	EstimateFeeDatabaseKey = []byte("estimatefee")
 )
 
-// SatoshiPerByte is number with units of satoshis per byte.
-type SatoshiPerByte float64
+// GrainPerByte is number with units of grains per byte.
+type GrainPerByte float64
 
-// BtcPerKilobyte is number with units of bitcoins per kilobyte.
-type BtcPerKilobyte float64
+// PrlPerKilobyte is number with units of pearls per kilobyte.
+type PrlPerKilobyte float64
 
-// ToBtcPerKb returns a float value that represents the given
-// SatoshiPerByte converted to satoshis per kb.
-func (rate SatoshiPerByte) ToBtcPerKb() BtcPerKilobyte {
+// ToPrlPerKb returns a float value that represents the given
+// GrainPerByte converted to grains per kb.
+func (rate GrainPerByte) ToPrlPerKb() PrlPerKilobyte {
 	// If our rate is the error value, return that.
-	if rate == SatoshiPerByte(-1.0) {
+	if rate == GrainPerByte(-1.0) {
 		return -1.0
 	}
 
-	return BtcPerKilobyte(float64(rate) * bytePerKb * btcPerSatoshi)
+	return PrlPerKilobyte(float64(rate) * bytePerKb * prlPerGrain)
 }
 
 // Fee returns the fee for a transaction of a given size for
 // the given fee rate.
-func (rate SatoshiPerByte) Fee(size uint32) btcutil.Amount {
+func (rate GrainPerByte) Fee(size uint32) btcutil.Amount {
 	// If our rate is the error value, return that.
-	if rate == SatoshiPerByte(-1) {
+	if rate == GrainPerByte(-1) {
 		return btcutil.Amount(-1)
 	}
 
 	return btcutil.Amount(float64(rate) * float64(size))
 }
 
-// NewSatoshiPerByte creates a SatoshiPerByte from an Amount and a
+// NewGrainPerByte creates a GrainPerByte from an Amount and a
 // size in bytes.
-func NewSatoshiPerByte(fee btcutil.Amount, size uint32) SatoshiPerByte {
-	return SatoshiPerByte(float64(fee) / float64(size))
+func NewGrainPerByte(fee btcutil.Amount, size uint32) GrainPerByte {
+	return GrainPerByte(float64(fee) / float64(size))
 }
 
 // observedTransaction represents an observed transaction and some
@@ -96,8 +97,8 @@ type observedTransaction struct {
 	// A transaction hash.
 	hash chainhash.Hash
 
-	// The fee per byte of the transaction in satoshis.
-	feeRate SatoshiPerByte
+	// The fee per byte of the transaction in grains.
+	feeRate GrainPerByte
 
 	// The block height when it was observed.
 	observed int32
@@ -120,7 +121,7 @@ func deserializeObservedTransaction(r io.Reader) (*observedTransaction, error) {
 	// The first 32 bytes should be a hash.
 	binary.Read(r, binary.BigEndian, &ot.hash)
 
-	// The next 8 are SatoshiPerByte
+	// The next 8 are GrainPerByte
 	binary.Read(r, binary.BigEndian, &ot.feeRate)
 
 	// And next there are two uint32's.
@@ -173,7 +174,7 @@ type FeeEstimator struct {
 	bin      [estimateFeeDepth][]*observedTransaction
 
 	// The cached estimates.
-	cached []SatoshiPerByte
+	cached []GrainPerByte
 
 	// Transactions that have been removed from the bins. This allows us to
 	// revert in case of an orphaned block.
@@ -208,11 +209,11 @@ func (ef *FeeEstimator) ObserveTransaction(t *TxDesc) {
 
 	hash := *t.Tx.Hash()
 	if _, ok := ef.observed[hash]; !ok {
-		size := uint32(GetTxVirtualSize(t.Tx))
+		size := uint32(blockchain.GetTransactionVsize(t.Tx))
 
 		ef.observed[hash] = &observedTransaction{
 			hash:     hash,
-			feeRate:  NewSatoshiPerByte(btcutil.Amount(t.Fee), size),
+			feeRate:  NewGrainPerByte(btcutil.Amount(t.Fee), size),
 			observed: t.Height,
 			mined:    mining.UnminedHeight,
 		}
@@ -465,7 +466,7 @@ func (ef *FeeEstimator) rollback() {
 // estimateFeeSet is a set of txs that can that is sorted
 // by the fee per kb rate.
 type estimateFeeSet struct {
-	feeRate []SatoshiPerByte
+	feeRate []GrainPerByte
 	bin     [estimateFeeDepth]uint32
 }
 
@@ -482,9 +483,9 @@ func (b *estimateFeeSet) Swap(i, j int) {
 // estimateFee returns the estimated fee for a transaction
 // to confirm in confirmations blocks from now, given
 // the data set we have collected.
-func (b *estimateFeeSet) estimateFee(confirmations int) SatoshiPerByte {
+func (b *estimateFeeSet) estimateFee(confirmations int) GrainPerByte {
 	if confirmations <= 0 {
-		return SatoshiPerByte(math.Inf(1))
+		return GrainPerByte(math.Inf(1))
 	}
 
 	if confirmations > estimateFeeDepth {
@@ -525,7 +526,7 @@ func (ef *FeeEstimator) newEstimateFeeSet() *estimateFeeSet {
 		capacity += l
 	}
 
-	set.feeRate = make([]SatoshiPerByte, capacity)
+	set.feeRate = make([]GrainPerByte, capacity)
 
 	i := 0
 	for _, b := range ef.bin {
@@ -542,10 +543,10 @@ func (ef *FeeEstimator) newEstimateFeeSet() *estimateFeeSet {
 
 // estimates returns the set of all fee estimates from 1 to estimateFeeDepth
 // confirmations from now.
-func (ef *FeeEstimator) estimates() []SatoshiPerByte {
+func (ef *FeeEstimator) estimates() []GrainPerByte {
 	set := ef.newEstimateFeeSet()
 
-	estimates := make([]SatoshiPerByte, estimateFeeDepth)
+	estimates := make([]GrainPerByte, estimateFeeDepth)
 	for i := 0; i < estimateFeeDepth; i++ {
 		estimates[i] = set.estimateFee(i + 1)
 	}
@@ -555,7 +556,7 @@ func (ef *FeeEstimator) estimates() []SatoshiPerByte {
 
 // EstimateFee estimates the fee per byte to have a tx confirmed a given
 // number of blocks from now.
-func (ef *FeeEstimator) EstimateFee(numBlocks uint32) (BtcPerKilobyte, error) {
+func (ef *FeeEstimator) EstimateFee(numBlocks uint32) (PrlPerKilobyte, error) {
 	ef.mtx.Lock()
 	defer ef.mtx.Unlock()
 
@@ -580,7 +581,7 @@ func (ef *FeeEstimator) EstimateFee(numBlocks uint32) (BtcPerKilobyte, error) {
 		ef.cached = ef.estimates()
 	}
 
-	return ef.cached[int(numBlocks)-1].ToBtcPerKb(), nil
+	return ef.cached[int(numBlocks)-1].ToPrlPerKb(), nil
 }
 
 // In case the format for the serialized version of the FeeEstimator changes,

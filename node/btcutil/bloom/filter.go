@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,10 +9,10 @@ import (
 	"math"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // ln2Squared is simply the square of the natural log of 2.
@@ -27,7 +27,7 @@ func minUint32(a, b uint32) uint32 {
 	return b
 }
 
-// Filter defines a bitcoin bloom filter that provides easy manipulation of raw
+// Filter defines a bloom filter that provides easy manipulation of raw
 // filter data.
 type Filter struct {
 	mtx           sync.Mutex
@@ -76,12 +76,21 @@ func NewFilter(elements, tweak uint32, fprate float64, flags wire.BloomUpdateTyp
 	}
 }
 
+// normalize adjusts filter parameters for consistency.
+func (bf *Filter) normalize() {
+	if bf.msgFilterLoad != nil && len(bf.msgFilterLoad.Filter) == 0 {
+		bf.msgFilterLoad.HashFuncs = 0
+	}
+}
+
 // LoadFilter creates a new Filter instance with the given underlying
 // wire.MsgFilterLoad.
 func LoadFilter(filter *wire.MsgFilterLoad) *Filter {
-	return &Filter{
+	bf := &Filter{
 		msgFilterLoad: filter,
 	}
+	bf.normalize()
+	return bf
 }
 
 // IsLoaded returns true if a filter is loaded, otherwise false.
@@ -100,6 +109,7 @@ func (bf *Filter) IsLoaded() bool {
 func (bf *Filter) Reload(filter *wire.MsgFilterLoad) {
 	bf.mtx.Lock()
 	bf.msgFilterLoad = filter
+	bf.normalize()
 	bf.mtx.Unlock()
 }
 
@@ -147,7 +157,8 @@ func (bf *Filter) matches(data []byte) bool {
 			return false
 		}
 	}
-	return true
+
+	return bf.msgFilterLoad.HashFuncs > 0
 }
 
 // Matches returns true if the bloom filter might contain the passed data and
@@ -255,12 +266,8 @@ func (bf *Filter) maybeAddOutpoint(pkScript []byte, outHash *chainhash.Hash, out
 	case wire.BloomUpdateAll:
 		outpoint := wire.NewOutPoint(outHash, outIdx)
 		bf.addOutPoint(outpoint)
-	case wire.BloomUpdateP2PubkeyOnly:
-		class := txscript.GetScriptClass(pkScript)
-		if class == txscript.PubKeyTy || class == txscript.MultiSigTy {
-			outpoint := wire.NewOutPoint(outHash, outIdx)
-			bf.addOutPoint(outpoint)
-		}
+	case wire.BloomUpdateNone:
+		return
 	}
 }
 

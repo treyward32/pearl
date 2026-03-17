@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 func createTestIndex(t testing.TB) (func(), *headerIndex, error) {
@@ -22,7 +23,7 @@ func createTestIndex(t testing.TB) (func(), *headerIndex, error) {
 	}
 
 	db, err := walletdb.Create(
-		"bdb", tempDir+"/test.db", true, time.Second*10,
+		"bdb", tempDir+"/test.db", true, time.Second*10, false,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -90,7 +91,8 @@ func TestAddHeadersIndexRetrieve(t *testing.T) {
 	// Next if we truncate the index by one, then we should end up at the
 	// second to last entry for the tip.
 	newTip := headerIndex[numHeaders-2]
-	if err := hIndex.truncateIndex(&newTip.hash, true); err != nil {
+	oldTipHash := headerIndex[numHeaders-1].hash
+	if err := hIndex.truncateIndices(&newTip.hash, []*chainhash.Hash{&oldTipHash}, true); err != nil {
 		t.Fatalf("unable to truncate index: %v", err)
 	}
 
@@ -188,16 +190,17 @@ func TestHeaderStorageFallback(t *testing.T) {
 	// To do so, we first need to make sure the tip points to the last entry
 	// we added.
 	lastEntry := newHeaderEntries[len(newHeaderEntries)-1]
-	if err := hIndex.truncateIndex(&lastEntry.hash, false); err != nil {
+	if err := hIndex.truncateIndices(&lastEntry.hash, nil, false); err != nil {
 		t.Fatalf("error setting new tip: %v", err)
 	}
 	for _, header := range newHeaderEntries {
-		if err := hIndex.truncateIndex(&header.hash, true); err != nil {
+		if err := hIndex.truncateIndices(&header.hash, []*chainhash.Hash{&header.hash}, true); err != nil {
 			t.Fatalf("error truncating tip: %v", err)
 		}
 	}
-	for _, header := range oldHeaderEntries {
-		if err := hIndex.truncateIndex(&header.hash, true); err != nil {
+	for i := 0; i < len(oldHeaderEntries)-1; i++ {
+		header := oldHeaderEntries[i]
+		if err := hIndex.truncateIndices(&header.hash, []*chainhash.Hash{&header.hash}, true); err != nil {
 			t.Fatalf("error truncating tip: %v", err)
 		}
 	}

@@ -3,9 +3,9 @@ package chainsync
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 func TestControlCFHeader(t *testing.T) {
@@ -16,7 +16,7 @@ func TestControlCFHeader(t *testing.T) {
 	header := hashFromStr(
 		"4a242283a406a7c089f671bb8df7671e5d5e9ba577cea1047d30a7f4919df193",
 	)
-	filterHeaderCheckpoints = map[wire.BitcoinNet]map[uint32]*chainhash.Hash{
+	filterHeaderCheckpoints = map[wire.PearlNet]map[uint32]*chainhash.Hash{
 		chaincfg.MainNetParams.Net: {
 			height: header,
 		},

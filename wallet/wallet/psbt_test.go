@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,24 +9,24 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/btcsuite/btcwallet/wallet/txrules"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txrules"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txsizes"
 	"github.com/stretchr/testify/require"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/psbt"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/psbt"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
 )
 
 var (
-	testScriptP2WSH, _ = hex.DecodeString(
-		"0020d554616badeb46ccd4ce4b115e1c8d098e942d1387212d0af9ff93a1" +
-			"9c8f100e",
+	// P2TR test scripts for Taproot-only tests
+	testScriptP2TR1, _ = hex.DecodeString(
+		"5120a0e0b7f1c9b8c7e5d3a4f2b8c6e9a1d5c8f2a7b3e6c9d2a5b8c1e4f7a0d3b6c9",
 	)
-	testScriptP2WKH, _ = hex.DecodeString(
-		"0014e7a43aa41ef6d72dc6baeeaad8362cedf63b79a3",
+	testScriptP2TR2, _ = hex.DecodeString(
+		"5120b1f2c8d9e0a3f6b9c2e5a8d1b4e7c0a3f6d9b2e5c8a1b4e7d0a3f6c9b2e5a8d1",
 	)
 )
 
@@ -38,13 +38,13 @@ func TestFundPsbt(t *testing.T) {
 	defer cleanup()
 
 	// Create a P2WKH address we can use to send some coins to.
-	addr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0084)
+	addr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
 	require.NoError(t, err)
 	p2wkhAddr, err := txscript.PayToAddrScript(addr)
 	require.NoError(t, err)
 
 	// Also create a nested P2WKH address we can use to send some coins to.
-	addr, err = w.CurrentAddress(0, waddrmgr.KeyScopeBIP0049Plus)
+	addr, err = w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
 	require.NoError(t, err)
 	np2wkhAddr, err := txscript.PayToAddrScript(addr)
 	require.NoError(t, err)
@@ -122,10 +122,10 @@ func TestFundPsbt(t *testing.T) {
 		packet: &psbt.Packet{
 			UnsignedTx: &wire.MsgTx{
 				TxOut: []*wire.TxOut{{
-					PkScript: testScriptP2WSH,
+					PkScript: testScriptP2TR1,
 					Value:    100000,
 				}, {
-					PkScript: testScriptP2WKH,
+					PkScript: testScriptP2TR2,
 					Value:    50000,
 				}},
 			},
@@ -141,7 +141,7 @@ func TestFundPsbt(t *testing.T) {
 		packet: &psbt.Packet{
 			UnsignedTx: &wire.MsgTx{
 				TxOut: []*wire.TxOut{{
-					PkScript: testScriptP2WSH,
+					PkScript: testScriptP2TR1,
 					Value:    1500000,
 				}},
 			},
@@ -162,10 +162,10 @@ func TestFundPsbt(t *testing.T) {
 					PreviousOutPoint: utxo2,
 				}},
 				TxOut: []*wire.TxOut{{
-					PkScript: testScriptP2WSH,
+					PkScript: testScriptP2TR1,
 					Value:    100000,
 				}, {
-					PkScript: testScriptP2WKH,
+					PkScript: testScriptP2TR2,
 					Value:    50000,
 				}},
 			},
@@ -184,19 +184,19 @@ func TestFundPsbt(t *testing.T) {
 			txOuts := packet.UnsignedTx.TxOut
 			require.Len(t, txOuts, 3, "tx outputs")
 
-			p2wkhIndex := -1
-			p2wshIndex := -1
+			p2tr2Index := -1
+			p2tr1Index := -1
 			totalOut := int64(0)
 			for idx, txOut := range txOuts {
 				script := txOut.PkScript
 				totalOut += txOut.Value
 
 				switch {
-				case bytes.Equal(script, testScriptP2WKH):
-					p2wkhIndex = idx
+				case bytes.Equal(script, testScriptP2TR2):
+					p2tr2Index = idx
 
-				case bytes.Equal(script, testScriptP2WSH):
-					p2wshIndex = idx
+				case bytes.Equal(script, testScriptP2TR1):
+					p2tr1Index = idx
 
 				}
 			}
@@ -206,20 +206,20 @@ func TestFundPsbt(t *testing.T) {
 			}
 
 			// All outputs must be found.
-			require.Greater(t, p2wkhIndex, -1)
-			require.Greater(t, p2wshIndex, -1)
+			require.Greater(t, p2tr2Index, -1)
+			require.Greater(t, p2tr1Index, -1)
 			require.Greater(t, changeIndex, int32(-1))
 
-			// After BIP 69 sorting, the P2WKH output should be
-			// before the P2WSH output because the PK script is
+			// After BIP 69 sorting, testScriptP2TR2 output should be
+			// before testScriptP2TR1 output because the PK script is
 			// lexicographically smaller.
 			require.Less(
-				t, p2wkhIndex, p2wshIndex,
+				t, p2tr2Index, p2tr1Index,
 				"index after sorting",
 			)
 		},
 	}, {
-		name: "one input and a custom change scope: BIP0084",
+		name: "one input and a custom change scope: BIP0086",
 		packet: &psbt.Packet{
 			UnsignedTx: &wire.MsgTx{
 				TxIn: []*wire.TxIn{{
@@ -230,18 +230,18 @@ func TestFundPsbt(t *testing.T) {
 		},
 		feeRateSatPerKB:         20000,
 		validatePackage:         true,
-		changeKeyScope:          &waddrmgr.KeyScopeBIP0084,
+		changeKeyScope:          &waddrmgr.KeyScopeBIP0086,
 		expectedInputs:          []wire.OutPoint{utxo1},
 		expectedChangeBeforeFee: utxo1Amount,
 	}, {
-		name: "no inputs and a custom change scope: BIP0084",
+		name: "no inputs and a custom change scope: BIP0086",
 		packet: &psbt.Packet{
 			UnsignedTx: &wire.MsgTx{
 				TxOut: []*wire.TxOut{{
-					PkScript: testScriptP2WSH,
+					PkScript: testScriptP2TR1,
 					Value:    100000,
 				}, {
-					PkScript: testScriptP2WKH,
+					PkScript: testScriptP2TR2,
 					Value:    50000,
 				}},
 			},
@@ -250,7 +250,7 @@ func TestFundPsbt(t *testing.T) {
 		feeRateSatPerKB:         2000, // 2 sat/byte
 		expectedErr:             "",
 		validatePackage:         true,
-		changeKeyScope:          &waddrmgr.KeyScopeBIP0084,
+		changeKeyScope:          &waddrmgr.KeyScopeBIP0086,
 		expectedChangeBeforeFee: utxo1Amount - 150000,
 		expectedInputs:          []wire.OutPoint{utxo1},
 	}}
@@ -258,17 +258,16 @@ func TestFundPsbt(t *testing.T) {
 	calcFee := func(feeRateSatPerKB btcutil.Amount,
 		packet *psbt.Packet) btcutil.Amount {
 
-		var numP2WKHInputs, numNP2WKHInputs int
+		// Count Taproot inputs (all inputs are now Taproot in our system)
+		var numP2TRInputs int
 		for _, txin := range packet.UnsignedTx.TxIn {
-			if txin.PreviousOutPoint == utxo1 {
-				numP2WKHInputs++
-			}
-			if txin.PreviousOutPoint == utxo2 {
-				numNP2WKHInputs++
+			if txin.PreviousOutPoint == utxo1 || txin.PreviousOutPoint == utxo2 {
+				numP2TRInputs++
 			}
 		}
+		// EstimateVirtualSize parameters: (numP2PKHIns, numP2TRIns, numP2WPKHIns, numNestedP2WPKHIns, ...)
 		estimatedSize := txsizes.EstimateVirtualSize(
-			0, 0, numP2WKHInputs, numNP2WKHInputs,
+			0, numP2TRInputs, 0, 0,
 			packet.UnsignedTx.TxOut, 0,
 		)
 		return txrules.FeeForSerializeSize(
@@ -403,17 +402,10 @@ func assertChangeOutputScope(t *testing.T, pkScript []byte,
 	// be a pay-to-taproot one.
 	switch changeScope {
 	case nil, &waddrmgr.KeyScopeBIP0086:
+		// Only P2TR is supported in our system.
 		require.True(t, txscript.IsPayToTaproot(pkScript))
-
-	case &waddrmgr.KeyScopeBIP0049Plus, &waddrmgr.KeyScopeBIP0084:
-		require.True(t, txscript.IsPayToWitnessPubKeyHash(pkScript))
-
-	case &waddrmgr.KeyScopeBIP0044:
-		require.True(t, txscript.IsPayToPubKeyHash(pkScript))
-
 	default:
-		require.Fail(t, "assertChangeOutputScope error",
-			"change scope: %s", changeScope.String())
+		t.Fatalf("assertChangeOutputScope error: change scope: %v", changeScope)
 	}
 }
 
@@ -434,32 +426,24 @@ func TestFinalizePsbt(t *testing.T) {
 	w, cleanup := testWallet(t)
 	defer cleanup()
 
-	// Create a P2WKH address we can use to send some coins to.
-	addr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0084)
-	if err != nil {
-		t.Fatalf("unable to get current address: %v", addr)
-	}
-	p2wkhAddr, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		t.Fatalf("unable to convert wallet address to p2wkh: %v", err)
-	}
+	// Create a P2TR address we can use to send some coins to.
+	addr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
+	require.NoError(t, err)
+	p2trAddr, err := txscript.PayToAddrScript(addr)
+	require.NoError(t, err)
 
-	// Also create a nested P2WKH address we can send coins to.
-	addr, err = w.CurrentAddress(0, waddrmgr.KeyScopeBIP0049Plus)
-	if err != nil {
-		t.Fatalf("unable to get current address: %v", addr)
-	}
-	np2wkhAddr, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		t.Fatalf("unable to convert wallet address to np2wkh: %v", err)
-	}
+	// Also create a second P2TR address we can send coins to.
+	addr, err = w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
+	require.NoError(t, err)
+	p2trAddr2, err := txscript.PayToAddrScript(addr)
+	require.NoError(t, err)
 
 	// Register two big UTXO that will be used when funding the PSBT.
-	utxOutP2WKH := wire.NewTxOut(1000000, p2wkhAddr)
-	utxOutNP2WKH := wire.NewTxOut(1000000, np2wkhAddr)
+	utxOutP2TR := wire.NewTxOut(1000000, p2trAddr)
+	utxOutP2TR2 := wire.NewTxOut(1000000, p2trAddr2)
 	incomingTx := &wire.MsgTx{
 		TxIn:  []*wire.TxIn{{}},
-		TxOut: []*wire.TxOut{utxOutP2WKH, utxOutNP2WKH},
+		TxOut: []*wire.TxOut{utxOutP2TR, utxOutP2TR2},
 	}
 	addUtxo(t, w, incomingTx)
 
@@ -478,18 +462,18 @@ func TestFinalizePsbt(t *testing.T) {
 				},
 			}},
 			TxOut: []*wire.TxOut{{
-				PkScript: testScriptP2WKH,
+				PkScript: testScriptP2TR2,
 				Value:    50000,
 			}, {
-				PkScript: testScriptP2WSH,
+				PkScript: testScriptP2TR1,
 				Value:    100000,
 			}, {
-				PkScript: testScriptP2WKH,
+				PkScript: testScriptP2TR2,
 				Value:    849632,
 			}},
 		},
 		Inputs: []psbt.PInput{{
-			WitnessUtxo: utxOutP2WKH,
+			WitnessUtxo: utxOutP2TR,
 			SighashType: txscript.SigHashAll,
 		}, {
 			NonWitnessUtxo: incomingTx,
@@ -500,20 +484,14 @@ func TestFinalizePsbt(t *testing.T) {
 
 	// Finalize it to add all witness data then extract the final TX.
 	err = w.FinalizePsbt(nil, 0, packet)
-	if err != nil {
-		t.Fatalf("error finalizing PSBT packet: %v", err)
-	}
+	require.NoError(t, err)
 	finalTx, err := psbt.Extract(packet)
-	if err != nil {
-		t.Fatalf("error extracting final TX from PSBT: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Finally verify that the created witness is valid.
 	err = validateMsgTx(
-		finalTx, [][]byte{utxOutP2WKH.PkScript, utxOutNP2WKH.PkScript},
+		finalTx, [][]byte{utxOutP2TR.PkScript, utxOutP2TR2.PkScript},
 		[]btcutil.Amount{1000000, 1000000},
 	)
-	if err != nil {
-		t.Fatalf("error validating tx: %v", err)
-	}
+	require.NoError(t, err)
 }

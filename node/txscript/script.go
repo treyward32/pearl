@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -9,15 +9,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/btcsuite/btcd/wire"
 )
-
-// Bip16Activation is the timestamp where BIP0016 is valid to use in the
-// blockchain.  To be used to determine if BIP0016 should be called for or not.
-// This timestamp corresponds to Sun Apr 1 00:00:00 UTC 2012.
-var Bip16Activation = time.Unix(1333238400, 0)
 
 const (
 	// TaprootAnnexTag is the tag for an annex. This value is used to
@@ -35,9 +27,8 @@ const (
 
 // These are the constants specified for maximums in individual scripts.
 const (
-	MaxOpsPerScript       = 201 // Max number of non-push operations.
-	MaxPubKeysPerMultiSig = 20  // Multisig can't have more sigs than this.
-	MaxScriptElementSize  = 520 // Max bytes pushable to the stack.
+	MaxOpsPerScript      = 201 // Max number of non-push operations.
+	MaxScriptElementSize = 520 // Max bytes pushable to the stack.
 )
 
 // IsSmallInt returns whether or not the opcode is considered a small integer,
@@ -50,46 +41,16 @@ func IsSmallInt(op byte) bool {
 	return op == OP_0 || (op >= OP_1 && op <= OP_16)
 }
 
-// IsPayToPubKey returns true if the script is in the standard pay-to-pubkey
-// (P2PK) format, false otherwise.
-func IsPayToPubKey(script []byte) bool {
-	return isPubKeyScript(script)
-}
-
-// IsPayToPubKeyHash returns true if the script is in the standard
-// pay-to-pubkey-hash (P2PKH) format, false otherwise.
-func IsPayToPubKeyHash(script []byte) bool {
-	return isPubKeyHashScript(script)
-}
-
-// IsPayToScriptHash returns true if the script is in the standard
-// pay-to-script-hash (P2SH) format, false otherwise.
-//
-// WARNING: This function always treats the passed script as version 0.  Great
-// care must be taken if introducing a new script version because it is used in
-// consensus which, unfortunately as of the time of this writing, does not check
-// script versions before determining if the script is a P2SH which means nodes
-// on existing rules will analyze new version scripts as if they were version 0.
-func IsPayToScriptHash(script []byte) bool {
-	return isScriptHashScript(script)
-}
-
-// IsPayToWitnessScriptHash returns true if the script is in the standard
-// pay-to-witness-script-hash (P2WSH) format, false otherwise.
-func IsPayToWitnessScriptHash(script []byte) bool {
-	return isWitnessScriptHashScript(script)
-}
-
-// IsPayToWitnessPubKeyHash returns true if the script is in the standard
-// pay-to-witness-pubkey-hash (P2WKH) format, false otherwise.
-func IsPayToWitnessPubKeyHash(script []byte) bool {
-	return isWitnessPubKeyHashScript(script)
-}
-
 // IsPayToTaproot returns true if the passed script is a standard
 // pay-to-taproot (PTTR) scripts, and false otherwise.
 func IsPayToTaproot(script []byte) bool {
 	return isWitnessTaprootScript(script)
+}
+
+// IsPayToMerkleRoot returns true if the passed script is a standard
+// pay-to-merkle-root (P2MR, BIP 360) script, and false otherwise.
+func IsPayToMerkleRoot(script []byte) bool {
+	return isWitnessMerkleRootScript(script)
 }
 
 // IsWitnessProgram returns true if the passed script is a valid witness
@@ -103,8 +64,7 @@ func IsWitnessProgram(script []byte) bool {
 // IsNullData returns true if the passed script is a null data script, false
 // otherwise.
 func IsNullData(script []byte) bool {
-	const scriptVersion = 0
-	return isNullDataScript(scriptVersion, script)
+	return isNullDataScript(script)
 }
 
 // ExtractWitnessProgramInfo attempts to extract the witness program version,
@@ -318,196 +278,6 @@ func AsSmallInt(op byte) int {
 	}
 
 	return int(op - (OP_1 - 1))
-}
-
-// countSigOpsV0 returns the number of signature operations in the provided
-// script up to the point of the first parse failure or the entire script when
-// there are no parse failures.  The precise flag attempts to accurately count
-// the number of operations for a multisig operation versus using the maximum
-// allowed.
-//
-// WARNING: This function always treats the passed script as version 0.  Great
-// care must be taken if introducing a new script version because it is used in
-// consensus which, unfortunately as of the time of this writing, does not check
-// script versions before counting their signature operations which means nodes
-// on existing rules will count new version scripts as if they were version 0.
-func countSigOpsV0(script []byte, precise bool) int {
-	const scriptVersion = 0
-
-	numSigOps := 0
-	tokenizer := MakeScriptTokenizer(scriptVersion, script)
-	prevOp := byte(OP_INVALIDOPCODE)
-	for tokenizer.Next() {
-		switch tokenizer.Opcode() {
-		case OP_CHECKSIG, OP_CHECKSIGVERIFY:
-			numSigOps++
-
-		case OP_CHECKMULTISIG, OP_CHECKMULTISIGVERIFY:
-			// Note that OP_0 is treated as the max number of sigops here in
-			// precise mode despite it being a valid small integer in order to
-			// highly discourage multisigs with zero pubkeys.
-			//
-			// Also, even though this is referred to as "precise" counting, it's
-			// not really precise at all due to the small int opcodes only
-			// covering 1 through 16 pubkeys, which means this will count any
-			// more than that value (e.g. 17, 18 19) as the maximum number of
-			// allowed pubkeys. This is, unfortunately, now part of
-			// the Bitcoin consensus rules, due to historical
-			// reasons. This could be made more correct with a new
-			// script version, however, ideally all multisignaure
-			// operations in new script versions should move to
-			// aggregated schemes such as Schnorr instead.
-			if precise && prevOp >= OP_1 && prevOp <= OP_16 {
-				numSigOps += AsSmallInt(prevOp)
-			} else {
-				numSigOps += MaxPubKeysPerMultiSig
-			}
-
-		default:
-			// Not a sigop.
-		}
-
-		prevOp = tokenizer.Opcode()
-	}
-
-	return numSigOps
-}
-
-// GetSigOpCount provides a quick count of the number of signature operations
-// in a script. a CHECKSIG operations counts for 1, and a CHECK_MULTISIG for 20.
-// If the script fails to parse, then the count up to the point of failure is
-// returned.
-//
-// WARNING: This function always treats the passed script as version 0.  Great
-// care must be taken if introducing a new script version because it is used in
-// consensus which, unfortunately as of the time of this writing, does not check
-// script versions before counting their signature operations which means nodes
-// on existing rules will count new version scripts as if they were version 0.
-func GetSigOpCount(script []byte) int {
-	return countSigOpsV0(script, false)
-}
-
-// finalOpcodeData returns the data associated with the final opcode in the
-// script.  It will return nil if the script fails to parse.
-func finalOpcodeData(scriptVersion uint16, script []byte) []byte {
-	// Avoid unnecessary work.
-	if len(script) == 0 {
-		return nil
-	}
-
-	var data []byte
-	tokenizer := MakeScriptTokenizer(scriptVersion, script)
-	for tokenizer.Next() {
-		data = tokenizer.Data()
-	}
-	if tokenizer.Err() != nil {
-		return nil
-	}
-	return data
-}
-
-// GetPreciseSigOpCount returns the number of signature operations in
-// scriptPubKey.  If bip16 is true then scriptSig may be searched for the
-// Pay-To-Script-Hash script in order to find the precise number of signature
-// operations in the transaction.  If the script fails to parse, then the count
-// up to the point of failure is returned.
-//
-// WARNING: This function always treats the passed script as version 0.  Great
-// care must be taken if introducing a new script version because it is used in
-// consensus which, unfortunately as of the time of this writing, does not check
-// script versions before counting their signature operations which means nodes
-// on existing rules will count new version scripts as if they were version 0.
-//
-// The third parameter is DEPRECATED and is unused.
-func GetPreciseSigOpCount(scriptSig, scriptPubKey []byte, _ bool) int {
-	const scriptVersion = 0
-
-	// Treat non P2SH transactions as normal.  Note that signature operation
-	// counting includes all operations up to the first parse failure.
-	if !isScriptHashScript(scriptPubKey) {
-		return countSigOpsV0(scriptPubKey, true)
-	}
-
-	// The signature script must only push data to the stack for P2SH to be
-	// a valid pair, so the signature operation count is 0 when that is not
-	// the case.
-	if len(scriptSig) == 0 || !IsPushOnlyScript(scriptSig) {
-		return 0
-	}
-
-	// The P2SH script is the last item the signature script pushes to the
-	// stack.  When the script is empty, there are no signature operations.
-	//
-	// Notice that signature scripts that fail to fully parse count as 0
-	// signature operations unlike public key and redeem scripts.
-	redeemScript := finalOpcodeData(scriptVersion, scriptSig)
-	if len(redeemScript) == 0 {
-		return 0
-	}
-
-	// Return the more precise sigops count for the redeem script.  Note that
-	// signature operation counting includes all operations up to the first
-	// parse failure.
-	return countSigOpsV0(redeemScript, true)
-}
-
-// GetWitnessSigOpCount returns the number of signature operations generated by
-// spending the passed pkScript with the specified witness, or sigScript.
-// Unlike GetPreciseSigOpCount, this function is able to accurately count the
-// number of signature operations generated by spending witness programs, and
-// nested p2sh witness programs. If the script fails to parse, then the count
-// up to the point of failure is returned.
-func GetWitnessSigOpCount(sigScript, pkScript []byte, witness wire.TxWitness) int {
-	// If this is a regular witness program, then we can proceed directly
-	// to counting its signature operations without any further processing.
-	if isWitnessProgramScript(pkScript) {
-		return getWitnessSigOps(pkScript, witness)
-	}
-
-	// Next, we'll check the sigScript to see if this is a nested p2sh
-	// witness program. This is a case wherein the sigScript is actually a
-	// datapush of a p2wsh witness program.
-	if isScriptHashScript(pkScript) && IsPushOnlyScript(sigScript) &&
-		len(sigScript) > 0 && isWitnessProgramScript(sigScript[1:]) {
-		return getWitnessSigOps(sigScript[1:], witness)
-	}
-
-	return 0
-}
-
-// getWitnessSigOps returns the number of signature operations generated by
-// spending the passed witness program wit the passed witness. The exact
-// signature counting heuristic is modified by the version of the passed
-// witness program. If the version of the witness program is unable to be
-// extracted, then 0 is returned for the sig op count.
-func getWitnessSigOps(pkScript []byte, witness wire.TxWitness) int {
-	// Attempt to extract the witness program version.
-	witnessVersion, witnessProgram, err := ExtractWitnessProgramInfo(
-		pkScript,
-	)
-	if err != nil {
-		return 0
-	}
-
-	switch witnessVersion {
-	case BaseSegwitWitnessVersion:
-		switch {
-		case len(witnessProgram) == payToWitnessPubKeyHashDataSize:
-			return 1
-		case len(witnessProgram) == payToWitnessScriptHashDataSize &&
-			len(witness) > 0:
-
-			witnessScript := witness[len(witness)-1]
-			return countSigOpsV0(witnessScript, true)
-		}
-
-	// Taproot signature operations don't count towards the block-wide sig
-	// op limit, instead a distinct weight-based accounting method is used.
-	case TaprootWitnessVersion:
-		return 0
-	}
-
-	return 0
 }
 
 // checkScriptParses returns an error if the provided script fails to parse.

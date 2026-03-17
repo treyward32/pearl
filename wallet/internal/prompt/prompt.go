@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -15,8 +15,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcwallet/internal/legacy/keystore"
+	bip39 "github.com/tyler-smith/go-bip39"
+
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
 	"golang.org/x/term"
 )
 
@@ -160,39 +161,8 @@ func promptPass(_ *bufio.Reader, prefix string, confirm bool) ([]byte, error) {
 // On the other hand, when the legacy keystore is nil, the user is prompted for
 // a new private passphrase.  All prompts are repeated until the user enters a
 // valid response.
-func PrivatePass(reader *bufio.Reader, legacyKeyStore *keystore.Store) ([]byte, error) {
-	// When there is not an existing legacy wallet, simply prompt the user
-	// for a new private passphase and return it.
-	if legacyKeyStore == nil {
-		return promptPass(reader, "Enter the private "+
-			"passphrase for your new wallet", true)
-	}
-
-	// At this point, there is an existing legacy wallet, so prompt the user
-	// for the existing private passphrase and ensure it properly unlocks
-	// the legacy wallet so all of the addresses can later be imported.
-	fmt.Println("You have an existing legacy wallet.  All addresses from " +
-		"your existing legacy wallet will be imported into the new " +
-		"wallet format.")
-	for {
-		privPass, err := promptPass(reader, "Enter the private "+
-			"passphrase for your existing wallet", false)
-		if err != nil {
-			return nil, err
-		}
-
-		// Keep prompting the user until the passphrase is correct.
-		if err := legacyKeyStore.Unlock(privPass); err != nil {
-			if err == keystore.ErrWrongPassphrase {
-				fmt.Println(err)
-				continue
-			}
-
-			return nil, err
-		}
-
-		return privPass, nil
-	}
+func PrivatePass(reader *bufio.Reader) ([]byte, error) {
+	return promptPass(reader, "Enter the private passphrase for your new wallet", true)
 }
 
 // PublicPass prompts the user whether they want to add an additional layer of
@@ -273,22 +243,29 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if !useUserSeed {
-		seed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
+		// Generate 16-byte (128-bit) entropy → 12-word BIP39 mnemonic.
+		// Derive the 64-byte BIP32 master seed via PBKDF2 (standard BIP39).
+		entropy, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 		if err != nil {
 			return nil, err
 		}
+		mnemonic, err := bip39.NewMnemonic(entropy)
+		if err != nil {
+			return nil, err
+		}
+		seed := bip39.NewSeed(mnemonic, "")
 
-		fmt.Println("Your wallet generation seed is:")
-		fmt.Printf("%x\n", seed)
-		fmt.Println("IMPORTANT: Keep the seed in a safe place as you\n" +
+		fmt.Println("Your wallet mnemonic seed phrase is:")
+		fmt.Println(mnemonic)
+		fmt.Println("IMPORTANT: Keep the seed phrase in a safe place as you\n" +
 			"will NOT be able to restore your wallet without it.")
 		fmt.Println("Please keep in mind that anyone who has access\n" +
-			"to the seed can also restore your wallet thereby\n" +
+			"to the seed phrase can also restore your wallet thereby\n" +
 			"giving them access to all your funds, so it is\n" +
 			"imperative that you keep it in a secure location.")
 
 		for {
-			fmt.Print(`Once you have stored the seed in a safe ` +
+			fmt.Print(`Once you have stored the seed phrase in a safe ` +
 				`and secure location, enter "OK" to continue: `)
 			confirmSeed, err := reader.ReadString('\n')
 			if err != nil {
@@ -305,21 +282,25 @@ func Seed(reader *bufio.Reader) ([]byte, error) {
 	}
 
 	for {
-		fmt.Print("Enter existing wallet seed: ")
+		fmt.Print("Enter existing wallet seed (BIP39 mnemonic or hex): ")
 		seedStr, err := reader.ReadString('\n')
 		if err != nil {
 			return nil, err
 		}
-		seedStr = strings.TrimSpace(strings.ToLower(seedStr))
+		seedStr = strings.TrimSpace(seedStr)
 
-		seed, err := hex.DecodeString(seedStr)
+		// Accept a BIP39 mnemonic phrase.
+		if bip39.IsMnemonicValid(strings.ToLower(seedStr)) {
+			return bip39.NewSeed(strings.ToLower(seedStr), ""), nil
+		}
+
+		// Fall back to hex for backward compatibility.
+		seed, err := hex.DecodeString(strings.ToLower(seedStr))
 		if err != nil || len(seed) < hdkeychain.MinSeedBytes ||
 			len(seed) > hdkeychain.MaxSeedBytes {
 
-			fmt.Printf("Invalid seed specified.  Must be a "+
-				"hexadecimal value that is at least %d bits and "+
-				"at most %d bits\n", hdkeychain.MinSeedBytes*8,
-				hdkeychain.MaxSeedBytes*8)
+			fmt.Println("Invalid seed. Enter a 12-24 word BIP39 mnemonic or a " +
+				"hexadecimal value.")
 			continue
 		}
 

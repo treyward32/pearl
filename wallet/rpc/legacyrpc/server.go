@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -17,10 +17,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcwallet/chain"
-	"github.com/btcsuite/btcwallet/wallet"
 	"github.com/btcsuite/websocket"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/wallet/chain"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
 )
 
 type websocketClient struct {
@@ -78,7 +78,7 @@ type Server struct {
 
 // jsonAuthFail sends a message back to the client if the http auth is rejected.
 func jsonAuthFail(w http.ResponseWriter) {
-	w.Header().Add("WWW-Authenticate", `Basic realm="btcwallet RPC"`)
+	w.Header().Add("WWW-Authenticate", `Basic realm="oyster RPC"`)
 	http.Error(w, "401 Unauthorized.", http.StatusUnauthorized)
 }
 
@@ -164,7 +164,7 @@ func NewServer(opts *Options, walletLoader *wallet.Loader, listeners []net.Liste
 // httpBasicAuth returns the UTF-8 bytes of the HTTP Basic authentication
 // string:
 //
-//   "Basic " + base64(username + ":" + password)
+//	"Basic " + base64(username + ":" + password)
 func httpBasicAuth(username, password string) []byte {
 	const header = "Basic "
 	base64 := base64.StdEncoding
@@ -252,7 +252,7 @@ func (s *Server) Stop() {
 }
 
 // SetChainServer sets the chain server client component needed to run a fully
-// functional bitcoin wallet RPC server.  This can be called to enable RPC
+// functional wallet RPC server.  This can be called to enable RPC
 // passthrough even before a loaded wallet is set, but the wallet's RPC client
 // is preferred.
 func (s *Server) SetChainServer(chainClient chain.Interface) {
@@ -262,8 +262,8 @@ func (s *Server) SetChainServer(chainClient chain.Interface) {
 }
 
 // handlerClosure creates a closure function for handling requests of the given
-// method.  This may be a request that is handled directly by btcwallet, or
-// a chain server request that is handled by passing the request down to btcd.
+// method.  This may be a request that is handled directly by Oyster, or
+// a chain server request that is handled by passing the request down to pearld.
 //
 // NOTE: These handlers do not handle special cases, such as the authenticate
 // method.  Each of these must be checked beforehand (the method is already
@@ -441,7 +441,7 @@ out:
 			switch req.Method {
 			case "stop":
 				resp := makeResponse(req.ID,
-					"btcwallet stopping.", nil)
+					"oyster stopping.", nil)
 				mresp, err := json.Marshal(resp)
 				// Expected to never fail.
 				if err != nil {
@@ -592,7 +592,7 @@ func (s *Server) postClientRPC(w http.ResponseWriter, r *http.Request) {
 		return
 	case "stop":
 		stop = true
-		res = "btcwallet stopping"
+		res = "oyster stopping"
 	default:
 		res, jsonErr = s.handlerClosure(&req)()
 	}

@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // *****************************
@@ -499,7 +499,7 @@ func (r FutureSetTxFeeResult) Receive() error {
 //
 // See SetTxFee for the blocking version and more details.
 func (c *Client) SetTxFeeAsync(fee btcutil.Amount) FutureSetTxFeeResult {
-	cmd := btcjson.NewSetTxFeeCmd(fee.ToBTC())
+	cmd := btcjson.NewSetTxFeeCmd(fee.ToPRL())
 	return c.SendCmd(cmd)
 }
 
@@ -536,9 +536,9 @@ func (r FutureSendToAddressResult) Receive() (*chainhash.Hash, error) {
 // returned instance.
 //
 // See SendToAddress for the blocking version and more details.
-func (c *Client) SendToAddressAsync(address btcutil.Address, amount btcutil.Amount) FutureSendToAddressResult {
+func (c *Client) SendToAddressAsync(address btcutil.Address, amount btcutil.Amount, feeRatePerKb float64) FutureSendToAddressResult {
 	addr := address.EncodeAddress()
-	cmd := btcjson.NewSendToAddressCmd(addr, amount.ToBTC(), nil, nil)
+	cmd := btcjson.NewSendToAddressCmd(addr, amount.ToPRL(), feeRatePerKb, nil, nil)
 	return c.SendCmd(cmd)
 }
 
@@ -550,8 +550,8 @@ func (c *Client) SendToAddressAsync(address btcutil.Address, amount btcutil.Amou
 //
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
-func (c *Client) SendToAddress(address btcutil.Address, amount btcutil.Amount) (*chainhash.Hash, error) {
-	return c.SendToAddressAsync(address, amount).Receive()
+func (c *Client) SendToAddress(address btcutil.Address, amount btcutil.Amount, feeRatePerKb float64) (*chainhash.Hash, error) {
+	return c.SendToAddressAsync(address, amount, feeRatePerKb).Receive()
 }
 
 // SendToAddressCommentAsync returns an instance of a type that can be used to
@@ -560,12 +560,11 @@ func (c *Client) SendToAddress(address btcutil.Address, amount btcutil.Amount) (
 //
 // See SendToAddressComment for the blocking version and more details.
 func (c *Client) SendToAddressCommentAsync(address btcutil.Address,
-	amount btcutil.Amount, comment,
+	amount btcutil.Amount, feeRatePerKb float64, comment,
 	commentTo string) FutureSendToAddressResult {
 
 	addr := address.EncodeAddress()
-	cmd := btcjson.NewSendToAddressCmd(addr, amount.ToBTC(), &comment,
-		&commentTo)
+	cmd := btcjson.NewSendToAddressCmd(addr, amount.ToPRL(), feeRatePerKb, &comment, &commentTo)
 	return c.SendCmd(cmd)
 }
 
@@ -581,8 +580,8 @@ func (c *Client) SendToAddressCommentAsync(address btcutil.Address,
 //
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
-func (c *Client) SendToAddressComment(address btcutil.Address, amount btcutil.Amount, comment, commentTo string) (*chainhash.Hash, error) {
-	return c.SendToAddressCommentAsync(address, amount, comment,
+func (c *Client) SendToAddressComment(address btcutil.Address, amount btcutil.Amount, feeRatePerKb float64, comment, commentTo string) (*chainhash.Hash, error) {
+	return c.SendToAddressCommentAsync(address, amount, feeRatePerKb, comment,
 		commentTo).Receive()
 }
 
@@ -615,10 +614,9 @@ func (r FutureSendFromResult) Receive() (*chainhash.Hash, error) {
 // returned instance.
 //
 // See SendFrom for the blocking version and more details.
-func (c *Client) SendFromAsync(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount) FutureSendFromResult {
+func (c *Client) SendFromAsync(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, feeRatePerKb float64) FutureSendFromResult {
 	addr := toAddress.EncodeAddress()
-	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToBTC(), nil,
-		nil, nil)
+	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToPRL(), feeRatePerKb, nil, nil, nil)
 	return c.SendCmd(cmd)
 }
 
@@ -630,8 +628,8 @@ func (c *Client) SendFromAsync(fromAccount string, toAddress btcutil.Address, am
 //
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
-func (c *Client) SendFrom(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount) (*chainhash.Hash, error) {
-	return c.SendFromAsync(fromAccount, toAddress, amount).Receive()
+func (c *Client) SendFrom(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, feeRatePerKb float64) (*chainhash.Hash, error) {
+	return c.SendFromAsync(fromAccount, toAddress, amount, feeRatePerKb).Receive()
 }
 
 // SendFromMinConfAsync returns an instance of a type that can be used to get
@@ -639,9 +637,9 @@ func (c *Client) SendFrom(fromAccount string, toAddress btcutil.Address, amount 
 // the returned instance.
 //
 // See SendFromMinConf for the blocking version and more details.
-func (c *Client) SendFromMinConfAsync(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, minConfirms int) FutureSendFromResult {
+func (c *Client) SendFromMinConfAsync(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, feeRatePerKb float64, minConfirms int) FutureSendFromResult {
 	addr := toAddress.EncodeAddress()
-	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToBTC(),
+	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToPRL(), feeRatePerKb,
 		&minConfirms, nil, nil)
 	return c.SendCmd(cmd)
 }
@@ -655,8 +653,8 @@ func (c *Client) SendFromMinConfAsync(fromAccount string, toAddress btcutil.Addr
 //
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
-func (c *Client) SendFromMinConf(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, minConfirms int) (*chainhash.Hash, error) {
-	return c.SendFromMinConfAsync(fromAccount, toAddress, amount,
+func (c *Client) SendFromMinConf(fromAccount string, toAddress btcutil.Address, amount btcutil.Amount, feeRatePerKb float64, minConfirms int) (*chainhash.Hash, error) {
+	return c.SendFromMinConfAsync(fromAccount, toAddress, amount, feeRatePerKb,
 		minConfirms).Receive()
 }
 
@@ -666,11 +664,11 @@ func (c *Client) SendFromMinConf(fromAccount string, toAddress btcutil.Address, 
 //
 // See SendFromComment for the blocking version and more details.
 func (c *Client) SendFromCommentAsync(fromAccount string,
-	toAddress btcutil.Address, amount btcutil.Amount, minConfirms int,
+	toAddress btcutil.Address, amount btcutil.Amount, feeRatePerKb float64, minConfirms int,
 	comment, commentTo string) FutureSendFromResult {
 
 	addr := toAddress.EncodeAddress()
-	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToBTC(),
+	cmd := btcjson.NewSendFromCmd(fromAccount, addr, amount.ToPRL(), feeRatePerKb,
 		&minConfirms, &comment, &commentTo)
 	return c.SendCmd(cmd)
 }
@@ -687,10 +685,10 @@ func (c *Client) SendFromCommentAsync(fromAccount string,
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
 func (c *Client) SendFromComment(fromAccount string, toAddress btcutil.Address,
-	amount btcutil.Amount, minConfirms int,
+	amount btcutil.Amount, feeRatePerKb float64, minConfirms int,
 	comment, commentTo string) (*chainhash.Hash, error) {
 
-	return c.SendFromCommentAsync(fromAccount, toAddress, amount,
+	return c.SendFromCommentAsync(fromAccount, toAddress, amount, feeRatePerKb,
 		minConfirms, comment, commentTo).Receive()
 }
 
@@ -723,12 +721,12 @@ func (r FutureSendManyResult) Receive() (*chainhash.Hash, error) {
 // returned instance.
 //
 // See SendMany for the blocking version and more details.
-func (c *Client) SendManyAsync(fromAccount string, amounts map[btcutil.Address]btcutil.Amount) FutureSendManyResult {
+func (c *Client) SendManyAsync(fromAccount string, amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64) FutureSendManyResult {
 	convertedAmounts := make(map[string]float64, len(amounts))
 	for addr, amount := range amounts {
-		convertedAmounts[addr.EncodeAddress()] = amount.ToBTC()
+		convertedAmounts[addr.EncodeAddress()] = amount.ToPRL()
 	}
-	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts, nil, nil)
+	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts, feeRatePerKb, nil, nil)
 	return c.SendCmd(cmd)
 }
 
@@ -740,8 +738,8 @@ func (c *Client) SendManyAsync(fromAccount string, amounts map[btcutil.Address]b
 //
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
-func (c *Client) SendMany(fromAccount string, amounts map[btcutil.Address]btcutil.Amount) (*chainhash.Hash, error) {
-	return c.SendManyAsync(fromAccount, amounts).Receive()
+func (c *Client) SendMany(fromAccount string, amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64) (*chainhash.Hash, error) {
+	return c.SendManyAsync(fromAccount, amounts, feeRatePerKb).Receive()
 }
 
 // SendManyMinConfAsync returns an instance of a type that can be used to get
@@ -750,14 +748,14 @@ func (c *Client) SendMany(fromAccount string, amounts map[btcutil.Address]btcuti
 //
 // See SendManyMinConf for the blocking version and more details.
 func (c *Client) SendManyMinConfAsync(fromAccount string,
-	amounts map[btcutil.Address]btcutil.Amount,
+	amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64,
 	minConfirms int) FutureSendManyResult {
 
 	convertedAmounts := make(map[string]float64, len(amounts))
 	for addr, amount := range amounts {
-		convertedAmounts[addr.EncodeAddress()] = amount.ToBTC()
+		convertedAmounts[addr.EncodeAddress()] = amount.ToPRL()
 	}
-	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts,
+	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts, feeRatePerKb,
 		&minConfirms, nil)
 	return c.SendCmd(cmd)
 }
@@ -772,10 +770,10 @@ func (c *Client) SendManyMinConfAsync(fromAccount string,
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
 func (c *Client) SendManyMinConf(fromAccount string,
-	amounts map[btcutil.Address]btcutil.Amount,
+	amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64,
 	minConfirms int) (*chainhash.Hash, error) {
 
-	return c.SendManyMinConfAsync(fromAccount, amounts, minConfirms).Receive()
+	return c.SendManyMinConfAsync(fromAccount, amounts, feeRatePerKb, minConfirms).Receive()
 }
 
 // SendManyCommentAsync returns an instance of a type that can be used to get
@@ -784,14 +782,14 @@ func (c *Client) SendManyMinConf(fromAccount string,
 //
 // See SendManyComment for the blocking version and more details.
 func (c *Client) SendManyCommentAsync(fromAccount string,
-	amounts map[btcutil.Address]btcutil.Amount, minConfirms int,
+	amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64, minConfirms int,
 	comment string) FutureSendManyResult {
 
 	convertedAmounts := make(map[string]float64, len(amounts))
 	for addr, amount := range amounts {
-		convertedAmounts[addr.EncodeAddress()] = amount.ToBTC()
+		convertedAmounts[addr.EncodeAddress()] = amount.ToPRL()
 	}
-	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts,
+	cmd := btcjson.NewSendManyCmd(fromAccount, convertedAmounts, feeRatePerKb,
 		&minConfirms, &comment)
 	return c.SendCmd(cmd)
 }
@@ -807,10 +805,10 @@ func (c *Client) SendManyCommentAsync(fromAccount string,
 // NOTE: This function requires to the wallet to be unlocked.  See the
 // WalletPassphrase function for more details.
 func (c *Client) SendManyComment(fromAccount string,
-	amounts map[btcutil.Address]btcutil.Amount, minConfirms int,
+	amounts map[btcutil.Address]btcutil.Amount, feeRatePerKb float64, minConfirms int,
 	comment string) (*chainhash.Hash, error) {
 
-	return c.SendManyCommentAsync(fromAccount, amounts, minConfirms,
+	return c.SendManyCommentAsync(fromAccount, amounts, feeRatePerKb, minConfirms,
 		comment).Receive()
 }
 
@@ -1029,7 +1027,7 @@ func (c *Client) CreateWallet(name string, opts ...CreateWalletOpt) (*btcjson.Cr
 type FutureGetAddressInfoResult chan *Response
 
 // Receive waits for the Response promised by the future and returns the information
-// about the given bitcoin address.
+// about the given address.
 func (r FutureGetAddressInfoResult) Receive() (*btcjson.GetAddressInfoResult, error) {
 	res, err := ReceiveFuture(r)
 	if err != nil {
@@ -1054,7 +1052,7 @@ func (c *Client) GetAddressInfoAsync(address string) FutureGetAddressInfoResult 
 	return c.SendCmd(cmd)
 }
 
-// GetAddressInfo returns information about the given bitcoin address.
+// GetAddressInfo returns information about the given address.
 func (c *Client) GetAddressInfo(address string) (*btcjson.GetAddressInfoResult, error) {
 	return c.GetAddressInfoAsync(address).Receive()
 }
@@ -1245,7 +1243,7 @@ type FutureGetAccountAddressResult struct {
 }
 
 // Receive waits for the Response promised by the future and returns the current
-// Bitcoin address for receiving payments to the specified account.
+// address for receiving payments to the specified account.
 func (r FutureGetAccountAddressResult) Receive() (btcutil.Address, error) {
 	res, err := ReceiveFuture(r.responseChannel)
 	if err != nil {
@@ -1276,7 +1274,7 @@ func (c *Client) GetAccountAddressAsync(account string) FutureGetAccountAddressR
 	return result
 }
 
-// GetAccountAddress returns the current Bitcoin address for receiving payments
+// GetAccountAddress returns the current address for receiving payments
 // to the specified account.
 func (c *Client) GetAccountAddress(account string) (btcutil.Address, error) {
 	return c.GetAccountAddressAsync(account).Receive()
@@ -1429,7 +1427,7 @@ func (r FutureMoveResult) Receive() (bool, error) {
 //
 // See Move for the blocking version and more details.
 func (c *Client) MoveAsync(fromAccount, toAccount string, amount btcutil.Amount) FutureMoveResult {
-	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToBTC(), nil,
+	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToPRL(), nil,
 		nil)
 	return c.SendCmd(cmd)
 }
@@ -1450,7 +1448,7 @@ func (c *Client) Move(fromAccount, toAccount string, amount btcutil.Amount) (boo
 func (c *Client) MoveMinConfAsync(fromAccount, toAccount string,
 	amount btcutil.Amount, minConfirms int) FutureMoveResult {
 
-	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToBTC(),
+	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToPRL(),
 		&minConfirms, nil)
 	return c.SendCmd(cmd)
 }
@@ -1473,7 +1471,7 @@ func (c *Client) MoveMinConf(fromAccount, toAccount string, amount btcutil.Amoun
 func (c *Client) MoveCommentAsync(fromAccount, toAccount string,
 	amount btcutil.Amount, minConfirms int, comment string) FutureMoveResult {
 
-	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToBTC(),
+	cmd := btcjson.NewMoveCmd(fromAccount, toAccount, amount.ToPRL(),
 		&minConfirms, &comment)
 	return c.SendCmd(cmd)
 }
@@ -1522,7 +1520,7 @@ func (c *Client) RenameAccount(oldAccount, newAccount string) error {
 type FutureValidateAddressResult chan *Response
 
 // Receive waits for the Response promised by the future and returns information
-// about the given bitcoin address.
+// about the given address.
 func (r FutureValidateAddressResult) Receive() (*btcjson.ValidateAddressWalletResult, error) {
 	res, err := ReceiveFuture(r)
 	if err != nil {
@@ -1550,7 +1548,7 @@ func (c *Client) ValidateAddressAsync(address btcutil.Address) FutureValidateAdd
 	return c.SendCmd(cmd)
 }
 
-// ValidateAddress returns information about the given bitcoin address.
+// ValidateAddress returns information about the given Pearl address.
 func (c *Client) ValidateAddress(address btcutil.Address) (*btcjson.ValidateAddressWalletResult, error) {
 	return c.ValidateAddressAsync(address).Receive()
 }
@@ -2568,7 +2566,7 @@ func (c *Client) ImportPubKeyRescan(pubKey string, rescan bool) error {
 // Miscellaneous Functions
 // ***********************
 
-// NOTE: While getinfo is implemented here (in wallet.go), a btcd chain server
+// NOTE: While getinfo is implemented here (in wallet.go), a pearld chain server
 // will respond to getinfo requests as well, excluding any wallet information.
 
 // FutureGetInfoResult is a future promise to deliver the result of a
@@ -2833,7 +2831,7 @@ func (c *Client) UnloadWalletAsync(walletName *string) FutureUnloadWalletResult 
 }
 
 // UnloadWallet unloads the referenced wallet. If the RPC server URL already
-// contains the name of the wallet, like http://127.0.0.1:8332/wallet/<walletname>,
+// contains the name of the wallet, like http://127.0.0.1:44207/wallet/<walletname>,
 // the parameter must be nil, or it'll return an error.
 func (c *Client) UnloadWallet(walletName *string) error {
 	return c.UnloadWalletAsync(walletName).Receive()
@@ -2869,6 +2867,6 @@ func (c *Client) LoadWallet(walletName string) (*btcjson.LoadWalletResult, error
 }
 
 // TODO(davec): Implement
-// encryptwallet (Won't be supported by btcwallet since it's always encrypted)
-// listaddressgroupings (NYI in btcwallet)
-// listreceivedbyaccount (NYI in btcwallet)
+// encryptwallet (Won't be supported by Oyster since it's always encrypted)
+// listaddressgroupings (NYI in Oyster)
+// listreceivedbyaccount (NYI in Oyster)

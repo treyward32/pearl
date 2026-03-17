@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/pearl-research-labs/pearl/node/txscript"
 )
 
 // CreateWalletResult models the result of the createwallet command.
@@ -35,7 +35,6 @@ type embeddedAddressInfo struct {
 	ScriptType          *txscript.ScriptClass `json:"script,omitempty"`
 	Hex                 *string               `json:"hex,omitempty"`
 	PubKeys             *[]string             `json:"pubkeys,omitempty"`
-	SignaturesRequired  *int                  `json:"sigsrequired,omitempty"`
 	PubKey              *string               `json:"pubkey,omitempty"`
 	IsCompressed        *bool                 `json:"iscompressed,omitempty"`
 	HDMasterFingerprint *string               `json:"hdmasterfingerprint,omitempty"`
@@ -43,7 +42,7 @@ type embeddedAddressInfo struct {
 }
 
 // GetAddressInfoResult models the result of the getaddressinfo command. It
-// contains information about a bitcoin address.
+// contains information about an address.
 //
 // Reference: https://bitcoincore.org/en/doc/0.20.0/rpc/wallet/getaddressinfo
 //
@@ -336,13 +335,21 @@ type ValidateAddressWalletResult struct {
 	Addresses    []string `json:"addresses,omitempty"`
 	Hex          string   `json:"hex,omitempty"`
 	Script       string   `json:"script,omitempty"`
-	SigsRequired int32    `json:"sigsrequired,omitempty"`
 }
 
 // GetBestBlockResult models the data from the getbestblock command.
 type GetBestBlockResult struct {
 	Hash   string `json:"hash"`
 	Height int32  `json:"height"`
+}
+
+// GetSyncProgressResult models the data from the getsyncprogress command.
+type GetSyncProgressResult struct {
+	HeaderHeight       int32 `json:"header_height"`
+	FilterHeaderHeight int32 `json:"filter_header_height"`
+	BlockHeight        int32 `json:"block_height"`
+	BestPeerHeight     int32 `json:"best_peer_height"`
+	Synced             bool  `json:"synced"`
 }
 
 // BalanceDetailsResult models the details data from the `getbalances` command.

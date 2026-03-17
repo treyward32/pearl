@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TestErrNotInMainChain ensures the functions related to errNotInMainChain work
@@ -56,7 +56,7 @@ func TestStxoSerialization(t *testing.T) {
 				IsCoinBase: true,
 				Height:     9,
 			},
-			serialized: hexToBytes("1300320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c"),
+			serialized: hexToBytes("13320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c"),
 		},
 		// Adapted from block 100025 in main blockchain.
 		{
@@ -67,7 +67,7 @@ func TestStxoSerialization(t *testing.T) {
 				IsCoinBase: false,
 				Height:     100024,
 			},
-			serialized: hexToBytes("8b99700086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec"),
+			serialized: hexToBytes("8b997086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec"),
 		},
 		// Adapted from block 100025 in main blockchain.
 		{
@@ -165,7 +165,7 @@ func TestStxoDecodeErrors(t *testing.T) {
 			bytesRead:  1,
 		},
 		{
-			name:       "no data after reserved",
+			name:       "no data after header code for compressed txout",
 			stxo:       SpentTxOut{},
 			serialized: hexToBytes("1300"),
 			errType:    errDeserialize(""),
@@ -247,7 +247,7 @@ func TestSpendJournalSerialization(t *testing.T) {
 				}},
 				LockTime: 0,
 			}},
-			serialized: hexToBytes("1300320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c"),
+			serialized: hexToBytes("13320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c"),
 		},
 		// Adapted from block 100025 in main blockchain.
 		{
@@ -300,7 +300,7 @@ func TestSpendJournalSerialization(t *testing.T) {
 				}},
 				LockTime: 0,
 			}},
-			serialized: hexToBytes("8b99700086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec8b99700091f20f006edbc6c4d31bae9f1ccc38538a114bf42de65e86"),
+			serialized: hexToBytes("8b997086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec8b997091f20f006edbc6c4d31bae9f1ccc38538a114bf42de65e86"),
 		},
 	}
 

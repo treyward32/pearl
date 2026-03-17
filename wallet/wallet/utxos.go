@@ -1,5 +1,5 @@
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2016 The Decred developers
-// Copyright (c) 2017 The btcsuite developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,12 +9,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/btcutil/psbt"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/btcutil/psbt"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 var (
@@ -32,7 +33,7 @@ type OutputSelectionPolicy struct {
 }
 
 func (p *OutputSelectionPolicy) meetsRequiredConfs(txHeight, curHeight int32) bool {
-	return confirmed(p.RequiredConfirmations, txHeight, curHeight)
+	return hasMinConfs(p.RequiredConfirmations, txHeight, curHeight)
 }
 
 // UnspentOutputs fetches all unspent outputs from the wallet that match rules
@@ -174,6 +175,12 @@ func (w *Wallet) FetchOutpointInfo(prevOut *wire.OutPoint) (*wire.MsgTx,
 			numOutputs)
 	}
 
+	// Exit early if the output doesn't belong to our wallet. We know it's
+	// our UTXO iff the `TxDetails` has a credit record on this output.
+	if !hasOutput(txDetail, prevOut.Index) {
+		return nil, nil, 0, ErrNotMine
+	}
+
 	pkScript := txDetail.TxRecord.MsgTx.TxOut[prevOut.Index].PkScript
 
 	// Determine the number of confirmations the output currently has.
@@ -223,4 +230,20 @@ func (w *Wallet) FetchDerivationInfo(pkScript []byte) (*psbt.Bip32Derivation,
 	}
 
 	return derivation, nil
+}
+
+// hasOutpoint takes an output identified by its output index and determines
+// whether the TxDetails contains this output. If the TxDetails doesn't have
+// this output, it means this output doesn't belong to our wallet.
+//
+// TODO(yy): implement this method on `TxDetails` and update the package
+// `wtxmgr` instead.
+func hasOutput(t *wtxmgr.TxDetails, outputIndex uint32) bool {
+	for _, cred := range t.Credits {
+		if outputIndex == cred.Index {
+			return true
+		}
+	}
+
+	return false
 }

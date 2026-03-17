@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,30 +7,25 @@ package mempool
 import (
 	"container/list"
 	"fmt"
+	"maps"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/blockchain/indexers"
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mining"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/blockchain/indexers"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
-	// DefaultBlockPrioritySize is the default size in bytes for high-
-	// priority / low-fee transactions.  It is used to help determine which
-	// are allowed into the mempool and consequently affects their relay and
-	// inclusion when generating block templates.
-	DefaultBlockPrioritySize = 50000
-
 	// orphanTTL is the maximum amount of time an orphan is allowed to
 	// stay in the orphan pool before it expires and is evicted during the
 	// next scan.
@@ -140,12 +135,7 @@ type Policy struct {
 	// of big orphans.
 	MaxOrphanTxSize int
 
-	// MaxSigOpCostPerTx is the cumulative maximum cost of all the signature
-	// operations in a single transaction we will relay or mine.  It is a
-	// fraction of the max signature operations for a block.
-	MaxSigOpCostPerTx int
-
-	// MinRelayTxFee defines the minimum transaction fee in BTC/kB to be
+	// MinRelayTxFee defines the minimum transaction fee in PRL/kB to be
 	// considered a non-zero fee.
 	MinRelayTxFee btcutil.Amount
 
@@ -153,17 +143,16 @@ type Policy struct {
 	// transactions using the Replace-By-Fee (RBF) signaling policy into
 	// the mempool.
 	RejectReplacement bool
+
+	// MaxMempoolSize is the maximum allowed mempool size in bytes.
+	// When the pool exceeds this limit, the lowest fee-rate transactions
+	// are evicted. A value of 0 means unlimited (no eviction).
+	MaxMempoolSize uint64
 }
 
 // TxDesc is a descriptor containing a transaction in the mempool along with
-// additional metadata.
-type TxDesc struct {
-	mining.TxDesc
-
-	// StartingPriority is the priority of the transaction when it was added
-	// to the pool.
-	StartingPriority float64
-}
+// additional metadata. It is an alias for mining.TxDesc.
+type TxDesc = mining.TxDesc
 
 // orphanTx is normal transaction that references an ancestor transaction
 // that is not yet available.  It also contains additional information related
@@ -195,6 +184,19 @@ type TxPool struct {
 	// the scan will only run when an orphan is added to the pool as opposed
 	// to on an unconditional timer.
 	nextExpireScan time.Time
+
+	// poolBytes is the total serialized byte size of all transactions in
+	// the main pool. Updated on every add/remove.
+	poolBytes uint64
+
+	// feeRateHeap is a min-heap ordered by fee-per-kB, used to
+	// efficiently find the lowest fee-rate transaction for eviction.
+	feeRateHeap *txFeeRateHeap
+
+	// lastEvictedFeeRate is the fee-per-kB of the last transaction
+	// evicted by trimToSize. Used as a static fee floor to reject
+	// incoming transactions that would be immediately evicted.
+	lastEvictedFeeRate int64
 }
 
 // Ensure the TxPool type implements the mining.TxSource interface.
@@ -494,6 +496,11 @@ func (mp *TxPool) removeTransaction(tx *btcutil.Tx, removeRedeemers bool) {
 			mp.cfg.AddrIndex.RemoveUnconfirmedTx(txHash)
 		}
 
+		// Update pool size tracking and remove from the fee-rate heap.
+		txSize := uint64(txDesc.Tx.MsgTx().SerializeSize())
+		mp.poolBytes -= txSize
+		mp.feeRateHeap.Remove(*txHash)
+
 		// Mark the referenced outpoints as unspent by the pool.
 		for _, txIn := range txDesc.Tx.MsgTx().TxIn {
 			delete(mp.outpoints, txIn.PreviousOutPoint)
@@ -545,14 +552,11 @@ func (mp *TxPool) addTransaction(utxoView *blockchain.UtxoViewpoint, tx *btcutil
 	// Add the transaction to the pool and mark the referenced outpoints
 	// as spent by the pool.
 	txD := &TxDesc{
-		TxDesc: mining.TxDesc{
-			Tx:       tx,
-			Added:    time.Now(),
-			Height:   height,
-			Fee:      fee,
-			FeePerKB: fee * 1000 / GetTxVirtualSize(tx),
-		},
-		StartingPriority: mining.CalcPriority(tx.MsgTx(), utxoView, height),
+		Tx:       tx,
+		Added:    time.Now(),
+		Height:   height,
+		Fee:      fee,
+		FeePerKB: fee * 1000 / blockchain.GetTransactionVsize(tx),
 	}
 
 	mp.pool[*tx.Hash()] = txD
@@ -560,6 +564,11 @@ func (mp *TxPool) addTransaction(utxoView *blockchain.UtxoViewpoint, tx *btcutil
 		mp.outpoints[txIn.PreviousOutPoint] = tx
 	}
 	atomic.StoreInt64(&mp.lastUpdated, time.Now().Unix())
+
+	// Track pool size and register in the fee-rate heap for eviction.
+	txSize := uint64(tx.MsgTx().SerializeSize())
+	mp.poolBytes += txSize
+	mp.feeRateHeap.Add(*tx.Hash(), txD.FeePerKB, int64(txSize))
 
 	// Add unconfirmed address index entries associated with the transaction
 	// if enabled.
@@ -696,9 +705,7 @@ func (mp *TxPool) txAncestors(tx *btcutil.Tx,
 			cache[*parent.Tx.Hash()] = moreAncestors
 		}
 
-		for hash, ancestor := range moreAncestors {
-			ancestors[hash] = ancestor
-		}
+		maps.Copy(ancestors, moreAncestors)
 	}
 
 	return ancestors
@@ -766,9 +773,8 @@ func (mp *TxPool) txConflicts(tx *btcutil.Tx) map[chainhash.Hash]*btcutil.Tx {
 			continue
 		}
 		conflicts[*conflict.Hash()] = conflict
-		for hash, descendant := range mp.txDescendants(conflict, nil) {
-			conflicts[hash] = descendant
-		}
+		descendants := mp.txDescendants(conflict, nil)
+		maps.Copy(conflicts, descendants)
 	}
 	return conflicts
 }
@@ -873,7 +879,7 @@ func (mp *TxPool) validateReplacement(tx *btcutil.Tx,
 	// block. Requiring that the fee rate always be increased is also an
 	// easy-to-reason about way to prevent DoS attacks via replacements.
 	var (
-		txSize           = GetTxVirtualSize(tx)
+		txSize           = blockchain.GetTransactionVsize(tx)
 		txFeeRate        = txFee * 1000 / txSize
 		conflictsFee     int64
 		conflictsParents = make(map[chainhash.Hash]struct{})
@@ -965,6 +971,15 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit,
 		mp.removeTransaction(conflict, false)
 	}
 	txD := mp.addTransaction(r.utxoView, tx, r.bestHeight, int64(r.TxFee))
+
+	// Enforce the mempool size limit by evicting lowest fee-rate
+	// transactions, then check if the newly added tx survived.
+	mp.trimToSize()
+	if _, exists := mp.pool[*txHash]; !exists {
+		str := fmt.Sprintf("transaction %v evicted immediately; "+
+			"mempool full", txHash)
+		return nil, nil, txRuleError(wire.RejectInsufficientFee, str)
+	}
 
 	log.Debugf("Accepted transaction %v (pool size: %v)", txHash,
 		len(mp.pool))
@@ -1214,7 +1229,7 @@ func (mp *TxPool) MiningDescs() []*mining.TxDesc {
 	descs := make([]*mining.TxDesc, len(mp.pool))
 	i := 0
 	for _, desc := range mp.pool {
-		descs[i] = &desc.TxDesc
+		descs[i] = desc
 		i++
 	}
 	mp.mtx.RUnlock()
@@ -1232,30 +1247,17 @@ func (mp *TxPool) RawMempoolVerbose() map[string]*btcjson.GetRawMempoolVerboseRe
 
 	result := make(map[string]*btcjson.GetRawMempoolVerboseResult,
 		len(mp.pool))
-	bestHeight := mp.cfg.BestHeight()
 
 	for _, desc := range mp.pool {
-		// Calculate the current priority based on the inputs to
-		// the transaction.  Use zero if one or more of the
-		// input transactions can't be found for some reason.
 		tx := desc.Tx
-		var currentPriority float64
-		utxos, err := mp.fetchInputUtxos(tx)
-		if err == nil {
-			currentPriority = mining.CalcPriority(tx.MsgTx(), utxos,
-				bestHeight+1)
-		}
 
 		mpd := &btcjson.GetRawMempoolVerboseResult{
-			Size:             int32(tx.MsgTx().SerializeSize()),
-			Vsize:            int32(GetTxVirtualSize(tx)),
-			Weight:           int32(blockchain.GetTransactionWeight(tx)),
-			Fee:              btcutil.Amount(desc.Fee).ToBTC(),
-			Time:             desc.Added.Unix(),
-			Height:           int64(desc.Height),
-			StartingPriority: desc.StartingPriority,
-			CurrentPriority:  currentPriority,
-			Depends:          make([]string, 0),
+			Size:    int32(tx.MsgTx().SerializeSize()),
+			Vsize:   int32(blockchain.GetTransactionVsize(tx)),
+			Fee:     btcutil.Amount(desc.Fee).ToPRL(),
+			Time:    desc.Added.Unix(),
+			Height:  int64(desc.Height),
+			Depends: make([]string, 0),
 		}
 		for _, txIn := range tx.MsgTx().TxIn {
 			hash := &txIn.PreviousOutPoint.Hash
@@ -1281,7 +1283,7 @@ func (mp *TxPool) LastUpdated() time.Time {
 
 // MempoolAcceptResult holds the result from mempool acceptance check.
 type MempoolAcceptResult struct {
-	// TxFee is the fees paid in satoshi.
+	// TxFee is the fees paid in grain.
 	TxFee btcutil.Amount
 
 	// TxSize is the virtual size(vb) of the tx.
@@ -1342,9 +1344,9 @@ func (mp *TxPool) checkMempoolAcceptance(tx *btcutil.Tx,
 
 	txHash := tx.Hash()
 
-	// Check for segwit activeness.
-	if err := mp.validateSegWitDeployment(tx); err != nil {
-		return nil, err
+	// Enforce segwit for all transactions.
+	if !tx.MsgTx().HasWitness() {
+		return nil, txRuleError(wire.RejectNonstandard, "transaction has no witness data")
 	}
 
 	// Don't accept the transaction if it already exists in the pool. This
@@ -1507,13 +1509,24 @@ func (mp *TxPool) checkMempoolAcceptance(tx *btcutil.Tx,
 			"transaction's sequence locks on inputs not met")
 	}
 
-	// Don't allow transactions with an excessive number of signature
-	// operations which would result in making it impossible to mine.
-	if err := mp.validateSigCost(tx, utxoView); err != nil {
-		return nil, err
-	}
+	txSize := blockchain.GetTransactionVsize(tx)
 
-	txSize := GetTxVirtualSize(tx)
+	// If the mempool has a size limit and is at capacity, reject
+	// transactions whose fee rate is at or below the last evicted fee
+	// rate. This prevents accept/evict churn under sustained spam.
+	if mp.cfg.Policy.MaxMempoolSize > 0 && mp.lastEvictedFeeRate > 0 &&
+		mp.poolBytes >= mp.cfg.Policy.MaxMempoolSize {
+
+		txFeeRate := txFee * 1000 / txSize
+		if txFeeRate <= mp.lastEvictedFeeRate {
+			str := fmt.Sprintf("mempool min fee not met: "+
+				"%d <= %d grain/kB", txFeeRate,
+				mp.lastEvictedFeeRate)
+			return nil, txRuleError(
+				wire.RejectInsufficientFee, str,
+			)
+		}
+	}
 
 	// Don't allow transactions with fees too low to get into a mined
 	// block.
@@ -1555,41 +1568,6 @@ func (mp *TxPool) checkMempoolAcceptance(tx *btcutil.Tx,
 	}
 
 	return result, nil
-}
-
-// validateSegWitDeployment checks that when a transaction has witness data,
-// segwit must be active.
-func (mp *TxPool) validateSegWitDeployment(tx *btcutil.Tx) error {
-	// Exit early if this transaction doesn't have witness data.
-	if !tx.MsgTx().HasWitness() {
-		return nil
-	}
-
-	// If a transaction has witness data, and segwit isn't active yet, then
-	// we won't accept it into the mempool as it can't be mined yet.
-	segwitActive, err := mp.cfg.IsDeploymentActive(
-		chaincfg.DeploymentSegwit,
-	)
-	if err != nil {
-		return err
-	}
-
-	// Exit early if segwit is active.
-	if segwitActive {
-		return nil
-	}
-
-	simnetHint := ""
-	if mp.cfg.ChainParams.Net == wire.SimNet {
-		bestHeight := mp.cfg.BestHeight()
-		simnetHint = fmt.Sprintf(" (The threshold for segwit "+
-			"activation is 300 blocks on simnet, current best "+
-			"height is %d)", bestHeight)
-	}
-	str := fmt.Sprintf("transaction %v has witness data, "+
-		"but segwit isn't active yet%s", tx.Hash(), simnetHint)
-
-	return txRuleError(wire.RejectNonstandard, str)
 }
 
 // validateStandardness checks the transaction passes both transaction standard
@@ -1644,38 +1622,6 @@ func (mp *TxPool) validateStandardness(tx *btcutil.Tx, nextBlockHeight int32,
 	return nil
 }
 
-// validateSigCost checks the cost to run the signature operations to make sure
-// the number of signatures are sane.
-func (mp *TxPool) validateSigCost(tx *btcutil.Tx,
-	utxoView *blockchain.UtxoViewpoint) error {
-
-	// Since the coinbase address itself can contain signature operations,
-	// the maximum allowed signature operations per transaction is less
-	// than the maximum allowed signature operations per block.
-	//
-	// TODO(roasbeef): last bool should be conditional on segwit activation
-	sigOpCost, err := blockchain.GetSigOpCost(
-		tx, false, utxoView, true, true,
-	)
-	if err != nil {
-		if cerr, ok := err.(blockchain.RuleError); ok {
-			return chainRuleError(cerr)
-		}
-
-		return err
-	}
-
-	// Exit early if the sig cost is under limit.
-	if sigOpCost <= mp.cfg.Policy.MaxSigOpCostPerTx {
-		return nil
-	}
-
-	str := fmt.Sprintf("transaction %v sigop cost is too high: %d > %d",
-		tx.Hash(), sigOpCost, mp.cfg.Policy.MaxSigOpCostPerTx)
-
-	return txRuleError(wire.RejectNonstandard, str)
-}
-
 // validateRelayFeeMet checks that the min relay fee is covered by this
 // transaction.
 func (mp *TxPool) validateRelayFeeMet(tx *btcutil.Tx, txFee, txSize int64,
@@ -1684,18 +1630,10 @@ func (mp *TxPool) validateRelayFeeMet(tx *btcutil.Tx, txFee, txSize int64,
 
 	txHash := tx.Hash()
 
-	// Most miners allow a free transaction area in blocks they mine to go
-	// alongside the area used for high-priority transactions as well as
-	// transactions with fees. A transaction size of up to 1000 bytes is
-	// considered safe to go into this section. Further, the minimum fee
-	// calculated below on its own would encourage several small
-	// transactions to avoid fees rather than one single larger transaction
-	// which is more desirable. Therefore, as long as the size of the
-	// transaction does not exceed 1000 less than the reserved space for
-	// high-priority transactions, don't require a fee for it.
+	// Calculate the minimum required fee for this transaction.
 	minFee := calcMinRequiredTxRelayFee(txSize, mp.cfg.Policy.MinRelayTxFee)
 
-	if txSize >= (DefaultBlockPrioritySize-1000) && txFee < minFee {
+	if txFee < minFee {
 		str := fmt.Sprintf("transaction %v has %d fees which is under "+
 			"the required amount of %d", txHash, txFee, minFee)
 
@@ -1710,23 +1648,6 @@ func (mp *TxPool) validateRelayFeeMet(tx *btcutil.Tx, txFee, txSize int64,
 	// Exit early if this is neither a new tx or rate limited.
 	if !isNew && !rateLimit {
 		return nil
-	}
-
-	// Require that free transactions have sufficient priority to be mined
-	// in the next block. Transactions which are being added back to the
-	// memory pool from blocks that have been disconnected during a reorg
-	// are exempted.
-	if isNew && !mp.cfg.Policy.DisableRelayPriority {
-		currentPriority := mining.CalcPriority(
-			tx.MsgTx(), utxoView, nextBlockHeight,
-		)
-		if currentPriority <= mining.MinHighPriority {
-			str := fmt.Sprintf("transaction %v has insufficient "+
-				"priority (%g <= %g)", txHash,
-				currentPriority, mining.MinHighPriority)
-
-			return txRuleError(wire.RejectInsufficientFee, str)
-		}
 	}
 
 	// We can only end up here when the rateLimit is true. Free-to-relay
@@ -1757,6 +1678,60 @@ func (mp *TxPool) validateRelayFeeMet(tx *btcutil.Tx, txFee, txSize int64,
 	return nil
 }
 
+// trimToSize evicts the lowest fee-rate transactions from the pool until
+// poolBytes is at or below MaxMempoolSize. It also removes dependents
+// (redeemers) of each evicted transaction. The fee rate of the last evicted
+// transaction is recorded as a static fee floor.
+//
+// This function MUST be called with the mempool lock held (for writes).
+func (mp *TxPool) trimToSize() {
+	maxSize := mp.cfg.Policy.MaxMempoolSize
+	if maxSize == 0 {
+		return
+	}
+
+	if mp.poolBytes <= maxSize {
+		mp.lastEvictedFeeRate = 0
+		return
+	}
+
+	nRemoved := 0
+	for mp.poolBytes > maxSize && mp.feeRateHeap.Len() > 0 {
+		entry := mp.feeRateHeap.PopMin()
+		txDesc, exists := mp.pool[entry.txHash]
+		if !exists {
+			continue
+		}
+
+		mp.lastEvictedFeeRate = entry.feePerKB
+		mp.removeTransaction(txDesc.Tx, true)
+		nRemoved++
+	}
+
+	if nRemoved > 0 {
+		log.Debugf("Evicted %d txns from mempool (pool size: %d bytes), "+
+			"fee floor now %d grain/kB", nRemoved, mp.poolBytes,
+			mp.lastEvictedFeeRate)
+	}
+}
+
+// PoolBytes returns the total serialized byte size of all transactions in
+// the main pool.
+//
+// This function is safe for concurrent access.
+func (mp *TxPool) PoolBytes() uint64 {
+	mp.mtx.RLock()
+	bytes := mp.poolBytes
+	mp.mtx.RUnlock()
+	return bytes
+}
+
+// MaxMempoolSize returns the configured maximum mempool size in bytes.
+// A value of 0 means unlimited (no eviction).
+func (mp *TxPool) MaxMempoolSize() uint64 {
+	return mp.cfg.Policy.MaxMempoolSize
+}
+
 // New returns a new memory pool for validating and storing standalone
 // transactions until they are mined into a block.
 func New(cfg *Config) *TxPool {
@@ -1767,5 +1742,6 @@ func New(cfg *Config) *TxPool {
 		orphansByPrev:  make(map[wire.OutPoint]map[chainhash.Hash]*btcutil.Tx),
 		nextExpireScan: time.Now().Add(orphanExpireScanInterval),
 		outpoints:      make(map[wire.OutPoint]*btcutil.Tx),
+		feeRateHeap:    newTxFeeRateHeap(),
 	}
 }

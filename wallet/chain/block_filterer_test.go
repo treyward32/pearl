@@ -5,31 +5,45 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/chain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+
+	"github.com/pearl-research-labs/pearl/wallet/chain"
 )
 
+// Block100000 uses ZKCertificate with stub proof (not valid for PoW verification).
 var Block100000 = wire.MsgBlock{
-	Header: wire.BlockHeader{
-		Version: 1,
-		PrevBlock: chainhash.Hash([32]byte{ // Make go vet happy.
-			0x50, 0x12, 0x01, 0x19, 0x17, 0x2a, 0x61, 0x04,
-			0x21, 0xa6, 0xc3, 0x01, 0x1d, 0xd3, 0x30, 0xd9,
-			0xdf, 0x07, 0xb6, 0x36, 0x16, 0xc2, 0xcc, 0x1f,
-			0x1c, 0xd0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-		}), // 000000000002d01c1fccc21636b607dfd930d31d01c3a62104612a1719011250
-		MerkleRoot: chainhash.Hash([32]byte{ // Make go vet happy.
-			0x66, 0x57, 0xa9, 0x25, 0x2a, 0xac, 0xd5, 0xc0,
-			0xb2, 0x94, 0x09, 0x96, 0xec, 0xff, 0x95, 0x22,
-			0x28, 0xc3, 0x06, 0x7c, 0xc3, 0x8d, 0x48, 0x85,
-			0xef, 0xb5, 0xa4, 0xac, 0x42, 0x47, 0xe9, 0xf3,
-		}), // f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766
-		Timestamp: time.Unix(1293623863, 0), // 2010-12-29 11:57:43 +0000 UTC
-		Bits:      0x1b04864c,               // 453281356
-		Nonce:     0x10572b0f,               // 274148111
+	MsgHeader: wire.MsgHeader{
+		MsgCertificate: wire.MsgCertificate{
+			Certificate: &wire.ZKCertificate{
+				Hash: chainhash.Hash([32]byte{
+					0x06, 0xe5, 0x33, 0xfd, 0x1a, 0xda, 0x86, 0x39,
+					0x1f, 0x3f, 0x6c, 0x34, 0x32, 0x04, 0xb0, 0xd2,
+					0x78, 0xd4, 0xaa, 0xec, 0x1c, 0x0b, 0x20, 0xaa,
+					0x27, 0xba, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00,
+				}),
+				ProofData: []byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe},
+			},
+		},
+		BlockHeader: wire.BlockHeader{
+			Version: 1,
+			PrevBlock: chainhash.Hash([32]byte{ // Make go vet happy.
+				0x50, 0x12, 0x01, 0x19, 0x17, 0x2a, 0x61, 0x04,
+				0x21, 0xa6, 0xc3, 0x01, 0x1d, 0xd3, 0x30, 0xd9,
+				0xdf, 0x07, 0xb6, 0x36, 0x16, 0xc2, 0xcc, 0x1f,
+				0x1c, 0xd0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+			}), // 000000000002d01c1fccc21636b607dfd930d31d01c3a62104612a1719011250
+			MerkleRoot: chainhash.Hash([32]byte{ // Make go vet happy.
+				0x66, 0x57, 0xa9, 0x25, 0x2a, 0xac, 0xd5, 0xc0,
+				0xb2, 0x94, 0x09, 0x96, 0xec, 0xff, 0x95, 0x22,
+				0x28, 0xc3, 0x06, 0x7c, 0xc3, 0x8d, 0x48, 0x85,
+				0xef, 0xb5, 0xa4, 0xac, 0x42, 0x47, 0xe9, 0xf3,
+			}), // f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766
+			Timestamp: time.Unix(1293623863, 0), // 2010-12-29 11:57:43 +0000 UTC
+			Bits:      0x1b04864c,               // 453281356
+		},
 	},
 	Transactions: []*wire.MsgTx{
 		{
@@ -274,8 +288,8 @@ func TestBlockFiltererOneInOneOut(t *testing.T) {
 	// Add each of their single previous outpoints to the set of watched
 	// outpoints to filter for.
 	watchedOutPoints := make(map[wire.OutPoint]btcutil.Address)
-	watchedOutPoints[firstTx.TxIn[0].PreviousOutPoint] = &btcutil.AddressWitnessPubKeyHash{}
-	watchedOutPoints[lastTx.TxIn[0].PreviousOutPoint] = &btcutil.AddressWitnessPubKeyHash{}
+	watchedOutPoints[firstTx.TxIn[0].PreviousOutPoint] = &btcutil.AddressTaproot{}
+	watchedOutPoints[lastTx.TxIn[0].PreviousOutPoint] = &btcutil.AddressTaproot{}
 
 	// Construct a filter request, watching only for the outpoints above,
 	// and construct a block filterer.

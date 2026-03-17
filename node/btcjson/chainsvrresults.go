@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,12 +8,11 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // GetBlockHeaderVerboseResult models the data from the getblockheader command when
@@ -27,7 +26,6 @@ type GetBlockHeaderVerboseResult struct {
 	VersionHex    string  `json:"versionHex"`
 	MerkleRoot    string  `json:"merkleroot"`
 	Time          int64   `json:"time"`
-	Nonce         uint64  `json:"nonce"`
 	Bits          string  `json:"bits"`
 	Difficulty    float64 `json:"difficulty"`
 	PreviousHash  string  `json:"previousblockhash,omitempty"`
@@ -54,13 +52,11 @@ type GetBlockStatsResult struct {
 	MinTxSize          int64   `json:"mintxsize"`
 	Outs               int64   `json:"outs"`
 	SegWitTotalSize    int64   `json:"swtotal_size"`
-	SegWitTotalWeight  int64   `json:"swtotal_weight"`
 	SegWitTxs          int64   `json:"swtxs"`
 	Subsidy            int64   `json:"subsidy"`
 	Time               int64   `json:"time"`
 	TotalOut           int64   `json:"total_out"`
 	TotalSize          int64   `json:"total_size"`
-	TotalWeight        int64   `json:"total_weight"`
 	Txs                int64   `json:"txs"`
 	UTXOIncrease       int64   `json:"utxo_increase"`
 	UTXOSizeIncrease   int64   `json:"utxo_size_inc"`
@@ -75,9 +71,9 @@ type GetBlockStatsResult struct {
 type GetBlockVerboseResult struct {
 	Hash          string        `json:"hash"`
 	Confirmations int64         `json:"confirmations"`
-	StrippedSize  int32         `json:"strippedsize"`
 	Size          int32         `json:"size"`
-	Weight        int32         `json:"weight"`
+	StrippedSize  int32         `json:"strippedsize"`
+	Vsize         int32         `json:"vsize"`
 	Height        int64         `json:"height"`
 	Version       int32         `json:"version"`
 	VersionHex    string        `json:"versionHex"`
@@ -85,7 +81,6 @@ type GetBlockVerboseResult struct {
 	Tx            []string      `json:"tx,omitempty"`
 	RawTx         []TxRawResult `json:"rawtx,omitempty"` // Note: this field is always empty when verbose != 2.
 	Time          int64         `json:"time"`
-	Nonce         uint32        `json:"nonce"`
 	Bits          string        `json:"bits"`
 	Difficulty    float64       `json:"difficulty"`
 	PreviousHash  string        `json:"previousblockhash"`
@@ -102,8 +97,7 @@ type GetBlockVerboseTxResult struct {
 	Hash          string        `json:"hash"`
 	Confirmations int64         `json:"confirmations"`
 	StrippedSize  int32         `json:"strippedsize"`
-	Size          int32         `json:"size"`
-	Weight        int32         `json:"weight"`
+	Vsize         int32         `json:"vsize"`
 	Height        int64         `json:"height"`
 	Version       int32         `json:"version"`
 	VersionHex    string        `json:"versionHex"`
@@ -111,7 +105,6 @@ type GetBlockVerboseTxResult struct {
 	Tx            []TxRawResult `json:"tx,omitempty"`
 	RawTx         []TxRawResult `json:"rawtx,omitempty"` // Deprecated: removed in Bitcoin Core
 	Time          int64         `json:"time"`
-	Nonce         uint32        `json:"nonce"`
 	Bits          string        `json:"bits"`
 	Difficulty    float64       `json:"difficulty"`
 	PreviousHash  string        `json:"previousblockhash"`
@@ -152,7 +145,6 @@ type DecodeScriptResult struct {
 	Type      string   `json:"type"`
 	Address   string   `json:"address,omitempty"`
 	Addresses []string `json:"addresses,omitempty"` // Deprecated: removed in Bitcoin Core
-	P2sh      string   `json:"p2sh,omitempty"`
 }
 
 // GetAddedNodeInfoResultAddr models the data of the addresses portion of the
@@ -257,8 +249,7 @@ type GetBlockTemplateResultTx struct {
 	TxID    string  `json:"txid"`
 	Depends []int64 `json:"depends"`
 	Fee     int64   `json:"fee"`
-	SigOps  int64   `json:"sigops"`
-	Weight  int64   `json:"weight"`
+	Vsize   int64   `json:"vsize"`
 }
 
 // GetBlockTemplateResultAux models the coinbaseaux field of the
@@ -276,9 +267,7 @@ type GetBlockTemplateResult struct {
 	CurTime       int64                      `json:"curtime"`
 	Height        int64                      `json:"height"`
 	PreviousHash  string                     `json:"previousblockhash"`
-	SigOpLimit    int64                      `json:"sigoplimit,omitempty"`
-	SizeLimit     int64                      `json:"sizelimit,omitempty"`
-	WeightLimit   int64                      `json:"weightlimit,omitempty"`
+	VsizeLimit    int64                      `json:"vsizelimit,omitempty"`
 	Transactions  []GetBlockTemplateResultTx `json:"transactions"`
 	Version       int32                      `json:"version"`
 	CoinbaseAux   *GetBlockTemplateResultAux `json:"coinbaseaux,omitempty"`
@@ -323,8 +312,6 @@ type MempoolFees struct {
 // command.
 type GetMempoolEntryResult struct {
 	VSize           int32       `json:"vsize"`
-	Size            int32       `json:"size"`
-	Weight          int64       `json:"weight"`
 	Fee             float64     `json:"fee"`
 	ModifiedFee     float64     `json:"modifiedfee"`
 	Time            int64       `json:"time"`
@@ -343,8 +330,9 @@ type GetMempoolEntryResult struct {
 // GetMempoolInfoResult models the data returned from the getmempoolinfo
 // command.
 type GetMempoolInfoResult struct {
-	Size  int64 `json:"size"`
-	Bytes int64 `json:"bytes"`
+	Size     int64  `json:"size"`
+	Bytes    int64  `json:"bytes"`
+	Capacity uint64 `json:"cap"`
 }
 
 // NetworksResult models the networks data from the getnetworkinfo command.
@@ -364,67 +352,25 @@ type LocalAddressesResult struct {
 	Score   int32  `json:"score"`
 }
 
-// StringOrArray defines a type that can be used as type that is either a single
-// string value or a string array in JSON-RPC commands, depending on the version
-// of the chain backend.
-type StringOrArray []string
-
-// MarshalJSON implements the json.Marshaler interface.
-func (h StringOrArray) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h)
-}
-
-// UnmarshalJSON implements the json.Unmarshaler interface.
-func (h *StringOrArray) UnmarshalJSON(data []byte) error {
-	var unmarshalled interface{}
-	if err := json.Unmarshal(data, &unmarshalled); err != nil {
-		return err
-	}
-
-	switch v := unmarshalled.(type) {
-	case string:
-		*h = []string{v}
-
-	case []interface{}:
-		s := make([]string, len(v))
-		for i, e := range v {
-			str, ok := e.(string)
-			if !ok {
-				return fmt.Errorf("invalid string_or_array "+
-					"value: %v", unmarshalled)
-			}
-
-			s[i] = str
-		}
-
-		*h = s
-
-	default:
-		return fmt.Errorf("invalid string_or_array value: %v",
-			unmarshalled)
-	}
-
-	return nil
-}
-
 // GetNetworkInfoResult models the data returned from the getnetworkinfo
 // command.
 type GetNetworkInfoResult struct {
-	Version         int32                  `json:"version"`
-	SubVersion      string                 `json:"subversion"`
-	ProtocolVersion int32                  `json:"protocolversion"`
-	LocalServices   string                 `json:"localservices"`
-	LocalRelay      bool                   `json:"localrelay"`
-	TimeOffset      int64                  `json:"timeoffset"`
-	Connections     int32                  `json:"connections"`
-	ConnectionsIn   int32                  `json:"connections_in"`
-	ConnectionsOut  int32                  `json:"connections_out"`
-	NetworkActive   bool                   `json:"networkactive"`
-	Networks        []NetworksResult       `json:"networks"`
-	RelayFee        float64                `json:"relayfee"`
-	IncrementalFee  float64                `json:"incrementalfee"`
-	LocalAddresses  []LocalAddressesResult `json:"localaddresses"`
-	Warnings        StringOrArray          `json:"warnings"`
+	Version            int32                  `json:"version"`
+	SubVersion         string                 `json:"subversion"`
+	ProtocolVersion    int32                  `json:"protocolversion"`
+	LocalServices      string                 `json:"localservices"`
+	LocalServicesNames []string               `json:"localservicesnames"`
+	LocalRelay         bool                   `json:"localrelay"`
+	TimeOffset         int64                  `json:"timeoffset"`
+	Connections        int32                  `json:"connections"`
+	ConnectionsIn      int32                  `json:"connections_in"`
+	ConnectionsOut     int32                  `json:"connections_out"`
+	NetworkActive      bool                   `json:"networkactive"`
+	Networks           []NetworksResult       `json:"networks"`
+	RelayFee           float64                `json:"relayfee"`
+	IncrementalFee     float64                `json:"incrementalfee"`
+	LocalAddresses     []LocalAddressesResult `json:"localaddresses"`
+	Warnings           []string               `json:"warnings"`
 }
 
 // GetNodeAddressesResult models the data returned from the getnodeaddresses
@@ -460,21 +406,19 @@ type GetPeerInfoResult struct {
 	BanScore       int32   `json:"banscore"`
 	FeeFilter      int64   `json:"feefilter"`
 	SyncNode       bool    `json:"syncnode"`
+	V2Connection   bool    `json:"v2_connection"`
 }
 
 // GetRawMempoolVerboseResult models the data returned from the getrawmempool
 // command when the verbose flag is set.  When the verbose flag is not set,
 // getrawmempool returns an array of transaction hashes.
 type GetRawMempoolVerboseResult struct {
-	Size             int32    `json:"size"`
-	Vsize            int32    `json:"vsize"`
-	Weight           int32    `json:"weight"`
-	Fee              float64  `json:"fee"`
-	Time             int64    `json:"time"`
-	Height           int64    `json:"height"`
-	StartingPriority float64  `json:"startingpriority"`
-	CurrentPriority  float64  `json:"currentpriority"`
-	Depends          []string `json:"depends"`
+	Size    int32    `json:"size"`
+	Vsize   int32    `json:"vsize"`
+	Fee     float64  `json:"fee"`
+	Time    int64    `json:"time"`
+	Height  int64    `json:"height"`
+	Depends []string `json:"depends"`
 }
 
 // ScriptPubKeyResult models the scriptPubKey data of a tx script.  It is
@@ -725,18 +669,17 @@ type Vout struct {
 
 // GetMiningInfoResult models the data from the getmininginfo command.
 type GetMiningInfoResult struct {
-	Blocks             int64   `json:"blocks"`
-	CurrentBlockSize   uint64  `json:"currentblocksize"`
-	CurrentBlockWeight uint64  `json:"currentblockweight"`
-	CurrentBlockTx     uint64  `json:"currentblocktx"`
-	Difficulty         float64 `json:"difficulty"`
-	Errors             string  `json:"errors"`
-	Generate           bool    `json:"generate"`
-	GenProcLimit       int32   `json:"genproclimit"`
-	HashesPerSec       float64 `json:"hashespersec"`
-	NetworkHashPS      float64 `json:"networkhashps"`
-	PooledTx           uint64  `json:"pooledtx"`
-	TestNet            bool    `json:"testnet"`
+	Blocks            int64   `json:"blocks"`
+	CurrentBlockSize  uint64  `json:"currentblocksize"`
+	CurrentBlockVsize uint64  `json:"currentblockvsize"`
+	CurrentBlockTx    uint64  `json:"currentblocktx"`
+	Difficulty        float64 `json:"difficulty"`
+	Errors            string  `json:"errors"`
+	Generate          bool    `json:"generate"`
+	GenProcLimit      int32   `json:"genproclimit"`
+	NetworkHashPS     float64 `json:"networkhashps"`
+	PooledTx          uint64  `json:"pooledtx"`
+	TestNet           bool    `json:"testnet"`
 }
 
 // GetWorkResult models the data from the getwork command.
@@ -766,9 +709,8 @@ type TxRawResult struct {
 	Hex           string `json:"hex"`
 	Txid          string `json:"txid"`
 	Hash          string `json:"hash,omitempty"`
-	Size          int32  `json:"size,omitempty"`
 	Vsize         int32  `json:"vsize,omitempty"`
-	Weight        int32  `json:"weight,omitempty"`
+	Size          int32  `json:"size,omitempty"`
 	Version       uint32 `json:"version"`
 	LockTime      uint32 `json:"locktime"`
 	Vin           []Vin  `json:"vin"`
@@ -787,7 +729,6 @@ type SearchRawTransactionsResult struct {
 	Hash          string       `json:"hash"`
 	Size          string       `json:"size"`
 	Vsize         string       `json:"vsize"`
-	Weight        string       `json:"weight"`
 	Version       int32        `json:"version"`
 	LockTime      uint32       `json:"locktime"`
 	Vin           []VinPrevOut `json:"vin"`
@@ -811,12 +752,11 @@ type TxRawDecodeResult struct {
 // validateaddress command.
 //
 // Compared to the Bitcoin Core version, this struct lacks the scriptPubKey
-// field since it requires wallet access, which is outside the scope of btcd.
+// field since it requires wallet access, which is outside the scope of pearld.
 // Ref: https://bitcoincore.org/en/doc/0.20.0/rpc/util/validateaddress/
 type ValidateAddressChainResult struct {
 	IsValid        bool    `json:"isvalid"`
 	Address        string  `json:"address,omitempty"`
-	IsScript       *bool   `json:"isscript,omitempty"`
 	IsWitness      *bool   `json:"iswitness,omitempty"`
 	WitnessVersion *int32  `json:"witness_version,omitempty"`
 	WitnessProgram *string `json:"witness_program,omitempty"`
@@ -938,21 +878,17 @@ type TestMempoolAcceptResult struct {
 // TestMempoolAcceptFees models the `fees` section from the testmempoolaccept
 // command.
 type TestMempoolAcceptFees struct {
-	// Base is the transaction fee in BTC.
+	// Base is the transaction fee in PRL.
 	Base float64 `json:"base"`
 
-	// EffectiveFeeRate specifies the effective feerate in BTC per KvB. May
+	// EffectiveFeeRate specifies the effective feerate in PRL per KvB. May
 	// differ from the base feerate if, for example, there are modified
 	// fees from prioritisetransaction or a package feerate was used.
-	//
-	// NOTE: this field only exists in bitcoind v25.0 and above.
 	EffectiveFeeRate float64 `json:"effective-feerate"`
 
 	// EffectiveIncludes specifies transactions whose fees and vsizes are
 	// included in effective-feerate. Each item is a transaction wtxid in
 	// hex.
-	//
-	// NOTE: this field only exists in bitcoind v25.0 and above.
 	EffectiveIncludes []string `json:"effective-includes"`
 }
 

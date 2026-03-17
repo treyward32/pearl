@@ -1,14 +1,14 @@
-// Copyright (c) 2013-2022 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 
 package schnorr
 
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	secp "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	ecdsa_schnorr "github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 const (

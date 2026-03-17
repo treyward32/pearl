@@ -1,9 +1,9 @@
 package neutrino
 
 import (
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/lightninglabs/neutrino/filterdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/spv/filterdb"
 )
 
 // FilterCacheKey represents the key used to access filters in the FilterCache.

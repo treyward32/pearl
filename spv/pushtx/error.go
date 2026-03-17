@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // BroadcastErrorCode uniquely identifies the broadcast error.
@@ -89,7 +89,7 @@ func IsBroadcastError(err error, codes ...BroadcastErrorCode) bool {
 func ParseBroadcastError(msg *wire.MsgReject, peerAddr string) *BroadcastError {
 	// We'll determine the appropriate broadcast error code by looking at
 	// the reject's message code and reason. The only reject codes returned
-	// from peers (bitcoind and btcd) when attempting to accept a
+	// from peers (bitcoind and pearld) when attempting to accept a
 	// transaction into their mempool are:
 	//   RejectInvalid, RejectNonstandard, RejectInsufficientFee,
 	//   RejectDuplicate
@@ -122,7 +122,7 @@ func ParseBroadcastError(msg *wire.MsgReject, peerAddr string) *BroadcastError {
 		strings.Contains(msg.Reason, "txn-already-known"):
 		code = Confirmed
 
-	// The cases below apply for reject messages sent from btcd peers.
+	// The cases below apply for reject messages sent from pearld peers.
 	//
 	// If the transaction double spends an unconfirmed transaction in the
 	// peer's mempool, then we'll deem it as invalid.

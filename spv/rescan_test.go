@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/lightninglabs/neutrino/blockntfns"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/blockntfns"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
 )
 
 // mockChainSource is a mock implementation of the ChainSource interface that
@@ -60,7 +60,7 @@ func newMockChainSource(numBlocks int) *mockChainSource {
 
 	chain.blockHeightIndex[*genesisHash] = 0
 	chain.blockHashesByHeight[0] = genesisHash
-	chain.blockHeaders[*genesisHash] = &genesisBlock.Header
+	chain.blockHeaders[*genesisHash] = genesisBlock.BlockHeader()
 	chain.blocks[*genesisHash] = btcutil.NewBlock(genesisBlock)
 
 	filter, _ := gcs.FromBytes(0, builder.DefaultP, builder.DefaultM, nil)
@@ -72,7 +72,7 @@ func newMockChainSource(numBlocks int) *mockChainSource {
 	chain.bestBlock = headerfs.BlockStamp{
 		Height:    0,
 		Hash:      *genesisHash,
-		Timestamp: genesisBlock.Header.Timestamp,
+		Timestamp: genesisBlock.BlockHeader().Timestamp,
 	}
 
 	for i := 0; i < numBlocks-1; i++ {
@@ -90,7 +90,7 @@ func (c *mockChainSource) addNewBlock(notify bool) headerfs.BlockStamp {
 	prevHash := c.bestBlock.Hash
 	c.mu.Unlock()
 
-	genesisTimestamp := c.ChainParams().GenesisBlock.Header.Timestamp
+	genesisTimestamp := c.ChainParams().GenesisBlock.BlockHeader().Timestamp
 	header := &wire.BlockHeader{
 		PrevBlock: prevHash,
 		Timestamp: genesisTimestamp.Add(

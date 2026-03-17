@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,17 +8,18 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
 	"github.com/lightningnetwork/lnd/clock"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 // Received transaction output for mainnet outpoint
@@ -50,12 +51,35 @@ var (
 	defaultDBTimeout = 10 * time.Second
 )
 
-func testDB(t *testing.T) (walletdb.DB, error) {
-	tmpDir := t.TempDir()
+// exampleDB creates a new database in a temporary directory.
+//
+// NOTE: This is used for golang example functions.
+func exampleDB() (walletdb.DB, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "example_*")
+	if err != nil {
+		return nil, nil, err
+	}
+
 	db, err := walletdb.Create(
 		"bdb", filepath.Join(tmpDir, "db"), true, defaultDBTimeout,
+		false,
 	)
-	return db, err
+	if err != nil {
+		err = os.RemoveAll(tmpDir)
+
+		return nil, nil, err
+	}
+
+	return db, func() {
+		err := db.Close()
+		if err != nil {
+			panic(err)
+		}
+		err = os.RemoveAll(tmpDir)
+		if err != nil {
+			panic(err)
+		}
+	}, nil
 }
 
 var namespaceKey = []byte("txstore")
@@ -65,6 +89,7 @@ func testStore(t *testing.T) (*Store, walletdb.DB, error) {
 
 	db, err := walletdb.Create(
 		"bdb", filepath.Join(tmpDir, "db"), true, defaultDBTimeout,
+		false,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -80,11 +105,53 @@ func testStore(t *testing.T) (*Store, walletdb.DB, error) {
 		if err != nil {
 			return err
 		}
-		s, err = Open(ns, &chaincfg.TestNet3Params)
+		s, err = Open(ns, &chaincfg.TestNetParams)
 		return err
 	})
 
 	return s, db, err
+}
+
+// exampleStore creates a new store and database in a temporary directory.
+//
+// NOTE: This is used for golang example functions.
+func exampleStore() (*Store, walletdb.DB, func(), error) {
+	tmpDir, err := os.MkdirTemp("", "example_*")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	db, err := walletdb.Create(
+		"bdb", filepath.Join(tmpDir, "db"), true, defaultDBTimeout,
+		false,
+	)
+	if err != nil {
+		err = os.RemoveAll(tmpDir)
+
+		return nil, nil, nil, err
+	}
+
+	var s *Store
+	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns, err := tx.CreateTopLevelBucket(namespaceKey)
+		if err != nil {
+			return err
+		}
+		if err := Create(ns); err != nil {
+			return err
+		}
+		s, err = Open(ns, &chaincfg.TestNetParams)
+		return err
+	})
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return nil, nil, nil, err
+	}
+
+	return s, db, func() {
+		db.Close()
+		os.RemoveAll(tmpDir)
+	}, nil
 }
 
 func serializeTx(tx *btcutil.Tx) []byte {
@@ -101,7 +168,7 @@ func TestInsertsCreditsDebitsRollbacks(t *testing.T) {
 
 	// Create a double spend of the received blockchain transaction.
 	dupRecvTx, _ := btcutil.NewTxFromBytes(TstRecvSerializedTx)
-	// Switch txout amount to 1 BTC.  Transaction store doesn't
+	// Switch txout amount to 1 PRL.  Transaction store doesn't
 	// validate txs, so this is fine for testing a double spend
 	// removal.
 	TstDupRecvAmount := int64(1e8)
@@ -714,9 +781,9 @@ func TestCoinbases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	coinbaseMaturity := int32(chaincfg.TestNet3Params.CoinbaseMaturity)
+	coinbaseMaturity := int32(chaincfg.TestNetParams.CoinbaseMaturity)
 
-	// Balance should be 0 if the coinbase is immature, 50 BTC at and beyond
+	// Balance should be 0 if the coinbase is immature, 50 PRL at and beyond
 	// maturity.
 	//
 	// Outputs when depth is below maturity are never included, no matter
@@ -1159,7 +1226,7 @@ func TestMoveMultipleToSameBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	coinbaseMaturity := int32(chaincfg.TestNet3Params.CoinbaseMaturity)
+	coinbaseMaturity := int32(chaincfg.TestNetParams.CoinbaseMaturity)
 
 	// Mine both transactions in the block that matures the coinbase.
 	bMaturity := BlockMeta{
@@ -1358,7 +1425,7 @@ func TestRemoveUnminedTx(t *testing.T) {
 	})
 
 	// Determine the maturity height for the coinbase output created.
-	coinbaseMaturity := int32(chaincfg.TestNet3Params.CoinbaseMaturity)
+	coinbaseMaturity := int32(chaincfg.TestNetParams.CoinbaseMaturity)
 	maturityHeight := b100.Block.Height + coinbaseMaturity
 
 	// checkBalance is a helper function that compares the balance of the
@@ -1826,7 +1893,7 @@ func testInsertMempoolDoubleSpendTx(t *testing.T, first bool) {
 	// Then, we'll confirm either the first or second spend, depending on
 	// the boolean passed, with a height deep enough that allows us to
 	// succesfully spend the coinbase output.
-	coinbaseMaturity := int32(chaincfg.TestNet3Params.CoinbaseMaturity)
+	coinbaseMaturity := int32(chaincfg.TestNetParams.CoinbaseMaturity)
 	bMaturity := BlockMeta{
 		Block: Block{Height: b100.Height + coinbaseMaturity},
 		Time:  time.Now(),
@@ -2015,7 +2082,7 @@ func TestInsertConfirmedDoubleSpendTx(t *testing.T) {
 
 	// Then, we'll insert the confirmed spend at a height deep enough that
 	// allows us to successfully spend the coinbase outputs.
-	coinbaseMaturity := int32(chaincfg.TestNet3Params.CoinbaseMaturity)
+	coinbaseMaturity := int32(chaincfg.TestNetParams.CoinbaseMaturity)
 	bMaturity := BlockMeta{
 		Block: Block{Height: b100.Height + coinbaseMaturity},
 		Time:  time.Now(),
@@ -2524,12 +2591,12 @@ func TestOutputLocks(t *testing.T) {
 
 	// Create a coinbase transaction with two outputs, which we'll spend.
 	coinbase := newCoinBase(
-		btcutil.SatoshiPerBitcoin, btcutil.SatoshiPerBitcoin*2,
+		btcutil.GrainPerPearl, btcutil.GrainPerPearl*2,
 	)
 	coinbaseHash := coinbase.TxHash()
 
 	// One of the spends will be unconfirmed.
-	const unconfirmedBalance = btcutil.SatoshiPerBitcoin / 2
+	const unconfirmedBalance = btcutil.GrainPerPearl / 2
 	unconfirmedTx := spendOutput(&coinbaseHash, 0, unconfirmedBalance)
 	unconfirmedOutPoint := wire.OutPoint{
 		Hash:  unconfirmedTx.TxHash(),
@@ -2537,7 +2604,7 @@ func TestOutputLocks(t *testing.T) {
 	}
 
 	// The other will be confirmed.
-	const confirmedBalance = btcutil.SatoshiPerBitcoin
+	const confirmedBalance = btcutil.GrainPerPearl
 	confirmedTx := spendOutput(&coinbaseHash, 1, confirmedBalance)
 	confirmedOutPoint := wire.OutPoint{
 		Hash:  confirmedTx.TxHash(),

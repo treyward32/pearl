@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,8 +8,10 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain/internal/workmath"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/blockchain/internal/workmath"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // HashToBig converts a chainhash.Hash into a big.Int that can be used to
@@ -39,9 +41,9 @@ func HashToBig(hash *chainhash.Hash) *big.Int {
 //
 //	N = (-1^sign) * mantissa * 256^(exponent-3)
 //
-// This compact form is only used in bitcoin to encode unsigned 256-bit numbers
+// This compact form is used to encode unsigned 256-bit numbers
 // which represent difficulty targets, thus there really is not a need for a
-// sign bit, but it is implemented here to stay consistent with bitcoind.
+// sign bit, but it is implemented here to stay consistent with Bitcoin Core.
 func CompactToBig(compact uint32) *big.Int {
 	return workmath.CompactToBig(compact)
 }
@@ -54,7 +56,7 @@ func BigToCompact(n *big.Int) uint32 {
 	return workmath.BigToCompact(n)
 }
 
-// CalcWork calculates a work value from difficulty bits.  Bitcoin increases
+// CalcWork calculates a work value from difficulty bits.  The protocol increases
 // the difficulty for generating a block by decreasing the value which the
 // generated hash must be less than.  This difficulty target is stored in each
 // block header using a compact representation as described in the documentation
@@ -68,18 +70,107 @@ func CalcWork(bits uint32) *big.Int {
 	return workmath.CalcWork(bits)
 }
 
-// calcEasiestDifficulty calculates the easiest possible difficulty that a block
-// can have given starting difficulty bits and a duration.  It is mainly used to
-// verify that claimed proof of work by a block is sane as compared to a
-// known good checkpoint.
-func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) uint32 {
-	// Convert types used in the calculations below.
-	durationVal := int64(duration / time.Second)
-	adjustmentFactor := big.NewInt(b.chainParams.RetargetAdjustmentFactor)
+// calcNextRequiredDifficulty calculates the required difficulty for the
+// next block using the WTEMA (Weighted Target Exponential Moving Average)
+// algorithm. The difficulty adjusts every block using the formula:
+//
+//	new_target = old_target + (t - T) * old_target / half_life
+//
+// Where:
+//   - T = target time per block (e.g., 600 seconds for 10 minutes)
+//   - t = actual time for the last block (current_timestamp - prev_timestamp)
+//   - half_life = WTEMA half-life (e.g., 2 days)
+//   - old_target = current difficulty target
+func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.Time,
+	c ChainCtx) (uint32, error) {
 
-	// The test network rules allow minimum difficulty blocks after more
-	// than twice the desired amount of time needed to generate a block has
-	// elapsed.
+	// Genesis block or no retargeting - use minimum difficulty (maximum target).
+	if lastNode == nil || c.ChainParams().PoWNoRetargeting {
+		return c.ChainParams().PowLimitBits, nil
+	}
+
+	// For networks that support it (panics on mainnet), allow special reduction of the
+	// required difficulty once too much time has elapsed without
+	// mining a block.
+	if c.ChainParams().ReduceMinDifficulty {
+		if c.ChainParams().Net == wire.MainNet {
+			panic("ReduceMinDifficulty should not be true on mainnet")
+		}
+
+		reductionTime := int64(c.ChainParams().MinDiffReductionTime / time.Second)
+		allowMinTime := lastNode.Timestamp() + reductionTime
+		if newBlockTime.Unix() > allowMinTime {
+			return c.ChainParams().PowLimitBits, nil
+		}
+	}
+
+	// Get the parent node for time calculation.
+	// We need the time between the last block and its parent.
+	parentNode := lastNode.Parent()
+	if parentNode == nil {
+		// First block after genesis - use genesis difficulty.
+		return lastNode.Bits(), nil
+	}
+
+	// Calculate actual time for the last block (t).
+	t := lastNode.Timestamp() - parentNode.Timestamp()
+
+	// Get WTEMA parameters.
+	T := int64(c.ChainParams().TargetTimePerBlock / time.Second)   // Target time per block in seconds
+	halfLife := int64(c.ChainParams().WTEMAHalfLife / time.Second) // Half-life in seconds
+
+	// Get current target from the last block.
+	oldTarget := CompactToBig(lastNode.Bits())
+
+	// Calculate: new_target = old_target + (t - T) * old_target / half_life
+	adjustment := new(big.Int).Mul(big.NewInt(t-T), oldTarget)
+	adjustment.Div(adjustment, big.NewInt(halfLife))
+
+	newTarget := new(big.Int).Add(oldTarget, adjustment)
+
+	// Ensure the new target doesn't exceed the proof of work limit.
+	if newTarget.Cmp(c.ChainParams().PowLimit) > 0 {
+		newTarget.Set(c.ChainParams().PowLimit)
+	}
+
+	// Ensure target doesn't go below 1 (would cause divide by zero in work calc).
+	if newTarget.Sign() <= 0 {
+		newTarget.SetInt64(1)
+	}
+
+	newTargetBits := BigToCompact(newTarget)
+
+	log.Debugf("WTEMA difficulty adjustment at block height %d", lastNode.Height()+1)
+	log.Debugf("Old target %08x (%064x)", lastNode.Bits(), oldTarget)
+	log.Debugf("New target %08x (%064x)", newTargetBits, CompactToBig(newTargetBits))
+	log.Debugf("Block time: %v seconds (target: %v seconds)", t, T)
+
+	return newTargetBits, nil
+}
+
+// calcEasiestDifficulty calculates the easiest possible difficulty that a block
+// can have given starting difficulty bits and a duration. It is used in
+// ProcessBlock to verify that claimed proof of work is sane compared to a
+// known good checkpoint, before the block is fully validated or cached as an
+// orphan.
+//
+// For WTEMA, the maximum target growth over duration D is bounded by
+// exp(D / halfLife). Each block multiplies the target by (1 + (t-T)/HL), and
+// the attacker-optimal distribution of block times converges to exp(D/HL) in
+// the continuous limit. We approximate this per half-life using the rational
+// upper bound 87/32 = 2.71875, which exceeds e = 2.71828... by 0.017%.
+// Ceiling integer division ensures we never underestimate the true bound.
+//
+// This mirrors the structure of btcd's original calcEasiestDifficulty, which
+// iterated with a 4x multiplier per retarget period for Bitcoin's 2016-block
+// difficulty adjustment. Here the period is WTEMAHalfLife and the multiplier
+// is 87/32 instead.
+func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) uint32 {
+	durationVal := int64(duration / time.Second)
+
+	// Test networks allow minimum-difficulty blocks after a prolonged gap.
+	// If the elapsed time exceeds that threshold, any difficulty is
+	// reachable so return the easiest possible value immediately.
 	if b.chainParams.ReduceMinDifficulty {
 		reductionTime := int64(b.chainParams.MinDiffReductionTime /
 			time.Second)
@@ -88,17 +179,31 @@ func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) 
 		}
 	}
 
-	// Since easier difficulty equates to higher numbers, the easiest
-	// difficulty for a given duration is the largest value possible given
-	// the number of retargets for the duration and starting difficulty
-	// multiplied by the max adjustment factor.
+	halfLifeSec := int64(b.chainParams.WTEMAHalfLife / time.Second)
 	newTarget := CompactToBig(bits)
-	for durationVal > 0 && newTarget.Cmp(b.chainParams.PowLimit) < 0 {
-		newTarget.Mul(newTarget, adjustmentFactor)
-		durationVal -= b.maxRetargetTimespan
+
+	if durationVal > 0 {
+		// Number of half-life periods, rounded up so any partial period
+		// is conservatively counted as full.
+		periods := (durationVal + halfLifeSec - 1) / halfLifeSec
+
+		// (87/32)^178 > e^178 > 2^256, which overflows any target.
+		// Short-circuit to avoid computing a huge exponent for nothing.
+		if periods > 177 {
+			return b.chainParams.PowLimitBits
+		}
+
+		// newTarget = newTarget * (87/32)^periods.
+		// 87/32 = 2.71875 > e = 2.71828, so this exceeds the true
+		// continuous-time bound exp(D/halfLife) at every period count.
+		// The floor from the right-shift loses < 1 part in 2^200 for
+		// any realistic target, well within the 0.017% margin of 87/32
+		// over e.
+		pow87 := new(big.Int).Exp(big.NewInt(87), big.NewInt(periods), nil)
+		newTarget.Mul(newTarget, pow87)
+		newTarget.Rsh(newTarget, uint(5*periods)) // ÷ 32^periods
 	}
 
-	// Limit new value to the proof of work limit.
 	if newTarget.Cmp(b.chainParams.PowLimit) > 0 {
 		newTarget.Set(b.chainParams.PowLimit)
 	}
@@ -106,125 +211,9 @@ func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) 
 	return BigToCompact(newTarget)
 }
 
-// findPrevTestNetDifficulty returns the difficulty of the previous block which
-// did not have the special testnet minimum difficulty rule applied.
-func findPrevTestNetDifficulty(startNode HeaderCtx, c ChainCtx) uint32 {
-	// Search backwards through the chain for the last block without
-	// the special rule applied.
-	iterNode := startNode
-	for iterNode != nil && iterNode.Height()%c.BlocksPerRetarget() != 0 &&
-		iterNode.Bits() == c.ChainParams().PowLimitBits {
-
-		iterNode = iterNode.Parent()
-	}
-
-	// Return the found difficulty or the minimum difficulty if no
-	// appropriate block was found.
-	lastBits := c.ChainParams().PowLimitBits
-	if iterNode != nil {
-		lastBits = iterNode.Bits()
-	}
-	return lastBits
-}
-
-// calcNextRequiredDifficulty calculates the required difficulty for the block
-// after the passed previous HeaderCtx based on the difficulty retarget rules.
-// This function differs from the exported CalcNextRequiredDifficulty in that
-// the exported version uses the current best chain as the previous HeaderCtx
-// while this function accepts any block node. This function accepts a ChainCtx
-// parameter that gives the necessary difficulty context variables.
-func calcNextRequiredDifficulty(lastNode HeaderCtx, newBlockTime time.Time,
-	c ChainCtx) (uint32, error) {
-
-	// Emulate the same behavior as Bitcoin Core that for regtest there is
-	// no difficulty retargeting.
-	if c.ChainParams().PoWNoRetargeting {
-		return c.ChainParams().PowLimitBits, nil
-	}
-
-	// Genesis block.
-	if lastNode == nil {
-		return c.ChainParams().PowLimitBits, nil
-	}
-
-	// Return the previous block's difficulty requirements if this block
-	// is not at a difficulty retarget interval.
-	if (lastNode.Height()+1)%c.BlocksPerRetarget() != 0 {
-		// For networks that support it, allow special reduction of the
-		// required difficulty once too much time has elapsed without
-		// mining a block.
-		if c.ChainParams().ReduceMinDifficulty {
-			// Return minimum difficulty when more than the desired
-			// amount of time has elapsed without mining a block.
-			reductionTime := int64(c.ChainParams().MinDiffReductionTime /
-				time.Second)
-			allowMinTime := lastNode.Timestamp() + reductionTime
-			if newBlockTime.Unix() > allowMinTime {
-				return c.ChainParams().PowLimitBits, nil
-			}
-
-			// The block was mined within the desired timeframe, so
-			// return the difficulty for the last block which did
-			// not have the special minimum difficulty rule applied.
-			return findPrevTestNetDifficulty(lastNode, c), nil
-		}
-
-		// For the main network (or any unrecognized networks), simply
-		// return the previous block's difficulty requirements.
-		return lastNode.Bits(), nil
-	}
-
-	// Get the block node at the previous retarget (targetTimespan days
-	// worth of blocks).
-	firstNode := lastNode.RelativeAncestorCtx(c.BlocksPerRetarget() - 1)
-	if firstNode == nil {
-		return 0, AssertError("unable to obtain previous retarget block")
-	}
-
-	// Limit the amount of adjustment that can occur to the previous
-	// difficulty.
-	actualTimespan := lastNode.Timestamp() - firstNode.Timestamp()
-	adjustedTimespan := actualTimespan
-	if actualTimespan < c.MinRetargetTimespan() {
-		adjustedTimespan = c.MinRetargetTimespan()
-	} else if actualTimespan > c.MaxRetargetTimespan() {
-		adjustedTimespan = c.MaxRetargetTimespan()
-	}
-
-	// Calculate new target difficulty as:
-	//  currentDifficulty * (adjustedTimespan / targetTimespan)
-	// The result uses integer division which means it will be slightly
-	// rounded down.  Bitcoind also uses integer division to calculate this
-	// result.
-	oldTarget := CompactToBig(lastNode.Bits())
-	newTarget := new(big.Int).Mul(oldTarget, big.NewInt(adjustedTimespan))
-	targetTimeSpan := int64(c.ChainParams().TargetTimespan / time.Second)
-	newTarget.Div(newTarget, big.NewInt(targetTimeSpan))
-
-	// Limit new value to the proof of work limit.
-	if newTarget.Cmp(c.ChainParams().PowLimit) > 0 {
-		newTarget.Set(c.ChainParams().PowLimit)
-	}
-
-	// Log new target difficulty and return it.  The new target logging is
-	// intentionally converting the bits back to a number instead of using
-	// newTarget since conversion to the compact representation loses
-	// precision.
-	newTargetBits := BigToCompact(newTarget)
-	log.Debugf("Difficulty retarget at block height %d", lastNode.Height()+1)
-	log.Debugf("Old target %08x (%064x)", lastNode.Bits(), oldTarget)
-	log.Debugf("New target %08x (%064x)", newTargetBits, CompactToBig(newTargetBits))
-	log.Debugf("Actual timespan %v, adjusted timespan %v, target timespan %v",
-		time.Duration(actualTimespan)*time.Second,
-		time.Duration(adjustedTimespan)*time.Second,
-		c.ChainParams().TargetTimespan)
-
-	return newTargetBits, nil
-}
-
 // CalcNextRequiredDifficulty calculates the required difficulty for the block
-// after the end of the current best chain based on the difficulty retarget
-// rules.
+// after the end of the current best chain based on the WTEMA difficulty
+// adjustment algorithm.
 //
 // This function is safe for concurrent access.
 func (b *BlockChain) CalcNextRequiredDifficulty(timestamp time.Time) (uint32, error) {

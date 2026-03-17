@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // importCmd defines the configuration options for the insecureimport command.
@@ -114,7 +114,7 @@ func (bi *blockImporter) processBlock(serializedBlock []byte) (bool, error) {
 	}
 
 	// update progress statistics
-	bi.lastBlockTime = block.MsgBlock().Header.Timestamp
+	bi.lastBlockTime = block.MsgBlock().BlockHeader().Timestamp
 	bi.receivedLogTx += int64(len(block.MsgBlock().Transactions))
 
 	// Skip blocks that already exist.
@@ -131,7 +131,7 @@ func (bi *blockImporter) processBlock(serializedBlock []byte) (bool, error) {
 	}
 
 	// Don't bother trying to process orphans.
-	prevHash := &block.MsgBlock().Header.PrevBlock
+	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
 	if !prevHash.IsEqual(&zeroHash) {
 		var exists bool
 		err := bi.db.View(func(tx database.Tx) error {

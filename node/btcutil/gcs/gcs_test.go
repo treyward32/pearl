@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2016-2017 The Lightning Network Developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -11,7 +11,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
 )
 
 var (
@@ -75,7 +75,7 @@ var (
 	}
 )
 
-// TestGCSFilterBuild builds a test filter with a randomized key. For Bitcoin
+// TestGCSFilterBuild builds a test filter with a randomized key. For Pearl
 // use, deterministic filter generation is desired. Therefore, a key that's
 // derived deterministically would be required.
 func TestGCSFilterBuild(t *testing.T) {

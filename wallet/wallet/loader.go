@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcwallet/internal/prompt"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/wallet/internal/prompt"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 const (
@@ -261,7 +261,7 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase []byte,
 			return nil, err
 		}
 		l.db, err = walletdb.Create(
-			"bdb", dbPath, l.noFreelistSync, l.timeout,
+			"bdb", dbPath, l.noFreelistSync, l.timeout, false,
 		)
 		if err != nil {
 			return nil, err
@@ -331,7 +331,7 @@ func (l *Loader) OpenExistingWallet(pubPassphrase []byte,
 		// Open the database using the boltdb backend.
 		dbPath := filepath.Join(l.dbDirPath, WalletDBName)
 		l.db, err = walletdb.Open(
-			"bdb", dbPath, l.noFreelistSync, l.timeout,
+			"bdb", dbPath, l.noFreelistSync, l.timeout, false,
 		)
 		if err != nil {
 			log.Errorf("Failed to open database: %v", err)

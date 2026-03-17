@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/btcsuite/btcd/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
 )
 
 func ExampleAmount() {
 
 	a := btcutil.Amount(0)
-	fmt.Println("Zero Satoshi:", a)
+	fmt.Println("Zero Grain:", a)
 
 	a = btcutil.Amount(1e8)
-	fmt.Println("100,000,000 Satoshis:", a)
+	fmt.Println("100,000,000 Grains:", a)
 
 	a = btcutil.Amount(1e5)
-	fmt.Println("100,000 Satoshis:", a)
+	fmt.Println("100,000 Grains:", a)
 	// Output:
-	// Zero Satoshi: 0 BTC
-	// 100,000,000 Satoshis: 1 BTC
-	// 100,000 Satoshis: 0.00100000 BTC
+	// Zero Grain: 0 PRL
+	// 100,000,000 Grains: 1 PRL
+	// 100,000 Grains: 0.00100000 PRL
 }
 
 func ExampleNewAmount() {
@@ -52,25 +52,25 @@ func ExampleNewAmount() {
 	}
 	fmt.Println(amountNaN) //Output 4
 
-	// Output: 1 BTC
-	// 0.01234567 BTC
-	// 0 BTC
-	// invalid bitcoin amount
+	// Output: 1 PRL
+	// 0.01234567 PRL
+	// 0 PRL
+	// invalid pearl amount
 }
 
 func ExampleAmount_unitConversions() {
 	amount := btcutil.Amount(44433322211100)
 
-	fmt.Println("Satoshi to kBTC:", amount.Format(btcutil.AmountKiloBTC))
-	fmt.Println("Satoshi to BTC:", amount)
-	fmt.Println("Satoshi to MilliBTC:", amount.Format(btcutil.AmountMilliBTC))
-	fmt.Println("Satoshi to MicroBTC:", amount.Format(btcutil.AmountMicroBTC))
-	fmt.Println("Satoshi to Satoshi:", amount.Format(btcutil.AmountSatoshi))
+	fmt.Println("Grain to kPRL:", amount.Format(btcutil.AmountKiloPRL))
+	fmt.Println("Grain to PRL:", amount)
+	fmt.Println("Grain to MilliPRL:", amount.Format(btcutil.AmountMilliPRL))
+	fmt.Println("Grain to MicroPRL:", amount.Format(btcutil.AmountMicroPRL))
+	fmt.Println("Grain to Grain:", amount.Format(btcutil.AmountGrain))
 
 	// Output:
-	// Satoshi to kBTC: 444.333222111 kBTC
-	// Satoshi to BTC: 444333.22211100 BTC
-	// Satoshi to MilliBTC: 444333222.111 mBTC
-	// Satoshi to MicroBTC: 444333222111 μBTC
-	// Satoshi to Satoshi: 44433322211100 Satoshi
+	// Grain to kPRL: 444.333222111 kPRL
+	// Grain to PRL: 444333.22211100 PRL
+	// Grain to MilliPRL: 444333222.111 mPRL
+	// Grain to MicroPRL: 444333222111 μPRL
+	// Grain to Grain: 44433322211100 Grain
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,19 +7,24 @@ package blockchain
 import (
 	"fmt"
 	"math/rand"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain/internal/testhelper"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain/internal/testhelper"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestHaveBlock tests the HaveBlock API to ensure proper functionality.
 func TestHaveBlock(t *testing.T) {
+	require := require.New(t)
+
+	t.Skip("Test files rely on Bitcoin block format, which is no longer supported") // TODO Or: re-enable with Pearl-format test fixtures
 	// Load up blocks such that there is a side chain.
 	// (genesis block) -> 1 -> 2 -> 3 -> 4
 	//                          \-> 3a
@@ -31,21 +36,15 @@ func TestHaveBlock(t *testing.T) {
 	var blocks []*btcutil.Block
 	for _, file := range testFiles {
 		blockTmp, err := loadBlocks(file)
-		if err != nil {
-			t.Errorf("Error loading file: %v\n", err)
-			return
-		}
+		require.NoError(err, "Error loading file: %v", file)
 		blocks = append(blocks, blockTmp...)
 	}
 
 	// Create a new database and chain instance to run tests against.
 	chain, teardownFunc, err := chainSetup("haveblock",
 		&chaincfg.MainNetParams)
-	if err != nil {
-		t.Errorf("Failed to setup chain instance: %v", err)
-		return
-	}
-	defer teardownFunc()
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc)
 
 	// Since we're not dealing with the real block chain, set the coinbase
 	// maturity to 1.
@@ -53,29 +52,15 @@ func TestHaveBlock(t *testing.T) {
 
 	for i := 1; i < len(blocks); i++ {
 		_, isOrphan, err := chain.ProcessBlock(blocks[i], BFNone)
-		if err != nil {
-			t.Errorf("ProcessBlock fail on block %v: %v\n", i, err)
-			return
-		}
-		if isOrphan {
-			t.Errorf("ProcessBlock incorrectly returned block %v "+
-				"is an orphan\n", i)
-			return
-		}
+		require.NoError(err, "ProcessBlock fail on block %v", i)
+		require.False(isOrphan, "ProcessBlock incorrectly returned block %v is an orphan", i)
 	}
 
 	// Insert an orphan block.
 	_, isOrphan, err := chain.ProcessBlock(btcutil.NewBlock(&Block100000),
 		BFNone)
-	if err != nil {
-		t.Errorf("Unable to process block: %v", err)
-		return
-	}
-	if !isOrphan {
-		t.Errorf("ProcessBlock indicated block is an not orphan when " +
-			"it should be\n")
-		return
-	}
+	require.NoError(err, "Unable to process block")
+	require.True(isOrphan, "ProcessBlock indicated block is an not orphan when it should be")
 
 	tests := []struct {
 		hash string
@@ -96,21 +81,11 @@ func TestHaveBlock(t *testing.T) {
 
 	for i, test := range tests {
 		hash, err := chainhash.NewHashFromStr(test.hash)
-		if err != nil {
-			t.Errorf("NewHashFromStr: %v", err)
-			continue
-		}
+		require.NoError(err, "NewHashFromStr")
 
 		result, err := chain.HaveBlock(hash)
-		if err != nil {
-			t.Errorf("HaveBlock #%d unexpected error: %v", i, err)
-			return
-		}
-		if result != test.want {
-			t.Errorf("HaveBlock #%d got %v want %v", i, result,
-				test.want)
-			continue
-		}
+		require.NoError(err, "HaveBlock #%d unexpected error", i)
+		require.Equal(test.want, result, "HaveBlock #%d got %v want %v", i, result, test.want)
 	}
 }
 
@@ -119,23 +94,32 @@ func TestHaveBlock(t *testing.T) {
 // combinations of inputs to the CalcSequenceLock function in order to ensure
 // the returned SequenceLocks are correct for each test instance.
 func TestCalcSequenceLock(t *testing.T) {
+	require := require.New(t)
+
 	netParams := &chaincfg.SimNetParams
 
-	// We need to activate CSV in order to test the processing logic, so
-	// manually craft the block version that's used to signal the soft-fork
-	// activation.
-	csvBit := netParams.Deployments[chaincfg.DeploymentCSV].BitNumber
-	blockVersion := int32(0x20000000 | (uint32(1) << csvBit))
-
 	// Generate enough synthetic blocks to activate CSV.
-	chain := newFakeChain(netParams)
+	// TODO Or: CSV is activated since genesis, can remove this logic from the test
+	chain, teardownFunc, err := chainSetup("testcalcsequencelock", netParams)
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc)
+
 	node := chain.bestChain.Tip()
-	blockTime := node.Header().Timestamp
+	blockTime := time.Unix(node.Timestamp(), 0)
 	numBlocksToActivate := (netParams.MinerConfirmationWindow * 3)
 	for i := uint32(0); i < numBlocksToActivate; i++ {
 		blockTime = blockTime.Add(time.Second)
-		node = newFakeNode(node, blockVersion, 0, blockTime)
-		chain.index.AddNode(node)
+		node = chain.index.Add(
+			&wire.BlockHeader{
+				Version:   1,
+				PrevBlock: node.hash,
+				Bits:      0,
+				Timestamp: blockTime,
+			},
+			node,
+			statusNone,
+			0,
+		)
 		chain.bestChain.SetTip(node)
 	}
 
@@ -427,18 +411,10 @@ func TestCalcSequenceLock(t *testing.T) {
 	for i, test := range tests {
 		utilTx := btcutil.NewTx(test.tx)
 		seqLock, err := chain.CalcSequenceLock(utilTx, test.view, test.mempool)
-		if err != nil {
-			t.Fatalf("test #%d, unable to calc sequence lock: %v", i, err)
-		}
+		require.NoError(err, "test #%d, unable to calc sequence lock", i)
 
-		if seqLock.Seconds != test.want.Seconds {
-			t.Fatalf("test #%d got %v seconds want %v seconds",
-				i, seqLock.Seconds, test.want.Seconds)
-		}
-		if seqLock.BlockHeight != test.want.BlockHeight {
-			t.Fatalf("test #%d got height of %v want height of %v ",
-				i, seqLock.BlockHeight, test.want.BlockHeight)
-		}
+		require.Equal(test.want.Seconds, seqLock.Seconds, "test #%d got %v seconds want %v seconds", i, seqLock.Seconds, test.want.Seconds)
+		require.Equal(test.want.BlockHeight, seqLock.BlockHeight, "test #%d got height of %v want height of %v", i, seqLock.BlockHeight, test.want.BlockHeight)
 	}
 }
 
@@ -453,34 +429,84 @@ func nodeHashes(nodes []*blockNode, indexes ...int) []chainhash.Hash {
 	return hashes
 }
 
-// nodeHeaders is a convenience function that returns the headers for all of
-// the passed indexes of the provided nodes.  It is used to construct expected
+// nodeHeaders is a convenience function that returns the MsgHeaders (header + certificate)
+// for all of the passed indexes of the provided nodes.  It is used to construct expected
 // located headers in the tests.
-func nodeHeaders(nodes []*blockNode, indexes ...int) []wire.BlockHeader {
-	headers := make([]wire.BlockHeader, 0, len(indexes))
+func nodeHeaders(t *testing.T, chain *BlockChain, nodes []*blockNode, indexes ...int) []wire.MsgHeader {
+	msgHeaders := make([]wire.MsgHeader, 0, len(indexes))
 	for _, idx := range indexes {
-		headers = append(headers, nodes[idx].Header())
+		header, err := chain.HeaderByHash(&nodes[idx].hash)
+		require.NoError(t, err, "failed to get block header for node %d", idx)
+		var cert wire.BlockCertificate
+		err = chain.db.View(func(dbTx database.Tx) error {
+			var err error
+			cert, err = dbFetchCertificate(dbTx, nodes[idx].hash)
+			return err
+		})
+		require.NoError(t, err, "failed to get certificate for node %d", idx)
+		msgHeaders = append(msgHeaders, wire.MsgHeader{
+			BlockHeader:    header,
+			MsgCertificate: wire.MsgCertificate{Certificate: cert},
+		})
 	}
-	return headers
+	return msgHeaders
+}
+
+func addNodes(t *testing.T, chain *BlockChain, tip *blockNode, numNodes int) []*blockNode {
+	nodes := make([]*blockNode, numNodes)
+	for i := range numNodes {
+		// This is invalid, but all that is needed is enough to get the
+		// synthetic tests to work. Use random timestamp to create different hashes.
+		var height int32
+		header := wire.BlockHeader{
+			Timestamp: time.Unix(int64(testNoncePrng.Uint32()), 0),
+		}
+		if tip != nil {
+			header.PrevBlock = tip.hash
+			height = tip.height + 1
+		}
+
+		// Create a certificate for the block.
+		// These are synthetic blocks for testing the chain index, not going through
+		// full validation, so they don't need valid PoW certificates.
+		cert := &wire.ZKCertificate{
+			Hash:      header.BlockHash(),
+			ProofData: []byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe},
+		}
+		block := btcutil.NewBlock(&wire.MsgBlock{
+			MsgHeader: wire.MsgHeader{
+				BlockHeader:    header,
+				MsgCertificate: wire.MsgCertificate{Certificate: cert},
+			},
+		})
+		block.SetHeight(height)
+		blockVsize := GetBlockVsize(block)
+		err := chain.db.Update(func(dbTx database.Tx) error {
+			return dbStoreBlock(dbTx, block, blockVsize)
+		})
+		require.NoError(t, err, "failed to add block to database")
+		nodes[i] = chain.index.Add(&header, tip, statusNone, blockVsize)
+		tip = nodes[i]
+	}
+	return nodes
 }
 
 // TestLocateInventory ensures that locating inventory via the LocateHeaders and
 // LocateBlocks functions behaves as expected.
 func TestLocateInventory(t *testing.T) {
+	require := require.New(t)
+
 	// Construct a synthetic block chain with a block index consisting of
 	// the following structure.
 	// 	genesis -> 1 -> 2 -> ... -> 15 -> 16  -> 17  -> 18
 	// 	                              \-> 16a -> 17a
 	tip := tstTip
-	chain := newFakeChain(&chaincfg.MainNetParams)
-	branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 18)
-	branch1Nodes := chainedNodes(branch0Nodes[14], 2)
-	for _, node := range branch0Nodes {
-		chain.index.AddNode(node)
-	}
-	for _, node := range branch1Nodes {
-		chain.index.AddNode(node)
-	}
+	chain, teardown, err := chainSetup("test", &chaincfg.MainNetParams)
+	require.NoError(err, "Failed to create chain")
+	t.Cleanup(teardown)
+
+	branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 18)
+	branch1Nodes := addNodes(t, chain, branch0Nodes[14], 2)
 	chain.bestChain.SetTip(tip(branch0Nodes))
 
 	// Create chain views for different branches of the overall chain to
@@ -490,16 +516,16 @@ func TestLocateInventory(t *testing.T) {
 
 	// Create a chain view for a completely unrelated block chain to
 	// simulate a remote node on a totally different chain.
-	unrelatedBranchNodes := chainedNodes(nil, 5)
+	unrelatedBranchNodes := addNodes(t, chain, nil, 5)
 	unrelatedView := newChainView(tip(unrelatedBranchNodes))
 
 	tests := []struct {
 		name       string
-		locator    BlockLocator       // locator for requested inventory
-		hashStop   chainhash.Hash     // stop hash for locator
-		maxAllowed uint32             // max to locate, 0 = wire const
-		headers    []wire.BlockHeader // expected located headers
-		hashes     []chainhash.Hash   // expected located hashes
+		locator    BlockLocator     // locator for requested inventory
+		hashStop   chainhash.Hash   // stop hash for locator
+		maxAllowed uint32           // max to locate, 0 = wire const
+		headers    []wire.MsgHeader // expected located headers with certificates
+		hashes     []chainhash.Hash // expected located hashes
 	}{
 		{
 			// Empty block locators and unknown stop hash.  No
@@ -516,7 +542,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "no locators, stop in side",
 			locator:  nil,
 			hashStop: tip(branch1Nodes).hash,
-			headers:  nodeHeaders(branch1Nodes, 1),
+			headers:  nodeHeaders(t, chain, branch1Nodes, 1),
 			hashes:   nodeHashes(branch1Nodes, 1),
 		},
 		{
@@ -525,7 +551,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "no locators, stop in main",
 			locator:  nil,
 			hashStop: branch0Nodes[12].hash,
-			headers:  nodeHeaders(branch0Nodes, 12),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 12),
 			hashes:   nodeHashes(branch0Nodes, 12),
 		},
 		{
@@ -536,7 +562,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, unknown stop",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: chainhash.Hash{0x01},
-			headers:  nodeHeaders(branch0Nodes, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 15, 16, 17),
 		},
 		{
@@ -547,7 +573,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, stop in side",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: tip(branch1Nodes).hash,
-			headers:  nodeHeaders(branch0Nodes, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 15, 16, 17),
 		},
 		{
@@ -558,7 +584,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, stop in main before",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: branch0Nodes[13].hash,
-			headers:  nodeHeaders(branch0Nodes, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 15, 16, 17),
 		},
 		{
@@ -570,7 +596,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, stop in main exact",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: branch0Nodes[14].hash,
-			headers:  nodeHeaders(branch0Nodes, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 15, 16, 17),
 		},
 		{
@@ -582,7 +608,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, stop in main after",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: branch0Nodes[15].hash,
-			headers:  nodeHeaders(branch0Nodes, 15),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15),
 			hashes:   nodeHashes(branch0Nodes, 15),
 		},
 		{
@@ -594,7 +620,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote side chain, stop in main after more",
 			locator:  remoteView.BlockLocator(nil),
 			hashStop: branch0Nodes[16].hash,
-			headers:  nodeHeaders(branch0Nodes, 15, 16),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 15, 16),
 			hashes:   nodeHashes(branch0Nodes, 15, 16),
 		},
 		{
@@ -606,7 +632,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, unknown stop",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: chainhash.Hash{0x01},
-			headers:  nodeHeaders(branch0Nodes, 13, 14, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13, 14, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 13, 14, 15, 16, 17),
 		},
 		{
@@ -617,7 +643,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, stop in side",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: tip(branch1Nodes).hash,
-			headers:  nodeHeaders(branch0Nodes, 13, 14, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13, 14, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 13, 14, 15, 16, 17),
 		},
 		{
@@ -629,7 +655,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, stop in main before",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: branch0Nodes[11].hash,
-			headers:  nodeHeaders(branch0Nodes, 13, 14, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13, 14, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 13, 14, 15, 16, 17),
 		},
 		{
@@ -641,7 +667,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, stop in main exact",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: branch0Nodes[12].hash,
-			headers:  nodeHeaders(branch0Nodes, 13, 14, 15, 16, 17),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13, 14, 15, 16, 17),
 			hashes:   nodeHashes(branch0Nodes, 13, 14, 15, 16, 17),
 		},
 		{
@@ -653,7 +679,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, stop in main after",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: branch0Nodes[13].hash,
-			headers:  nodeHeaders(branch0Nodes, 13),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13),
 			hashes:   nodeHashes(branch0Nodes, 13),
 		},
 		{
@@ -665,7 +691,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote main chain past, stop in main after more",
 			locator:  localView.BlockLocator(branch0Nodes[12]),
 			hashStop: branch0Nodes[15].hash,
-			headers:  nodeHeaders(branch0Nodes, 13, 14, 15),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 13, 14, 15),
 			hashes:   nodeHashes(branch0Nodes, 13, 14, 15),
 		},
 		{
@@ -700,7 +726,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "remote unrelated chain",
 			locator:  unrelatedView.BlockLocator(nil),
 			hashStop: chainhash.Hash{},
-			headers: nodeHeaders(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
+			headers: nodeHeaders(t, chain, branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
 			hashes: nodeHashes(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
@@ -714,7 +740,7 @@ func TestLocateInventory(t *testing.T) {
 			locator:    locatorHashes(branch0Nodes, 0),
 			hashStop:   chainhash.Hash{},
 			maxAllowed: 3,
-			headers:    nodeHeaders(branch0Nodes, 1, 2, 3),
+			headers:    nodeHeaders(t, chain, branch0Nodes, 1, 2, 3),
 			hashes:     nodeHashes(branch0Nodes, 1, 2, 3),
 		},
 		{
@@ -729,7 +755,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "weak locator, single known side block",
 			locator:  locatorHashes(branch1Nodes, 1),
 			hashStop: chainhash.Hash{},
-			headers: nodeHeaders(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
+			headers: nodeHeaders(t, chain, branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
 			hashes: nodeHashes(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
@@ -746,7 +772,7 @@ func TestLocateInventory(t *testing.T) {
 			name:     "weak locator, multiple known side blocks",
 			locator:  locatorHashes(branch1Nodes, 1),
 			hashStop: chainhash.Hash{},
-			headers: nodeHeaders(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
+			headers: nodeHeaders(t, chain, branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
 			hashes: nodeHashes(branch0Nodes, 0, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
@@ -765,29 +791,25 @@ func TestLocateInventory(t *testing.T) {
 			name:     "weak locator, multiple known side blocks, stop in main",
 			locator:  locatorHashes(branch1Nodes, 1),
 			hashStop: branch0Nodes[5].hash,
-			headers:  nodeHeaders(branch0Nodes, 0, 1, 2, 3, 4, 5),
+			headers:  nodeHeaders(t, chain, branch0Nodes, 0, 1, 2, 3, 4, 5),
 			hashes:   nodeHashes(branch0Nodes, 0, 1, 2, 3, 4, 5),
 		},
 	}
 	for _, test := range tests {
-		// Ensure the expected headers are located.
-		var headers []wire.BlockHeader
+		// Ensure the expected headers with certificates are located.
+		var headers []wire.MsgHeader
 		if test.maxAllowed != 0 {
 			// Need to use the unexported function to override the
 			// max allowed for headers.
 			chain.chainLock.RLock()
 			headers = chain.locateHeaders(test.locator,
-				&test.hashStop, test.maxAllowed)
+				&test.hashStop, test.maxAllowed, true)
 			chain.chainLock.RUnlock()
 		} else {
 			headers = chain.LocateHeaders(test.locator,
-				&test.hashStop)
+				&test.hashStop, true)
 		}
-		if !reflect.DeepEqual(headers, test.headers) {
-			t.Errorf("%s: unexpected headers -- got %v, want %v",
-				test.name, headers, test.headers)
-			continue
-		}
+		require.Equal(test.headers, headers, "%s: unexpected headers", test.name)
 
 		// Ensure the expected block hashes are located.
 		maxAllowed := uint32(wire.MaxBlocksPerMsg)
@@ -796,34 +818,66 @@ func TestLocateInventory(t *testing.T) {
 		}
 		hashes := chain.LocateBlocks(test.locator, &test.hashStop,
 			maxAllowed)
-		if !reflect.DeepEqual(hashes, test.hashes) {
-			t.Errorf("%s: unexpected hashes -- got %v, want %v",
-				test.name, hashes, test.hashes)
-			continue
-		}
+		require.Equal(test.hashes, hashes, "%s: unexpected hashes", test.name)
 	}
+}
+
+// TestLocateHeadersCertificateFiltering verifies that locateHeaders includes
+// or omits certificates based on the includeCerts parameter.
+func TestLocateHeadersCertificateFiltering(t *testing.T) {
+	require := require.New(t)
+
+	tip := tstTip
+	chain, teardown, err := chainSetup("testcertfilter", &chaincfg.MainNetParams)
+	require.NoError(err)
+	t.Cleanup(teardown)
+
+	nodes := addNodes(t, chain, chain.bestChain.Genesis(), 2)
+	chain.bestChain.SetTip(tip(nodes))
+
+	locator := BlockLocator{&chain.bestChain.Genesis().hash}
+
+	// With includeCerts=true, all headers should have certificates.
+	chain.chainLock.RLock()
+	headers := chain.locateHeaders(locator, &chainhash.Hash{}, 100, true)
+	chain.chainLock.RUnlock()
+
+	require.Len(headers, 2)
+	require.NotNil(headers[0].BlockCertificate())
+	require.NotNil(headers[1].BlockCertificate())
+
+	// With includeCerts=false, no headers should have certificates.
+	chain.chainLock.RLock()
+	headers = chain.locateHeaders(locator, &chainhash.Hash{}, 100, false)
+	chain.chainLock.RUnlock()
+
+	require.Len(headers, 2)
+	require.Nil(headers[0].BlockCertificate())
+	require.Nil(headers[1].BlockCertificate())
 }
 
 // TestHeightToHashRange ensures that fetching a range of block hashes by start
 // height and end hash works as expected.
 func TestHeightToHashRange(t *testing.T) {
+	require := require.New(t)
+
 	// Construct a synthetic block chain with a block index consisting of
 	// the following structure.
 	// 	genesis -> 1 -> 2 -> ... -> 15 -> 16  -> 17  -> 18
 	// 	                              \-> 16a -> 17a -> 18a (unvalidated)
 	tip := tstTip
-	chain := newFakeChain(&chaincfg.MainNetParams)
-	branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 18)
-	branch1Nodes := chainedNodes(branch0Nodes[14], 3)
+	chain, teardownFunc, err := chainSetup("testheightohashrange", &chaincfg.MainNetParams)
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc)
+	branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 18)
+	branch1Nodes := addNodes(t, chain, branch0Nodes[14], 3)
 	for _, node := range branch0Nodes {
 		chain.index.SetStatusFlags(node, statusValid)
-		chain.index.AddNode(node)
 	}
 	for _, node := range branch1Nodes {
 		if node.height < 18 {
 			chain.index.SetStatusFlags(node, statusValid)
 		}
-		chain.index.AddNode(node)
 	}
 	chain.bestChain.SetTip(tip(branch0Nodes))
 
@@ -882,40 +936,37 @@ func TestHeightToHashRange(t *testing.T) {
 	for _, test := range tests {
 		hashes, err := chain.HeightToHashRange(test.startHeight, &test.endHash,
 			test.maxResults)
-		if err != nil {
-			if !test.expectError {
-				t.Errorf("%s: unexpected error: %v", test.name, err)
-			}
+		if test.expectError {
+			require.Error(err, "%s: expected error", test.name)
 			continue
 		}
-
-		if !reflect.DeepEqual(hashes, test.hashes) {
-			t.Errorf("%s: unexpected hashes -- got %v, want %v",
-				test.name, hashes, test.hashes)
-		}
+		require.NoError(err, "%s: unexpected error", test.name)
+		require.Equal(test.hashes, hashes, "%s: unexpected hashes", test.name)
 	}
 }
 
 // TestIntervalBlockHashes ensures that fetching block hashes at specified
 // intervals by end hash works as expected.
 func TestIntervalBlockHashes(t *testing.T) {
+	require := require.New(t)
+
 	// Construct a synthetic block chain with a block index consisting of
 	// the following structure.
 	// 	genesis -> 1 -> 2 -> ... -> 15 -> 16  -> 17  -> 18
 	// 	                              \-> 16a -> 17a -> 18a (unvalidated)
 	tip := tstTip
-	chain := newFakeChain(&chaincfg.MainNetParams)
-	branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 18)
-	branch1Nodes := chainedNodes(branch0Nodes[14], 3)
+	chain, teardownFunc, err := chainSetup("testintervalblockhashes", &chaincfg.MainNetParams)
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc)
+	branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 18)
+	branch1Nodes := addNodes(t, chain, branch0Nodes[14], 3)
 	for _, node := range branch0Nodes {
 		chain.index.SetStatusFlags(node, statusValid)
-		chain.index.AddNode(node)
 	}
 	for _, node := range branch1Nodes {
 		if node.height < 18 {
 			chain.index.SetStatusFlags(node, statusValid)
 		}
-		chain.index.AddNode(node)
 	}
 	chain.bestChain.SetTip(tip(branch0Nodes))
 
@@ -954,21 +1005,18 @@ func TestIntervalBlockHashes(t *testing.T) {
 	}
 	for _, test := range tests {
 		hashes, err := chain.IntervalBlockHashes(&test.endHash, test.interval)
-		if err != nil {
-			if !test.expectError {
-				t.Errorf("%s: unexpected error: %v", test.name, err)
-			}
+		if test.expectError {
+			require.Error(err, "%s: expected error", test.name)
 			continue
 		}
-
-		if !reflect.DeepEqual(hashes, test.hashes) {
-			t.Errorf("%s: unexpected hashes -- got %v, want %v",
-				test.name, hashes, test.hashes)
-		}
+		require.NoError(err, "%s: unexpected error", test.name)
+		require.Equal(test.hashes, hashes, "%s: unexpected hashes", test.name)
 	}
 }
 
 func TestChainTips(t *testing.T) {
+	require := require.New(t)
+
 	tests := []struct {
 		name        string
 		chainTipGen func() (*BlockChain, map[chainhash.Hash]ChainTip)
@@ -980,12 +1028,13 @@ func TestChainTips(t *testing.T) {
 				// the following structure.
 				// 	genesis -> 1 -> 2 -> 3
 				tip := tstTip
-				chain := newFakeChain(&chaincfg.MainNetParams)
-				branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 3)
+				chain, teardownFunc, err := chainSetup("testchaintips1", &chaincfg.MainNetParams)
+				require.NoError(err, "Failed to setup chain instance")
+				t.Cleanup(teardownFunc)
+				branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 3)
 				for _, node := range branch0Nodes {
 					chain.index.SetStatusFlags(node, statusDataStored)
 					chain.index.SetStatusFlags(node, statusValid)
-					chain.index.AddNode(node)
 				}
 				chain.bestChain.SetTip(tip(branch0Nodes))
 
@@ -1009,19 +1058,17 @@ func TestChainTips(t *testing.T) {
 				// 	genesis -> 1 -> 2 -> 3 ... -> 10 -> 11  -> 12  -> 13 (active)
 				//                                      \-> 11a -> 12a (unknown)
 				tip := tstTip
-				chain := newFakeChain(&chaincfg.MainNetParams)
-				branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 13)
+				chain, teardownFunc, err := chainSetup("testchaintips2", &chaincfg.MainNetParams)
+				require.NoError(err, "Failed to setup chain instance")
+				t.Cleanup(teardownFunc)
+				branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 13)
 				for _, node := range branch0Nodes {
 					chain.index.SetStatusFlags(node, statusDataStored)
 					chain.index.SetStatusFlags(node, statusValid)
-					chain.index.AddNode(node)
 				}
 				chain.bestChain.SetTip(tip(branch0Nodes))
 
-				branch1Nodes := chainedNodes(branch0Nodes[9], 2)
-				for _, node := range branch1Nodes {
-					chain.index.AddNode(node)
-				}
+				branch1Nodes := addNodes(t, chain, branch0Nodes[9], 2)
 
 				activeTip := ChainTip{
 					Height:    13,
@@ -1051,27 +1098,26 @@ func TestChainTips(t *testing.T) {
 				//            \ -> 1a (valid-fork)
 				//            \ -> 1b (invalid)
 				tip := tstTip
-				chain := newFakeChain(&chaincfg.MainNetParams)
-				branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 3)
+				chain, teardownFunc, err := chainSetup("testchaintips3", &chaincfg.MainNetParams)
+				require.NoError(err, "Failed to setup chain instance")
+				t.Cleanup(teardownFunc)
+				branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 3)
 				for _, node := range branch0Nodes {
 					chain.index.SetStatusFlags(node, statusDataStored)
 					chain.index.SetStatusFlags(node, statusValid)
-					chain.index.AddNode(node)
 				}
 				chain.bestChain.SetTip(tip(branch0Nodes))
 
-				branch1Nodes := chainedNodes(chain.bestChain.Genesis(), 1)
+				branch1Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 1)
 				for _, node := range branch1Nodes {
 					chain.index.SetStatusFlags(node, statusDataStored)
 					chain.index.SetStatusFlags(node, statusValid)
-					chain.index.AddNode(node)
 				}
 
-				branch2Nodes := chainedNodes(chain.bestChain.Genesis(), 1)
+				branch2Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 1)
 				for _, node := range branch2Nodes {
 					chain.index.SetStatusFlags(node, statusDataStored)
 					chain.index.SetStatusFlags(node, statusValidateFailed)
-					chain.index.AddNode(node)
 				}
 
 				activeTip := ChainTip{
@@ -1108,84 +1154,57 @@ func TestChainTips(t *testing.T) {
 	for _, test := range tests {
 		chain, expectedChainTips := test.chainTipGen()
 		gotChainTips := chain.ChainTips()
-		if len(gotChainTips) != len(expectedChainTips) {
-			t.Errorf("TestChainTips Failed test %s. Expected %d "+
-				"chain tips, got %d", test.name, len(expectedChainTips), len(gotChainTips))
-		}
+		require.Equal(len(expectedChainTips), len(gotChainTips), "TestChainTips Failed test %s. Expected %d chain tips, got %d", test.name, len(expectedChainTips), len(gotChainTips))
 
 		for _, gotChainTip := range gotChainTips {
 			testChainTip, found := expectedChainTips[gotChainTip.BlockHash]
-			if !found {
-				t.Errorf("TestChainTips Failed test %s. Couldn't find an expected "+
-					"chain tip with height %d, hash %s, branchlen %d, status \"%s\"",
-					test.name, testChainTip.Height, testChainTip.BlockHash.String(),
-					testChainTip.BranchLen, testChainTip.Status.String())
-			}
+			require.True(found, "TestChainTips Failed test %s. Couldn't find an expected chain tip with height %d, hash %s, branchlen %d, status \"%s\"", test.name, testChainTip.Height, testChainTip.BlockHash.String(), testChainTip.BranchLen, testChainTip.Status.String())
 
-			if !reflect.DeepEqual(testChainTip, gotChainTip) {
-				t.Errorf("TestChainTips Failed test %s. Expected chain tip with "+
-					"height %d, hash %s, branchlen %d, status \"%s\" but got "+
-					"height %d, hash %s, branchlen %d, status \"%s\"", test.name,
-					testChainTip.Height, testChainTip.BlockHash.String(),
-					testChainTip.BranchLen, testChainTip.Status.String(),
-					gotChainTip.Height, gotChainTip.BlockHash.String(),
-					gotChainTip.BranchLen, gotChainTip.Status.String())
-			}
+			require.Equal(testChainTip, gotChainTip, "TestChainTips Failed test %s. Expected chain tip with height %d, hash %s, branchlen %d, status \"%s\" but got height %d, hash %s, branchlen %d, status \"%s\"", test.name, testChainTip.Height, testChainTip.BlockHash.String(), testChainTip.BranchLen, testChainTip.Status.String(), gotChainTip.Height, gotChainTip.BlockHash.String(), gotChainTip.BranchLen, gotChainTip.Status.String())
 
 			switch testChainTip.Status {
 			case StatusActive:
-				if testChainTip.Status.String() != "active" {
-					t.Errorf("TestChainTips Fail: Expected string of \"active\", got \"%s\"",
-						testChainTip.Status.String())
-				}
+				require.Equal("active", testChainTip.Status.String(), "TestChainTips Fail: Expected string of \"active\", got \"%s\"", testChainTip.Status.String())
 			case StatusInvalid:
-				if testChainTip.Status.String() != "invalid" {
-					t.Errorf("TestChainTips Fail: Expected string of \"invalid\", got \"%s\"",
-						testChainTip.Status.String())
-				}
+				require.Equal("invalid", testChainTip.Status.String(), "TestChainTips Fail: Expected string of \"invalid\", got \"%s\"", testChainTip.Status.String())
 			case StatusValidFork:
-				if testChainTip.Status.String() != "valid-fork" {
-					t.Errorf("TestChainTips Fail: Expected string of \"valid-fork\", got \"%s\"",
-						testChainTip.Status.String())
-				}
+				require.Equal("valid-fork", testChainTip.Status.String(), "TestChainTips Fail: Expected string of \"valid-fork\", got \"%s\"", testChainTip.Status.String())
 			case StatusUnknown:
-				if testChainTip.Status.String() != fmt.Sprintf("unknown: %b", testChainTip.Status) {
-					t.Errorf("TestChainTips Fail: Expected string of \"unknown\", got \"%s\"",
-						testChainTip.Status.String())
-				}
+				require.Equal(fmt.Sprintf("unknown: %b", testChainTip.Status), testChainTip.Status.String(), "TestChainTips Fail: Expected string of \"unknown\", got \"%s\"", testChainTip.Status.String())
 			}
 		}
 	}
 }
 
 func TestIsAncestor(t *testing.T) {
+	require := require.New(t)
+
 	// Construct a synthetic block chain with a block index consisting of
 	// the following structure.
 	// 	genesis -> 1  -> 2  -> 3 (active)
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	tip := tstTip
-	chain := newFakeChain(&chaincfg.MainNetParams)
-	branch0Nodes := chainedNodes(chain.bestChain.Genesis(), 3)
+	chain, teardownFunc, err := chainSetup("testisancestor", &chaincfg.MainNetParams)
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc)
+	branch0Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 3)
 	for _, node := range branch0Nodes {
 		chain.index.SetStatusFlags(node, statusDataStored)
 		chain.index.SetStatusFlags(node, statusValid)
-		chain.index.AddNode(node)
 	}
 	chain.bestChain.SetTip(tip(branch0Nodes))
 
-	branch1Nodes := chainedNodes(chain.bestChain.Genesis(), 1)
+	branch1Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 1)
 	for _, node := range branch1Nodes {
 		chain.index.SetStatusFlags(node, statusDataStored)
 		chain.index.SetStatusFlags(node, statusValid)
-		chain.index.AddNode(node)
 	}
 
-	branch2Nodes := chainedNodes(chain.bestChain.Genesis(), 1)
+	branch2Nodes := addNodes(t, chain, chain.bestChain.Genesis(), 1)
 	for _, node := range branch2Nodes {
 		chain.index.SetStatusFlags(node, statusDataStored)
 		chain.index.SetStatusFlags(node, statusValidateFailed)
-		chain.index.AddNode(node)
 	}
 
 	// Is 1 an ancestor of 3?
@@ -1194,10 +1213,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeTrue := branch0Nodes[2].IsAncestor(branch0Nodes[0])
-	if !shouldBeTrue {
-		t.Errorf("TestIsAncestor fail. Node %s is an ancestor of node %s but got false",
-			branch0Nodes[0].hash.String(), branch0Nodes[2].hash.String())
-	}
+	require.True(shouldBeTrue, "TestIsAncestor fail. Node %s is an ancestor of node %s but got false", branch0Nodes[0].hash.String(), branch0Nodes[2].hash.String())
 
 	// Is 1 an ancestor of 2?
 	//
@@ -1205,10 +1221,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeTrue = branch0Nodes[1].IsAncestor(branch0Nodes[0])
-	if !shouldBeTrue {
-		t.Errorf("TestIsAncestor fail. Node %s is an ancestor of node %s but got false",
-			branch0Nodes[0].hash.String(), branch0Nodes[1].hash.String())
-	}
+	require.True(shouldBeTrue, "TestIsAncestor fail. Node %s is an ancestor of node %s but got false", branch0Nodes[0].hash.String(), branch0Nodes[1].hash.String())
 
 	// Is the genesis an ancestor of 1?
 	//
@@ -1216,11 +1229,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeTrue = branch0Nodes[0].IsAncestor(chain.bestChain.Genesis())
-	if !shouldBeTrue {
-		t.Errorf("TestIsAncestor fail. The genesis block is an ancestor of all blocks "+
-			"but got false for node %s",
-			branch0Nodes[0].hash.String())
-	}
+	require.True(shouldBeTrue, "TestIsAncestor fail. The genesis block is an ancestor of all blocks but got false for node %s", branch0Nodes[0].hash.String())
 
 	// Is the genesis an ancestor of 1a?
 	//
@@ -1228,11 +1237,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeTrue = branch1Nodes[0].IsAncestor(chain.bestChain.Genesis())
-	if !shouldBeTrue {
-		t.Errorf("TestIsAncestor fail. The genesis block is an ancestor of all blocks "+
-			"but got false for node %s",
-			branch1Nodes[0].hash.String())
-	}
+	require.True(shouldBeTrue, "TestIsAncestor fail. The genesis block is an ancestor of all blocks but got false for node %s", branch1Nodes[0].hash.String())
 
 	// Is the genesis an ancestor of 1b?
 	//
@@ -1240,11 +1245,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeTrue = branch2Nodes[0].IsAncestor(chain.bestChain.Genesis())
-	if !shouldBeTrue {
-		t.Errorf("TestIsAncestor fail. The genesis block is an ancestor of all blocks "+
-			"but got false for node %s",
-			branch2Nodes[0].hash.String())
-	}
+	require.True(shouldBeTrue, "TestIsAncestor fail. The genesis block is an ancestor of all blocks but got false for node %s", branch2Nodes[0].hash.String())
 
 	// Is 1 an ancestor of 1a?
 	//
@@ -1252,11 +1253,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeFalse := branch1Nodes[0].IsAncestor(branch0Nodes[0])
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node %s is in a different branch than "+
-			"node %s but got true", branch1Nodes[0].hash.String(),
-			branch0Nodes[0].hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node %s is in a different branch than node %s but got true", branch1Nodes[0].hash.String(), branch0Nodes[0].hash.String())
 
 	// Is 1 an ancestor of 1b?
 	//
@@ -1264,11 +1261,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeFalse = branch2Nodes[0].IsAncestor(branch0Nodes[0])
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node %s is in a different branch than "+
-			"node %s but got true", branch2Nodes[0].hash.String(),
-			branch0Nodes[0].hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node %s is in a different branch than node %s but got true", branch2Nodes[0].hash.String(), branch0Nodes[0].hash.String())
 
 	// Is 1a an ancestor of 1b?
 	//
@@ -1276,11 +1269,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeFalse = branch2Nodes[0].IsAncestor(branch1Nodes[0])
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node %s is in a different branch than "+
-			"node %s but got true", branch2Nodes[0].hash.String(),
-			branch1Nodes[0].hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node %s is in a different branch than node %s but got true", branch2Nodes[0].hash.String(), branch1Nodes[0].hash.String())
 
 	// Is 1 an ancestor of 1?
 	//
@@ -1288,10 +1277,7 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeFalse = branch0Nodes[0].IsAncestor(branch0Nodes[0])
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node is not an ancestor of itself but got true for node %s",
-			branch0Nodes[0].hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node is not an ancestor of itself but got true for node %s", branch0Nodes[0].hash.String())
 
 	// Is the geneis an ancestor of genesis?
 	//
@@ -1299,19 +1285,14 @@ func TestIsAncestor(t *testing.T) {
 	//            \ -> 1a (valid-fork)
 	//            \ -> 1b (invalid)
 	shouldBeFalse = chain.bestChain.Genesis().IsAncestor(chain.bestChain.Genesis())
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node is not an ancestor of itself but got true for node %s",
-			chain.bestChain.Genesis().hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node is not an ancestor of itself but got true for node %s", chain.bestChain.Genesis().hash.String())
 
 	// Is a block from another chain an ancestor of 1b?
-	fakeChain := newFakeChain(&chaincfg.TestNet3Params)
+	fakeChain, teardownFunc2, err := chainSetup("testisancestor2", &chaincfg.TestNetParams)
+	require.NoError(err, "Failed to setup chain instance")
+	t.Cleanup(teardownFunc2)
 	shouldBeFalse = branch2Nodes[0].IsAncestor(fakeChain.bestChain.Genesis())
-	if shouldBeFalse {
-		t.Errorf("TestIsAncestor fail. Node %s is in a different chain than "+
-			"node %s but got true", fakeChain.bestChain.Genesis().hash.String(),
-			branch2Nodes[0].hash.String())
-	}
+	require.False(shouldBeFalse, "TestIsAncestor fail. Node %s is in a different chain than node %s but got true", fakeChain.bestChain.Genesis().hash.String(), branch2Nodes[0].hash.String())
 }
 
 // randomSelect selects random amount of random elements from a slice and returns a
@@ -1372,65 +1353,43 @@ func addBlocks(count int, chain *BlockChain, prevBlock *btcutil.Block,
 }
 
 func TestInvalidateBlock(t *testing.T) {
+
 	tests := []struct {
 		name     string
-		chainGen func() (*BlockChain, []*chainhash.Hash, func())
+		chainGen func(*require.Assertions, *BlockChain, *btcutil.Block) []*chainhash.Hash
 	}{
 		{
 			name: "one branch, invalidate once",
-			chainGen: func() (*BlockChain, []*chainhash.Hash, func()) {
-				chain, params, tearDown := utxoCacheTestChain(
-					"TestInvalidateBlock-one-branch-" +
-						"invalidate-once")
-				// Grab the tip of the chain.
-				tip := btcutil.NewBlock(params.GenesisBlock)
-
+			chainGen: func(require *require.Assertions, chain *BlockChain, tip *btcutil.Block) []*chainhash.Hash {
 				// Create a chain with 11 blocks.
 				_, _, err := addBlocks(11, chain, tip, []*testhelper.SpendableOut{})
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Invalidate block 5.
 				block, err := chain.BlockByHeight(5)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				invalidateHash := block.Hash()
 
-				return chain, []*chainhash.Hash{invalidateHash}, tearDown
+				return []*chainhash.Hash{invalidateHash}
 			},
 		},
 		{
 			name: "invalidate twice",
-			chainGen: func() (*BlockChain, []*chainhash.Hash, func()) {
-				chain, params, tearDown := utxoCacheTestChain("TestInvalidateBlock-invalidate-twice")
-				// Grab the tip of the chain.
-				tip := btcutil.NewBlock(params.GenesisBlock)
-
+			chainGen: func(require *require.Assertions, chain *BlockChain, tip *btcutil.Block) []*chainhash.Hash {
 				// Create a chain with 11 blocks.
 				_, spendableOuts, err := addBlocks(11, chain, tip, []*testhelper.SpendableOut{})
-				//_, _, err := addBlocks(11, chain, tip, []*testhelper.SpendableOut{})
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Set invalidateHash as block 5.
 				block, err := chain.BlockByHeight(5)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				invalidateHash := block.Hash()
 
 				// Create a side chain with 7 blocks that builds on block 1.
 				b1, err := chain.BlockByHeight(1)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				altBlockHashes, _, err := addBlocks(6, chain, b1, spendableOuts[0])
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Grab block at height 5:
 				//
@@ -1440,41 +1399,24 @@ func TestInvalidateBlock(t *testing.T) {
 
 				// Sanity checking that we grabbed the correct hash.
 				node := chain.index.LookupNode(invalidateHash)
-				if node == nil || node.height != 5 {
-					t.Fatalf("wanted to grab block at height 5 but got height %v",
-						node.height)
-				}
+				require.NotNil(node, "wanted to grab block at height 5")
+				require.Equal(int32(5), node.height, "wanted to grab block at height 5, got height %d", node.height)
 
-				return chain, []*chainhash.Hash{invalidateHash, invalidateHash2}, tearDown
+				return []*chainhash.Hash{invalidateHash, invalidateHash2}
 			},
 		},
 		{
 			name: "invalidate a side branch",
-			chainGen: func() (*BlockChain, []*chainhash.Hash, func()) {
-				chain, params, tearDown := utxoCacheTestChain("TestInvalidateBlock-invalidate-side-branch")
-				tip := btcutil.NewBlock(params.GenesisBlock)
-
-				// Grab the tip of the chain.
-				tip, err := chain.BlockByHash(&chain.bestChain.Tip().hash)
-				if err != nil {
-					t.Fatal(err)
-				}
-
+			chainGen: func(require *require.Assertions, chain *BlockChain, tip *btcutil.Block) []*chainhash.Hash {
 				// Create a chain with 11 blocks.
 				_, spendableOuts, err := addBlocks(11, chain, tip, []*testhelper.SpendableOut{})
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Create a side chain with 7 blocks that builds on block 1.
 				b1, err := chain.BlockByHeight(1)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				altBlockHashes, _, err := addBlocks(6, chain, b1, spendableOuts[0])
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Grab block at height 4:
 				//
@@ -1489,15 +1431,22 @@ func TestInvalidateBlock(t *testing.T) {
 						node.height)
 				}
 
-				return chain, []*chainhash.Hash{invalidateHash}, tearDown
+				return []*chainhash.Hash{invalidateHash}
 			},
 		},
 	}
 
 	for _, test := range tests {
-		chain, invalidateHashes, tearDown := test.chainGen()
-		func() {
-			defer tearDown()
+		t.Run(test.name, func(t *testing.T) {
+			require := require.New(t)
+
+			chain, params, tearDown := utxoCacheTestChain(test.name)
+			t.Cleanup(tearDown)
+			tip := btcutil.NewBlock(params.GenesisBlock)
+			tip.SetHeight(0)
+
+			invalidateHashes := test.chainGen(require, chain, tip)
+
 			for _, invalidateHash := range invalidateHashes {
 				chainTipsBefore := chain.ChainTips()
 
@@ -1510,9 +1459,7 @@ func TestInvalidateBlock(t *testing.T) {
 
 				// Actual invalidation.
 				err := chain.InvalidateBlock(invalidateHash)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err, "test %s", test.name)
 
 				chainTipsAfter := chain.ChainTips()
 
@@ -1619,11 +1566,13 @@ func TestInvalidateBlock(t *testing.T) {
 				t.Fatalf("TestInvalidateBlock fail. Expected to err when trying to" +
 					"invalidate a block that doesn't exist.")
 			}
-		}()
+		})
 	}
 }
 
 func TestReconsiderBlock(t *testing.T) {
+	require := require.New(t)
+
 	tests := []struct {
 		name     string
 		chainGen func() (*BlockChain, []*chainhash.Hash, func())
@@ -1635,6 +1584,7 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Create a chain with 101 blocks.
 				tip := btcutil.NewBlock(params.GenesisBlock)
+				tip.SetHeight(0)
 				_, _, err := addBlocks(101, chain, tip, []*testhelper.SpendableOut{})
 				if err != nil {
 					t.Fatal(err)
@@ -1657,6 +1607,7 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Create a chain with 101 blocks.
 				tip := btcutil.NewBlock(params.GenesisBlock)
+				tip.SetHeight(0)
 				_, spendableOuts, err := addBlocks(101, chain, tip, []*testhelper.SpendableOut{})
 				if err != nil {
 					t.Fatal(err)
@@ -1671,13 +1622,9 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Create a side chain with 7 blocks that builds on block 1.
 				b1, err := chain.BlockByHeight(1)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				_, _, err = addBlocks(6, chain, b1, spendableOuts[0])
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				return chain, []*chainhash.Hash{invalidateHash}, tearDown
 			},
@@ -1689,6 +1636,7 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Create a chain with 101 blocks.
 				tip := btcutil.NewBlock(params.GenesisBlock)
+				tip.SetHeight(0)
 				_, spendableOuts, err := addBlocks(101, chain, tip, []*testhelper.SpendableOut{})
 				if err != nil {
 					t.Fatal(err)
@@ -1696,13 +1644,9 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Create a side chain with 7 blocks that builds on block 1.
 				b1, err := chain.BlockByHeight(1)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				altBlockHashes, _, err := addBlocks(6, chain, b1, spendableOuts[0])
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 				// Grab block at height 4:
 				//
 				// b2, b3, b4, b5
@@ -1718,6 +1662,7 @@ func TestReconsiderBlock(t *testing.T) {
 				chain, params, tearDown := utxoCacheTestChain("TestReconsiderBlock-reconsider-an-invalid-side-branch-higher")
 
 				tip := btcutil.NewBlock(params.GenesisBlock)
+				tip.SetHeight(0)
 				_, spendableOuts, err := addBlocks(6, chain, tip, []*testhelper.SpendableOut{})
 				if err != nil {
 					t.Fatal(err)
@@ -1752,6 +1697,7 @@ func TestReconsiderBlock(t *testing.T) {
 				chain, params, tearDown := utxoCacheTestChain("TestReconsiderBlock-reconsider-an-invalid-side-branch-lower")
 
 				tip := btcutil.NewBlock(params.GenesisBlock)
+				tip.SetHeight(0)
 				_, spendableOuts, err := addBlocks(6, chain, tip, []*testhelper.SpendableOut{})
 				if err != nil {
 					t.Fatal(err)
@@ -1791,8 +1737,8 @@ func TestReconsiderBlock(t *testing.T) {
 
 	for _, test := range tests {
 		chain, invalidateHashes, tearDown := test.chainGen()
-		func() {
-			defer tearDown()
+		t.Run(test.name, func(t *testing.T) {
+			t.Cleanup(tearDown)
 			for _, invalidateHash := range invalidateHashes {
 				// Cache the chain tips before the invalidate. Since we'll reconsider
 				// the invalidated block, we should come back to these tips in the end.
@@ -1804,15 +1750,11 @@ func TestReconsiderBlock(t *testing.T) {
 
 				// Invalidation.
 				err := chain.InvalidateBlock(invalidateHash)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Reconsideration.
 				err = chain.ReconsiderBlock(invalidateHash)
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(err)
 
 				// Compare the tips aginst the tips we've cached.
 				gotChainTips := chain.ChainTips()
@@ -1834,17 +1776,9 @@ func TestReconsiderBlock(t *testing.T) {
 						testChainTip.Status = StatusValidFork
 					}
 
-					if !reflect.DeepEqual(testChainTip, gotChainTip) {
-						t.Errorf("TestReconsiderBlock Failed test \"%s\". Expected chain tip with "+
-							"height %d, hash %s, branchlen %d, status \"%s\" but got "+
-							"height %d, hash %s, branchlen %d, status \"%s\"", test.name,
-							testChainTip.Height, testChainTip.BlockHash.String(),
-							testChainTip.BranchLen, testChainTip.Status.String(),
-							gotChainTip.Height, gotChainTip.BlockHash.String(),
-							gotChainTip.BranchLen, gotChainTip.Status.String())
-					}
+					require.Equal(testChainTip, gotChainTip, "TestReconsiderBlock Failed test \"%s\". Expected chain tip with height %d, hash %s, branchlen %d, status \"%s\" but got height %d, hash %s, branchlen %d, status \"%s\"", test.name, testChainTip.Height, testChainTip.BlockHash.String(), testChainTip.BranchLen, testChainTip.Status.String(), gotChainTip.Height, gotChainTip.BlockHash.String(), gotChainTip.BranchLen, gotChainTip.Status.String())
 				}
 			}
-		}()
+		})
 	}
 }

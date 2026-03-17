@@ -1,14 +1,14 @@
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2016 The Decred developers
-// Copyright (c) 2017 The btcsuite developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package wallet
 
 import (
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 type unstableAPI struct {

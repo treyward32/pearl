@@ -1,15 +1,14 @@
 package wallet
 
 import (
-	"encoding/binary"
-	"strings"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcwallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,22 +34,12 @@ func deriveAcctPubKey(t *testing.T, root *hdkeychain.ExtendedKey,
 	// The Neuter() method checks the version and doesn't know any
 	// non-standard methods. We need to convert them to standard, neuter,
 	// then convert them back with the target extended public key version.
+	// Use the current TestNet HD public key version (vpub)
 	pubVersionBytes := make([]byte, 4)
-	copy(pubVersionBytes, chaincfg.TestNet3Params.HDPublicKeyID[:])
-	switch {
-	case strings.HasPrefix(root.String(), "uprv"):
-		binary.BigEndian.PutUint32(pubVersionBytes, uint32(
-			waddrmgr.HDVersionTestNetBIP0049,
-		))
-
-	case strings.HasPrefix(root.String(), "vprv"):
-		binary.BigEndian.PutUint32(pubVersionBytes, uint32(
-			waddrmgr.HDVersionTestNetBIP0084,
-		))
-	}
+	copy(pubVersionBytes, chaincfg.TestNetParams.HDPublicKeyID[:])
 
 	currentKey, err = currentKey.CloneWithVersion(
-		chaincfg.TestNet3Params.HDPrivateKeyID[:],
+		chaincfg.TestNetParams.HDPrivateKeyID[:],
 	)
 	require.NoError(t, err)
 	currentKey, err = currentKey.Neuter()
@@ -72,56 +61,27 @@ type testCase struct {
 }
 
 var (
+	// All test cases now use Taproot-only addresses.
 	testCases = []*testCase{{
-		name: "bip44 with nested witness address type",
+		name: "taproot with tprv master key",
 		masterPriv: "tprv8ZgxMBicQKsPeWwrFuNjEGTTDSY4mRLwd2KDJAPGa1AY" +
 			"quw38bZqNMSuB3V1Va3hqJBo9Pt8Sx7kBQer5cNMrb8SYquoWPt9" +
 			"Y3BZdhdtUcw",
 		accountIndex:       0,
-		addrType:           waddrmgr.NestedWitnessPubKey,
-		expectedScope:      waddrmgr.KeyScopeBIP0049Plus,
-		expectedAddr:       "2N5YTxG9XtGXx1YyhZb7N2pwEjoZLLMHGKj",
-		expectedChangeAddr: "2N7wpz5Gy2zEJTvq2MAuU6BCTEBLXNQ8dUw",
+		addrType:           waddrmgr.TaprootPubKey,
+		expectedScope:      waddrmgr.KeyScopeBIP0086,
+		expectedAddr:       "tprl1pmxa4c2w8cp6dq0j65sm4ha5qglr83xuwqhjlnzgr9etj8l9n5rrqgkhc6a",
+		expectedChangeAddr: "tprl1p23muxzw30p5gvc8sthgkfckcqzxnf5rzpvak6zl9x0gjeqnxgu0qfcx3kk",
 	}, {
-		name: "bip44 with witness address type",
+		name: "taproot with different account index",
 		masterPriv: "tprv8ZgxMBicQKsPeWwrFuNjEGTTDSY4mRLwd2KDJAPGa1AY" +
 			"quw38bZqNMSuB3V1Va3hqJBo9Pt8Sx7kBQer5cNMrb8SYquoWPt9" +
 			"Y3BZdhdtUcw",
-		accountIndex:       777,
-		addrType:           waddrmgr.WitnessPubKey,
-		expectedScope:      waddrmgr.KeyScopeBIP0084,
-		expectedAddr:       "tb1qllxcutkzsukf8u8c8stkp464j0esu9xq7qju8x",
-		expectedChangeAddr: "tb1qu6jmqglrthscptjqj3egx54wy8xqvzn5hslgw7",
-	}, {
-		name: "traditional bip49",
-		masterPriv: "uprv8tXDerPXZ1QsVp8y6GAMSMYxPQgWi3LSY8qS5ZH9x1YRu" +
-			"1kGPFjPzR73CFSbVUhdEwJbtsUgucUJ4hGQoJnNepp3RBcE6Jhdom" +
-			"FD2KeY6G9",
-		accountIndex:       9,
-		addrType:           waddrmgr.NestedWitnessPubKey,
-		expectedScope:      waddrmgr.KeyScopeBIP0049Plus,
-		expectedAddr:       "2NBCJ9WzGXZqpLpXGq3Hacybj3c4eHRcqgh",
-		expectedChangeAddr: "2N3bankFu6F3ZNU41iVJQqyS9MXqp9dvn1M",
-	}, {
-		name: "bip49+",
-		masterPriv: "uprv8tXDerPXZ1QsVp8y6GAMSMYxPQgWi3LSY8qS5ZH9x1YRu" +
-			"1kGPFjPzR73CFSbVUhdEwJbtsUgucUJ4hGQoJnNepp3RBcE6Jhdom" +
-			"FD2KeY6G9",
-		accountIndex:       9,
-		addrType:           waddrmgr.WitnessPubKey,
-		expectedScope:      waddrmgr.KeyScopeBIP0049Plus,
-		expectedAddr:       "2NBCJ9WzGXZqpLpXGq3Hacybj3c4eHRcqgh",
-		expectedChangeAddr: "tb1qeqn05w2hfq6axpdprhs4y7x65gxkkvfvyxqk4u",
-	}, {
-		name: "bip84",
-		masterPriv: "vprv9DMUxX4ShgxMM7L5vcwyeSeTZNpxefKwTFMerxB3L1vJ" +
-			"x7ZVdutxcUmBDTQBVPMYeaRQeM5FNGpqwysyX1CPT4VeHXJegDX8" +
-			"5VJrQvaFaz3",
 		accountIndex:       1,
-		addrType:           waddrmgr.WitnessPubKey,
-		expectedScope:      waddrmgr.KeyScopeBIP0084,
-		expectedAddr:       "tb1q5vepvcl0z8xj7kps4rsux722r4dvfwlhk6j532",
-		expectedChangeAddr: "tb1qlwe2kgxcsa8x4huu79yff4rze0l5mwafg5c7xd",
+		addrType:           waddrmgr.TaprootPubKey,
+		expectedScope:      waddrmgr.KeyScopeBIP0086,
+		expectedAddr:       "tprl1pqquds2zajq7s32crdmqd6v2xkgl57mr2wftwq35zm77nepn2mexsv5akje",
+		expectedChangeAddr: "tprl1p9sk7jvzr2heekznre0jjgzvyepzlz5cw8uydacthu8zp2fdny2tqfsljvf",
 	}}
 )
 
@@ -210,14 +170,16 @@ func testImportAccount(t *testing.T, w *Wallet, tc *testCase, watchOnly bool,
 	// If the wallet is watch only, there is no default account and our
 	// imported account will be index 0.
 	firstAccountIndex := uint32(1)
+	numAccounts := 2
 	if watchOnly {
 		firstAccountIndex = 0
+		numAccounts = 1
 	}
 
-	// We should have 3 additional accounts now.
+	// We should have 2 additional accounts now.
 	acctResult, err := w.Accounts(tc.expectedScope)
 	require.NoError(t, err)
-	require.Len(t, acctResult.Accounts, int(firstAccountIndex*2)+2)
+	require.Len(t, acctResult.Accounts, numAccounts+2)
 
 	// Validate the state of the accounts.
 	require.Equal(t, firstAccountIndex, acct1.AccountNumber)
@@ -241,10 +203,10 @@ func testImportAccount(t *testing.T, w *Wallet, tc *testCase, watchOnly bool,
 	require.Equal(t, uint32(0), acct2.ImportedKeyCount)
 
 	// Test address derivation.
-	extAddr, err := w.NewAddress(acct1.AccountNumber, tc.expectedScope)
+	extAddr, err := w.NewAddress(acct1.AccountNumber, tc.expectedScope, false)
 	require.NoError(t, err)
 	require.Equal(t, tc.expectedAddr, extAddr.String())
-	intAddr, err := w.NewChangeAddress(acct1.AccountNumber, tc.expectedScope)
+	intAddr, err := w.NewChangeAddress(acct1.AccountNumber, tc.expectedScope, false)
 	require.NoError(t, err)
 	require.Equal(t, tc.expectedChangeAddr, intAddr.String())
 
@@ -259,32 +221,18 @@ func testImportAccount(t *testing.T, w *Wallet, tc *testCase, watchOnly bool,
 	_, err = w.DumpWIFPrivateKey(intAddr)
 	require.True(t, waddrmgr.IsError(err, waddrmgr.ErrWatchingOnly))
 
-	// Get the address info for the single key we imported.
+	// Get the address info for the single key we imported (Taproot).
 	switch tc.addrType {
-	case waddrmgr.NestedWitnessPubKey:
-		witnessAddr, err := btcutil.NewAddressWitnessPubKeyHash(
-			btcutil.Hash160(acct3ExternalPub.SerializeCompressed()),
-			&chaincfg.TestNet3Params,
-		)
-		require.NoError(t, err)
-
-		witnessProg, err := txscript.PayToAddrScript(witnessAddr)
-		require.NoError(t, err)
-
-		intAddr, err = btcutil.NewAddressScriptHash(
-			witnessProg, &chaincfg.TestNet3Params,
-		)
-		require.NoError(t, err)
-
-	case waddrmgr.WitnessPubKey:
-		intAddr, err = btcutil.NewAddressWitnessPubKeyHash(
-			btcutil.Hash160(acct3ExternalPub.SerializeCompressed()),
-			&chaincfg.TestNet3Params,
+	case waddrmgr.TaprootPubKey:
+		// For Taproot, we need to compute the taproot output key
+		taprootKey := txscript.ComputeTaprootKeyNoScript(acct3ExternalPub)
+		intAddr, err = btcutil.NewAddressTaproot(
+			schnorr.SerializePubKey(taprootKey), &chaincfg.TestNetParams,
 		)
 		require.NoError(t, err)
 
 	default:
-		t.Fatalf("unhandled address type %v", tc.addrType)
+		t.Fatalf("unhandled address type %v, only Taproot is supported", tc.addrType)
 	}
 
 	addrManaged, err := w.AddressInfo(intAddr)

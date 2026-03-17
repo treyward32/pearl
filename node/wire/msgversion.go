@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -17,9 +17,9 @@ import (
 const MaxUserAgentLen = 256
 
 // DefaultUserAgent for wire in the stack
-const DefaultUserAgent = "/btcwire:0.5.0/"
+const DefaultUserAgent = "/pearlwire:0.5.0/"
 
-// MsgVersion implements the Message interface and represents a bitcoin version
+// MsgVersion implements the Message interface and represents a version
 // message.  It is used for a peer to advertise itself as soon as an outbound
 // connection is made.  The remote peer then uses this information along with
 // its own to negotiate.  The remote peer must then respond with a version
@@ -69,17 +69,17 @@ func (msg *MsgVersion) AddService(service ServiceFlag) {
 	msg.Services |= service
 }
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // The version message is special in that the protocol version hasn't been
 // negotiated yet.  As a result, the pver field is ignored and any fields which
 // are added in new versions are optional.  This also mean that r must be a
 // *bytes.Buffer so the number of remaining bytes can be ascertained.
 //
 // This is part of the Message interface implementation.
-func (msg *MsgVersion) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
+func (msg *MsgVersion) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	buf, ok := r.(*bytes.Buffer)
 	if !ok {
-		return fmt.Errorf("MsgVersion.BtcDecode reader is not a " +
+		return fmt.Errorf("MsgVersion.PrlDecode reader is not a " +
 			"*bytes.Buffer")
 	}
 
@@ -147,9 +147,9 @@ func (msg *MsgVersion) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) 
 	return nil
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
-func (msg *MsgVersion) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
+func (msg *MsgVersion) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	err := validateUserAgent(msg.UserAgent)
 	if err != nil {
 		return err
@@ -186,16 +186,9 @@ func (msg *MsgVersion) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) 
 		return err
 	}
 
-	// There was no relay transactions field before BIP0037Version.  Also,
-	// the wire encoding for the field is true when transactions should be
-	// relayed, so reverse it from the DisableRelayTx field.
-	if pver >= BIP0037Version {
-		err = writeElement(w, !msg.DisableRelayTx)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	// The wire encoding for the relay field is true when transactions should
+	// be relayed, so reverse it from the DisableRelayTx field.
+	return writeElement(w, !msg.DisableRelayTx)
 }
 
 // Command returns the protocol command string for the message.  This is part
@@ -217,7 +210,7 @@ func (msg *MsgVersion) MaxPayloadLength(pver uint32) uint32 {
 		MaxUserAgentLen
 }
 
-// NewMsgVersion returns a new bitcoin version message that conforms to the
+// NewMsgVersion returns a new version message that conforms to the
 // Message interface using the passed parameters and defaults for the remaining
 // fields.
 func NewMsgVersion(me *NetAddress, you *NetAddress, nonce uint64,

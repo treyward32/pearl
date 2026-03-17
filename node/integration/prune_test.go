@@ -1,4 +1,4 @@
-// Copyright (c) 2023 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,8 +11,8 @@ package integration
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,8 +20,8 @@ func TestPrune(t *testing.T) {
 	t.Parallel()
 
 	// Boilerplate code to make a pruned node.
-	btcdCfg := []string{"--prune=1536"}
-	r, err := rpctest.New(&chaincfg.SimNetParams, nil, btcdCfg, "")
+	pearldCfg := []string{"--prune=1536"}
+	r, err := rpctest.New(&chaincfg.SimNetParams, nil, pearldCfg, "")
 	require.NoError(t, err)
 
 	if err := r.SetUp(false, 0); err != nil {

@@ -7,17 +7,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/cache"
-	"github.com/lightninglabs/neutrino/filterdb"
-	"github.com/lightninglabs/neutrino/pushtx"
-	"github.com/lightninglabs/neutrino/query"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/cache"
+	"github.com/pearl-research-labs/pearl/spv/filterdb"
+	"github.com/pearl-research-labs/pearl/spv/pushtx"
+	"github.com/pearl-research-labs/pearl/spv/query"
 )
 
 var (
@@ -864,12 +864,11 @@ func (s *ChainService) GetBlock(blockHash chainhash.Hash,
 		}
 
 		// If this claims our block but doesn't pass the sanity check,
-		// the peer is trying to bamboozle us.
+		// the peer is trying to bamboozle us. Note that the header
+		// sanity checks can be skipped, already done before.
 		if err := blockchain.CheckBlockSanity(
 			block,
-			// We don't need to check PoW because by the time we get
-			// here, it's been checked during header synchronization
-			s.chainParams.PowLimit,
+			&s.chainParams,
 			s.timeSource,
 		); err != nil {
 			log.Warnf("Invalid block for %s received from %s: %v",

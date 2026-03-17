@@ -1,10 +1,7 @@
 walletdb
 ========
 
-[![Build Status](https://travis-ci.org/btcsuite/btcwallet.png?branch=master)]
-(https://travis-ci.org/btcsuite/btcwallet)
-
-Package walletdb provides a namespaced database interface for btcwallet.
+Package walletdb provides a namespaced database interface for Oyster.
 
 A wallet essentially consists of a multitude of stored data such as private
 and public keys, key derivation bits, pay-to-script-hash scripts, and various
@@ -43,27 +40,29 @@ boltdb project at https://github.com/boltdb/bolt by Ben B. Johnson.
 
 ## Documentation
 
-[![GoDoc](https://godoc.org/github.com/btcsuite/btcwallet/walletdb?status.png)]
-(http://godoc.org/github.com/btcsuite/btcwallet/walletdb)
+[![GoDoc](https://godoc.org/github.com/pearl-research-labs/pearl/wallet/walletdb?status.png)]
+(http://godoc.org/github.com/pearl-research-labs/pearl/wallet/walletdb)
 
 Full `go doc` style documentation for the project can be viewed online without
 installing this package by using the GoDoc site here:
-http://godoc.org/github.com/btcsuite/btcwallet/walletdb
+http://godoc.org/github.com/pearl-research-labs/pearl/wallet/walletdb
 
 You can also view the documentation locally once the package is installed with
 the `godoc` tool by running `godoc -http=":6060"` and pointing your browser to
-http://localhost:6060/pkg/github.com/btcsuite/btcwallet/walletdb
+http://localhost:6060/pkg/github.com/pearl-research-labs/pearl/wallet/walletdb
 
 ## Installation
 
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
+
 ```bash
-$ go get github.com/btcsuite/btcwallet/walletdb
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## Examples
 
 * [Basic Usage Example]
-  (http://godoc.org/github.com/btcsuite/btcwallet/walletdb#example-package--BasicUsage)  
+  (http://godoc.org/github.com/pearl-research-labs/pearl/wallet/walletdb#example-package--BasicUsage)  
   Demonstrates creating a new database, getting a namespace from it, and using a
   managed read-write transaction against the namespace to store and retrieve
   data.

@@ -1,5 +1,5 @@
-// Copyright (c) 2013-2017 The btcsuite developers
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,15 +11,15 @@ import (
 	"math/rand"
 	"sort"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet/txauthor"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txauthor"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txsizes"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 func makeInputSource(eligible []Coin) txauthor.InputSource {
@@ -109,6 +109,22 @@ func (s secretSource) GetKey(addr btcutil.Address) (*btcec.PrivateKey, bool, err
 	return privKey, ma.Compressed(), nil
 }
 
+// GetTapscriptRoot returns the tapscript root hash for the address if it has
+// tapscript commitment, or nil if it's a standard BIP-86 address.
+func (s secretSource) GetTapscriptRoot(addr btcutil.Address) []byte {
+	ma, err := s.Address(s.addrmgrNs, addr)
+	if err != nil {
+		return nil
+	}
+
+	mpka, ok := ma.(waddrmgr.ManagedPubKeyAddress)
+	if !ok {
+		return nil
+	}
+
+	return mpka.TapscriptRoot()
+}
+
 func (s secretSource) GetScript(addr btcutil.Address) ([]byte, error) {
 	ma, err := s.Address(s.addrmgrNs, addr)
 	if err != nil {
@@ -191,6 +207,15 @@ func (w *Wallet) txToOutputs(outputs []*wire.TxOut,
 
 		var inputSource txauthor.InputSource
 		if len(selectedUtxos) > 0 {
+			seen := make(map[wire.OutPoint]struct{}, len(selectedUtxos))
+			for _, op := range selectedUtxos {
+				if _, dup := seen[op]; dup {
+					return errors.New("selected UTXOs contain " +
+						"duplicate values")
+				}
+				seen[op] = struct{}{}
+			}
+
 			eligibleByOutpoint := make(
 				map[wire.OutPoint]wtxmgr.Credit,
 			)
@@ -367,12 +392,12 @@ func (w *Wallet) findEligibleOutputs(dbtx walletdb.ReadTx,
 		// Only include this output if it meets the required number of
 		// confirmations. Coinbase transactions must have reached
 		// maturity before their outputs may be spent.
-		if !confirmed(minconf, output.Height, bs.Height) {
+		if !hasMinConfs(minconf, output.Height, bs.Height) {
 			continue
 		}
 		if output.FromCoinBase {
 			target := int32(w.chainParams.CoinbaseMaturity)
-			if !confirmed(target, output.Height, bs.Height) {
+			if !hasMinConfs(target, output.Height, bs.Height) {
 				continue
 			}
 		}
@@ -436,37 +461,13 @@ func (w *Wallet) addrMgrWithChangeSource(dbtx walletdb.ReadWriteTx,
 		changeKeyScope = &waddrmgr.KeyScopeBIP0086
 	}
 	addrType := waddrmgr.ScopeAddrMap[*changeKeyScope].InternalAddrType
+	if addrType != waddrmgr.TaprootPubKey {
+		return nil, nil, fmt.Errorf("unsupported address type: %v", addrType)
+	}
 
 	// It's possible for the account to have an address schema override, so
 	// prefer that if it exists.
 	addrmgrNs := dbtx.ReadWriteBucket(waddrmgrNamespaceKey)
-	scopeMgr, err := w.Manager.FetchScopedKeyManager(*changeKeyScope)
-	if err != nil {
-		return nil, nil, err
-	}
-	accountInfo, err := scopeMgr.AccountProperties(addrmgrNs, account)
-	if err != nil {
-		return nil, nil, err
-	}
-	if accountInfo.AddrSchema != nil {
-		addrType = accountInfo.AddrSchema.InternalAddrType
-	}
-
-	// Compute the expected size of the script for the change address type.
-	var scriptSize int
-	switch addrType {
-	case waddrmgr.PubKeyHash:
-		scriptSize = txsizes.P2PKHPkScriptSize
-	case waddrmgr.NestedWitnessPubKey:
-		scriptSize = txsizes.NestedP2WPKHPkScriptSize
-	case waddrmgr.WitnessPubKey:
-		scriptSize = txsizes.P2WPKHPkScriptSize
-	case waddrmgr.TaprootPubKey:
-		scriptSize = txsizes.P2TRPkScriptSize
-	default:
-		return nil, nil, fmt.Errorf("unsupported address type: %v",
-			addrType)
-	}
 
 	newChangeScript := func() ([]byte, error) {
 		// Derive the change output script. As a hack to allow spending
@@ -478,11 +479,11 @@ func (w *Wallet) addrMgrWithChangeSource(dbtx walletdb.ReadWriteTx,
 		)
 		if account == waddrmgr.ImportedAddrAccount {
 			changeAddr, err = w.newChangeAddress(
-				addrmgrNs, 0, *changeKeyScope,
+				addrmgrNs, 0, *changeKeyScope, false,
 			)
 		} else {
 			changeAddr, err = w.newChangeAddress(
-				addrmgrNs, account, *changeKeyScope,
+				addrmgrNs, account, *changeKeyScope, false,
 			)
 		}
 		if err != nil {
@@ -492,7 +493,7 @@ func (w *Wallet) addrMgrWithChangeSource(dbtx walletdb.ReadWriteTx,
 	}
 
 	return addrmgrNs, &txauthor.ChangeSource{
-		ScriptSize: scriptSize,
+		ScriptSize: txsizes.P2TRPkScriptSize,
 		NewScript:  newChangeScript,
 	}, nil
 }

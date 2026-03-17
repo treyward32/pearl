@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
-	"github.com/lightninglabs/neutrino/banman"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +24,7 @@ func createTestBanStore(t *testing.T) (banman.Store, func()) {
 	}
 	dbPath := filepath.Join(dbDir, "test.db")
 
-	db, err := walletdb.Create("bdb", dbPath, true, time.Second*10)
+	db, err := walletdb.Create("bdb", dbPath, true, time.Second*10, false)
 	if err != nil {
 		os.RemoveAll(dbDir)
 		t.Fatalf("unable to create db: %v", err)

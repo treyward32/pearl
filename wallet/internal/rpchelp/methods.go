@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 package rpchelp
 
-import "github.com/btcsuite/btcd/btcjson"
+import "github.com/pearl-research-labs/pearl/node/btcjson"
 
 // Common return types.
 var (
@@ -69,6 +69,8 @@ var Methods = []struct {
 	{"listalltransactions", returnsLTRArray},
 	{"renameaccount", nil},
 	{"walletislocked", returnsBool},
+	{"chainsynced", returnsBool},
+	{"getsyncprogress", []interface{}{(*btcjson.GetSyncProgressResult)(nil)}},
 }
 
 // HelpDescs contains the locale-specific help strings along with the locale.

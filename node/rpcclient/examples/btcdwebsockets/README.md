@@ -1,7 +1,7 @@
-btcd Websockets Example
-=======================
+pearld Websockets Example
+=========================
 
-This example shows how to use the rpcclient package to connect to a btcd RPC
+This example shows how to use the rpcclient package to connect to a pearld RPC
 server using TLS-secured websockets, register for block connected and block
 disconnected notifications, and get the current block count.
 
@@ -10,10 +10,10 @@ demonstrate clean shutdown.
 
 ## Running the Example
 
-The first step is to use `go get` to download and install the rpcclient package:
+The first step is to ensure the module is available. From the project root:
 
 ```bash
-$ go get github.com/btcsuite/btcd/rpcclient
+$ go mod download
 ```
 
 Next, modify the `main.go` source to specify the correct RPC username and
@@ -27,8 +27,8 @@ password for the RPC server:
 Finally, navigate to the example's directory and run it with:
 
 ```bash
-$ cd $GOPATH/src/github.com/btcsuite/btcd/rpcclient/examples/btcdwebsockets
-$ go run *.go
+$ cd node/rpcclient/examples/btcdwebsockets
+$ go run .
 ```
 
 ## License

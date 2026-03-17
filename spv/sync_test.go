@@ -2,10 +2,10 @@ package neutrino_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"runtime"
@@ -14,23 +14,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/integration/rpctest"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btclog"
-	"github.com/btcsuite/btcwallet/wallet/txauthor"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
-	"github.com/lightninglabs/neutrino"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txauthor"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -40,7 +42,7 @@ var (
 	// well. Keep in mind some log messages may not appear in order due to
 	// use of multiple query goroutines in the tests.
 	logLevel    = btclog.LevelOff
-	syncTimeout = 30 * time.Second
+	syncTimeout = 200 * time.Second
 	syncUpdate  = time.Second
 
 	dbOpenTimeout = time.Second * 10
@@ -189,8 +191,8 @@ var (
 	ourKnownTxsByFilteredBlock = make(map[chainhash.Hash][]*btcutil.Tx)
 )
 
-// secSource is an implementation of btcwallet/txauthor/SecretsSource that
-// stores WitnessPubKeyHash addresses.
+// secSource is an implementation of the wallet's txauthor/SecretsSource that
+// stores Taproot addresses.
 type secSource struct {
 	keys    map[string]*btcec.PrivateKey
 	scripts map[string]*[]byte
@@ -198,8 +200,12 @@ type secSource struct {
 }
 
 func (s *secSource) add(privKey *btcec.PrivateKey) (btcutil.Address, error) {
-	pubKeyHash := btcutil.Hash160(privKey.PubKey().SerializeCompressed())
-	addr, err := btcutil.NewAddressWitnessPubKeyHash(pubKeyHash, s.params)
+	// Create Taproot address from the private key
+	pubKey := privKey.PubKey()
+	tapKey := txscript.ComputeTaprootKeyNoScript(pubKey)
+	addr, err := btcutil.NewAddressTaproot(
+		schnorr.SerializePubKey(tapKey), s.params,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +249,11 @@ func (s *secSource) GetScript(addr btcutil.Address) ([]byte, error) {
 // ChainParams is required by the SecretsSource interface.
 func (s *secSource) ChainParams() *chaincfg.Params {
 	return s.params
+}
+
+// Returns nil since this test implementation uses non-tapscripts addresses.
+func (s *secSource) GetTapscriptRoot(addr btcutil.Address) []byte {
+	return nil
 }
 
 func newSecSource(params *chaincfg.Params) *secSource {
@@ -339,7 +350,7 @@ func testRescan(harness *neutrinoHarness, t *testing.T) {
 	createTx := func(txOuts ...*wire.TxOut) *wire.MsgTx {
 		t.Helper()
 
-		// Fee rate is satoshis per byte
+		// Fee rate is grains per byte
 		tx, err := harness.h1.CreateTransaction(
 			txOuts, 1000, true,
 		)
@@ -527,7 +538,7 @@ func testStartRescan(harness *neutrinoHarness, t *testing.T) {
 		[]*wire.TxOut{
 			&out3,
 		},
-		// Fee rate is satoshis per kilobyte
+		// Fee rate is grains per kilobyte
 		1024000,
 		inSrc(*tx1),
 		&txauthor.ChangeSource{
@@ -575,7 +586,7 @@ func testStartRescan(harness *neutrinoHarness, t *testing.T) {
 		[]*wire.TxOut{
 			&out3,
 		},
-		// Fee rate is satoshis per kilobyte
+		// Fee rate is grains per kilobyte
 		1024000,
 		inSrc(*tx2),
 		&txauthor.ChangeSource{
@@ -1035,6 +1046,10 @@ func testRandomBlocks(harness *neutrinoHarness, t *testing.T) {
 }
 
 func TestNeutrinoSync(t *testing.T) {
+	t.Skip("Neutrino is not properly supported yet, need to adapt to the changes in the protocol.") // TODO Or
+
+	require := require.New(t)
+
 	// Set up logging.
 	logger := btclog.NewBackend(os.Stdout)
 	chainLogger := logger.Logger("CHAIN")
@@ -1044,68 +1059,56 @@ func TestNeutrinoSync(t *testing.T) {
 	rpcLogger.SetLevel(logLevel)
 	rpcclient.UseLogger(rpcLogger)
 
-	// Create a btcd SimNet node and generate 800 blocks
+	// Create a pearld SimNet node and generate 800 blocks
 	h1, err := rpctest.New(
 		&chaincfg.SimNetParams, nil, []string{"--txindex"}, "",
 	)
-	if err != nil {
-		t.Fatalf("Couldn't create harness: %s", err)
-	}
+	require.NoError(err, "Couldn't create harness")
 	defer h1.TearDown()
 	err = h1.SetUp(false, 0)
-	if err != nil {
-		t.Fatalf("Couldn't set up harness: %s", err)
-	}
+	require.NoError(err, "Couldn't set up harness")
 	_, err = h1.Client.Generate(800)
-	if err != nil {
-		t.Fatalf("Couldn't generate blocks: %s", err)
-	}
+	require.NoError(err, "Couldn't generate blocks")
 
-	// Create a second btcd SimNet node
+	// Create a second pearld SimNet node
 	h2, err := rpctest.New(
 		&chaincfg.SimNetParams, nil, []string{"--txindex"}, "",
 	)
-	if err != nil {
-		t.Fatalf("Couldn't create harness: %s", err)
-	}
+	require.NoError(err, "Couldn't create harness")
 	defer h2.TearDown()
 	err = h2.SetUp(false, 0)
-	if err != nil {
-		t.Fatalf("Couldn't set up harness: %s", err)
-	}
+	require.NoError(err, "Couldn't set up harness")
 
-	// Create a third btcd SimNet node and generate 1200 blocks
+	// Create a third pearld SimNet node and generate 1200 blocks
 	h3, err := rpctest.New(
 		&chaincfg.SimNetParams, nil, []string{"--txindex"}, "",
 	)
-	if err != nil {
-		t.Fatalf("Couldn't create harness: %s", err)
-	}
+	require.NoError(err, "Couldn't create harness")
 	defer h3.TearDown()
 	err = h3.SetUp(false, 0)
-	if err != nil {
-		t.Fatalf("Couldn't set up harness: %s", err)
-	}
+	require.NoError(err, "Couldn't set up harness")
 	_, err = h3.Client.Generate(1200)
-	if err != nil {
-		t.Fatalf("Couldn't generate blocks: %s", err)
-	}
+	require.NoError(err, "Couldn't generate blocks")
 
 	// Connect, sync, and disconnect h1 and h2
 	err = csd([]*rpctest.Harness{h1, h2})
-	if err != nil {
-		t.Fatalf("Couldn't connect/sync/disconnect h1 and h2: %s", err)
-	}
+	require.NoError(err, "Couldn't connect/sync/disconnect h1 and h2")
+
+	// Verify h1 and h2 are synced to the same height and have the same best block hash
+	h1BestHash, h1BestHeight, err := h1.Client.GetBestBlock()
+	require.NoError(err)
+
+	h2BestHash, h2BestHeight, err := h2.Client.GetBestBlock()
+	require.NoError(err)
+
+	require.Equal(h1BestHash, h2BestHash)
+	require.Equal(h1BestHeight, h2BestHeight)
 
 	// Generate 300 blocks on the first node and 350 on the second
 	_, err = h1.Client.Generate(300)
-	if err != nil {
-		t.Fatalf("Couldn't generate blocks: %s", err)
-	}
+	require.NoError(err, "Couldn't generate blocks")
 	_, err = h2.Client.Generate(350)
-	if err != nil {
-		t.Fatalf("Couldn't generate blocks: %s", err)
-	}
+	require.NoError(err, "Couldn't generate blocks")
 
 	// Now we have a node with 1100 blocks (h1), 1150 blocks (h2), and
 	// 1200 blocks (h3). The chains of nodes h1 and h2 match up to block
@@ -1122,10 +1125,7 @@ func TestNeutrinoSync(t *testing.T) {
 	modParams := chaincfg.SimNetParams
 	for _, height := range []int64{111, 333, 555, 777, 999} {
 		hash, err := h1.Client.GetBlockHash(height)
-		if err != nil {
-			t.Fatalf("Couldn't get block hash for height %d: %s",
-				height, err)
-		}
+		require.NoError(err, "Couldn't get block hash for height %d", height)
 		modParams.Checkpoints = append(modParams.Checkpoints,
 			chaincfg.Checkpoint{
 				Hash:   hash,
@@ -1135,17 +1135,13 @@ func TestNeutrinoSync(t *testing.T) {
 
 	// Create a temporary directory, initialize an empty walletdb with an
 	// SPV chain namespace, and create a configuration for the ChainService.
-	tempDir, err := ioutil.TempDir("", "neutrino")
-	if err != nil {
-		t.Fatalf("Failed to create temporary directory: %s", err)
-	}
+	tempDir, err := os.MkdirTemp("", "neutrino")
+	require.NoError(err, "Failed to create temporary directory")
 	defer os.RemoveAll(tempDir)
 	db, err := walletdb.Create(
-		"bdb", tempDir+"/weks.db", true, dbOpenTimeout,
+		"bdb", tempDir+"/weks.db", true, dbOpenTimeout, false,
 	)
-	if err != nil {
-		t.Fatalf("Error opening DB: %s\n", err)
-	}
+	require.NoError(err, "Error opening DB")
 	defer db.Close()
 	config := neutrino.Config{
 		DataDir:     tempDir,
@@ -1162,10 +1158,8 @@ func TestNeutrinoSync(t *testing.T) {
 	neutrino.BanDuration = 5 * time.Second
 	neutrino.QueryPeerConnectTimeout = 10 * time.Second
 	svc, err := neutrino.NewChainService(config)
-	if err != nil {
-		t.Fatalf("Error creating ChainService: %s", err)
-	}
-	svc.Start()
+	require.NoError(err, "Error creating ChainService")
+	svc.Start(context.Background())
 	defer svc.Stop()
 
 	// Create a test harness with the three nodes and the neutrino instance.

@@ -10,20 +10,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/query"
 	"github.com/lightningnetwork/lnd/ticker"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/query"
 	"github.com/stretchr/testify/require"
 )
 
 var (
 	addrCounter int32 // Increased atomically.
 
-	chainParams = chaincfg.RegressionNetParams
+	chainParams = chaincfg.SimNetParams
 )
 
 func nextAddr() string {

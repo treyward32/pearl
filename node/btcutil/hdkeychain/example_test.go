@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,9 +7,23 @@ package hdkeychain_test
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/txscript"
 )
+
+func TaprootAddress(key *hdkeychain.ExtendedKey, net *chaincfg.Params) (*btcutil.AddressTaproot, error) {
+	pubKey, err := key.ECPubKey()
+	if err != nil {
+		return nil, err
+	}
+	tapKey := txscript.ComputeTaprootKeyNoScript(pubKey)
+	tapKeyBytes := schnorr.SerializePubKey(tapKey)
+
+	return btcutil.NewAddressTaproot(tapKeyBytes, net)
+}
 
 // This example demonstrates how to generate a cryptographically random seed
 // then use it to create a new master node (extended key).
@@ -57,8 +71,7 @@ func Example_defaultWalletLayout() {
 	// and be decrypted or generated as the NewMaster example shows, but
 	// for the purposes of this example, the private extended key for the
 	// master node is being hard coded here.
-	master := "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jP" +
-		"PqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+	master := "zprvAWgYBBk7JR8GjzqSzmunMCS7dAbwpYTCs1YUMDXqduMA5JFHZ3iX5s2UkAR6vBdcCYYa1S5o1fVLrKsrnpCQ4WpUd6aVUWP1bS2Yy5DoaKv"
 
 	// Start by getting an extended key instance for the master node.
 	// This gives the path:
@@ -117,13 +130,13 @@ func Example_defaultWalletLayout() {
 	}
 
 	// Get and show the address associated with the extended keys for the
-	// main bitcoin	network.
-	acct0ExtAddr, err := acct0Ext10.Address(&chaincfg.MainNetParams)
+	// main Pearl network.
+	acct0ExtAddr, err := TaprootAddress(acct0Ext10, &chaincfg.MainNetParams)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	acct0IntAddr, err := acct0Int0.Address(&chaincfg.MainNetParams)
+	acct0IntAddr, err := TaprootAddress(acct0Int0, &chaincfg.MainNetParams)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -132,8 +145,8 @@ func Example_defaultWalletLayout() {
 	fmt.Println("Account 0 Internal Address 0:", acct0IntAddr)
 
 	// Output:
-	// Account 0 External Address 10: 1HVccubUT8iKTapMJ5AnNA4sLRN27xzQ4F
-	// Account 0 Internal Address 0: 1J5rebbkQaunJTUoNVREDbeB49DqMNFFXk
+	// Account 0 External Address 10: prl1p48eeyql92n6vy2xfwqsnl5w92vz3x35qcvlqdr8x43rcm9nxg5kqwkcp30
+	// Account 0 Internal Address 0: prl1prrw760xke47jvnz30yc27pn7npkghquxrsj93xze84v5v8m9sdksfnsh6e
 }
 
 // This example demonstrates the audits use case in BIP0032.
@@ -153,8 +166,7 @@ func Example_audits() {
 	// and be decrypted or generated as the NewMaster example shows, but
 	// for the purposes of this example, the private extended key for the
 	// master node is being hard coded here.
-	master := "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jP" +
-		"PqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi"
+	master := "zprvAWgYBBk7JR8GjzqSzmunMCS7dAbwpYTCs1YUMDXqduMA5JFHZ3iX5s2UkAR6vBdcCYYa1S5o1fVLrKsrnpCQ4WpUd6aVUWP1bS2Yy5DoaKv"
 
 	// Start by getting an extended key instance for the master node.
 	// This gives the path:
@@ -178,5 +190,5 @@ func Example_audits() {
 	fmt.Println("Audit key N(m/*):", masterPubKey)
 
 	// Output:
-	// Audit key N(m/*): xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8
+	// Audit key N(m/*): zpub6jftahH18ngZxUuv6oSniLNrBCSSE1B4EEU59bwTCEt8x6aS6b2mdfLxbS4QS53g85SWWP6wexqeer516433gYpZQoJie2tcMYdJ1SYYYAL
 }

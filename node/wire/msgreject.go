@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // RejectCode represents a numeric value by which a remote peer indicates
@@ -48,7 +48,7 @@ func (code RejectCode) String() string {
 	return fmt.Sprintf("Unknown RejectCode (%d)", uint8(code))
 }
 
-// MsgReject implements the Message interface and represents a bitcoin reject
+// MsgReject implements the Message interface and represents a reject
 // message.
 //
 // This message was not added until protocol version RejectVersion.
@@ -71,15 +71,9 @@ type MsgReject struct {
 	Hash chainhash.Hash
 }
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // This is part of the Message interface implementation.
-func (msg *MsgReject) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	if pver < RejectVersion {
-		str := fmt.Sprintf("reject message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgReject.BtcDecode", str)
-	}
-
+func (msg *MsgReject) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	// Command that was rejected.
 	buf := binarySerializer.Borrow()
 	defer binarySerializer.Return(buf)
@@ -116,15 +110,9 @@ func (msg *MsgReject) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) e
 	return nil
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
-func (msg *MsgReject) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	if pver < RejectVersion {
-		str := fmt.Sprintf("reject message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgReject.BtcEncode", str)
-	}
-
+func (msg *MsgReject) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	// Command that was rejected.
 	buf := binarySerializer.Borrow()
 	defer binarySerializer.Return(buf)
@@ -168,20 +156,13 @@ func (msg *MsgReject) Command() string {
 // MaxPayloadLength returns the maximum length the payload can be for the
 // receiver.  This is part of the Message interface implementation.
 func (msg *MsgReject) MaxPayloadLength(pver uint32) uint32 {
-	plen := uint32(0)
-	// The reject message did not exist before protocol version
-	// RejectVersion.
-	if pver >= RejectVersion {
-		// Unfortunately the bitcoin protocol does not enforce a sane
-		// limit on the length of the reason, so the max payload is the
-		// overall maximum message payload.
-		plen = MaxMessagePayload
-	}
-
-	return plen
+	// Unfortunately the wire protocol does not enforce a sane
+	// limit on the length of the reason, so the max payload is the
+	// overall maximum message payload.
+	return MaxMessagePayload
 }
 
-// NewMsgReject returns a new bitcoin reject message that conforms to the
+// NewMsgReject returns a new reject message that conforms to the
 // Message interface.  See MsgReject for details.
 func NewMsgReject(command string, code RejectCode, reason string) *MsgReject {
 	return &MsgReject{

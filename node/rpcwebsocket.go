@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2017 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -20,15 +20,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/websocket"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -297,29 +297,6 @@ func newWSClientFilter(addresses []string, unspentOutPoints []wire.OutPoint, par
 //
 // NOTE: This extension was ported from github.com/decred/dcrd
 func (f *wsClientFilter) addAddress(a btcutil.Address) {
-	switch a := a.(type) {
-	case *btcutil.AddressPubKeyHash:
-		f.pubKeyHashes[*a.Hash160()] = struct{}{}
-		return
-	case *btcutil.AddressScriptHash:
-		f.scriptHashes[*a.Hash160()] = struct{}{}
-		return
-	case *btcutil.AddressPubKey:
-		serializedPubKey := a.ScriptAddress()
-		switch len(serializedPubKey) {
-		case 33: // compressed
-			var compressedPubKey [33]byte
-			copy(compressedPubKey[:], serializedPubKey)
-			f.compressedPubKeys[compressedPubKey] = struct{}{}
-			return
-		case 65: // uncompressed
-			var uncompressedPubKey [65]byte
-			copy(uncompressedPubKey[:], serializedPubKey)
-			f.uncompressedPubKeys[uncompressedPubKey] = struct{}{}
-			return
-		}
-	}
-
 	f.otherAddresses[a.EncodeAddress()] = struct{}{}
 }
 
@@ -343,35 +320,6 @@ func (f *wsClientFilter) addAddressStr(s string, params *chaincfg.Params) {
 //
 // NOTE: This extension was ported from github.com/decred/dcrd
 func (f *wsClientFilter) existsAddress(a btcutil.Address) bool {
-	switch a := a.(type) {
-	case *btcutil.AddressPubKeyHash:
-		_, ok := f.pubKeyHashes[*a.Hash160()]
-		return ok
-	case *btcutil.AddressScriptHash:
-		_, ok := f.scriptHashes[*a.Hash160()]
-		return ok
-	case *btcutil.AddressPubKey:
-		serializedPubKey := a.ScriptAddress()
-		switch len(serializedPubKey) {
-		case 33: // compressed
-			var compressedPubKey [33]byte
-			copy(compressedPubKey[:], serializedPubKey)
-			_, ok := f.compressedPubKeys[compressedPubKey]
-			if !ok {
-				_, ok = f.pubKeyHashes[*a.AddressPubKeyHash().Hash160()]
-			}
-			return ok
-		case 65: // uncompressed
-			var uncompressedPubKey [65]byte
-			copy(uncompressedPubKey[:], serializedPubKey)
-			_, ok := f.uncompressedPubKeys[uncompressedPubKey]
-			if !ok {
-				_, ok = f.pubKeyHashes[*a.AddressPubKeyHash().Hash160()]
-			}
-			return ok
-		}
-	}
-
 	_, ok := f.otherAddresses[a.EncodeAddress()]
 	return ok
 }
@@ -381,29 +329,6 @@ func (f *wsClientFilter) existsAddress(a btcutil.Address) bool {
 //
 // NOTE: This extension was ported from github.com/decred/dcrd
 func (f *wsClientFilter) removeAddress(a btcutil.Address) {
-	switch a := a.(type) {
-	case *btcutil.AddressPubKeyHash:
-		delete(f.pubKeyHashes, *a.Hash160())
-		return
-	case *btcutil.AddressScriptHash:
-		delete(f.scriptHashes, *a.Hash160())
-		return
-	case *btcutil.AddressPubKey:
-		serializedPubKey := a.ScriptAddress()
-		switch len(serializedPubKey) {
-		case 33: // compressed
-			var compressedPubKey [33]byte
-			copy(compressedPubKey[:], serializedPubKey)
-			delete(f.compressedPubKeys, compressedPubKey)
-			return
-		case 65: // uncompressed
-			var uncompressedPubKey [65]byte
-			copy(uncompressedPubKey[:], serializedPubKey)
-			delete(f.uncompressedPubKeys, uncompressedPubKey)
-			return
-		}
-	}
-
 	delete(f.otherAddresses, a.EncodeAddress())
 }
 
@@ -694,7 +619,7 @@ func (*wsNotificationManager) notifyBlockConnected(clients map[chan struct{}]*ws
 
 	// Notify interested websocket clients about the connected block.
 	ntfn := btcjson.NewBlockConnectedNtfn(block.Hash().String(), block.Height(),
-		block.MsgBlock().Header.Timestamp.Unix())
+		block.MsgBlock().BlockHeader().Timestamp.Unix())
 	marshalledJSON, err := btcjson.MarshalCmd(btcjson.RpcVersion1, nil, ntfn)
 	if err != nil {
 		rpcsLog.Errorf("Failed to marshal block connected notification: "+
@@ -718,7 +643,7 @@ func (*wsNotificationManager) notifyBlockDisconnected(clients map[chan struct{}]
 
 	// Notify interested websocket clients about the disconnected block.
 	ntfn := btcjson.NewBlockDisconnectedNtfn(block.Hash().String(),
-		block.Height(), block.MsgBlock().Header.Timestamp.Unix())
+		block.Height(), block.MsgBlock().BlockHeader().Timestamp.Unix())
 	marshalledJSON, err := btcjson.MarshalCmd(btcjson.RpcVersion1, nil, ntfn)
 	if err != nil {
 		rpcsLog.Errorf("Failed to marshal block disconnected "+
@@ -738,7 +663,7 @@ func (m *wsNotificationManager) notifyFilteredBlockConnected(clients map[chan st
 	// Create the common portion of the notification that is the same for
 	// every client.
 	var w bytes.Buffer
-	err := block.MsgBlock().Header.Serialize(&w)
+	err := block.MsgBlock().BlockHeader().Serialize(&w)
 	if err != nil {
 		rpcsLog.Errorf("Failed to serialize header for filtered block "+
 			"connected notification: %v", err)
@@ -788,7 +713,7 @@ func (*wsNotificationManager) notifyFilteredBlockDisconnected(clients map[chan s
 
 	// Notify interested websocket clients about the disconnected block.
 	var w bytes.Buffer
-	err := block.MsgBlock().Header.Serialize(&w)
+	err := block.MsgBlock().BlockHeader().Serialize(&w)
 	if err != nil {
 		rpcsLog.Errorf("Failed to serialize header for filtered block "+
 			"disconnected notification: %v", err)
@@ -830,7 +755,7 @@ func (m *wsNotificationManager) notifyForNewTx(clients map[chan struct{}]*wsClie
 		amount += txOut.Value
 	}
 
-	ntfn := btcjson.NewTxAcceptedNtfn(txHashStr, btcutil.Amount(amount).ToBTC())
+	ntfn := btcjson.NewTxAcceptedNtfn(txHashStr, btcutil.Amount(amount).ToPRL())
 	marshalledJSON, err := btcjson.MarshalCmd(btcjson.RpcVersion1, nil, ntfn)
 	if err != nil {
 		rpcsLog.Errorf("Failed to marshal tx notification: %s", err.Error())
@@ -971,7 +896,7 @@ func blockDetails(block *btcutil.Block, txIndex int) *btcjson.BlockDetails {
 		Height: block.Height(),
 		Hash:   block.Hash().String(),
 		Index:  txIndex,
-		Time:   block.MsgBlock().Header.Timestamp.Unix(),
+		Time:   block.MsgBlock().BlockHeader().Timestamp.Unix(),
 	}
 }
 
@@ -2534,7 +2459,7 @@ func handleRescanBlocks(wsc *wsClient, icmd interface{}) (interface{}, error) {
 				Message: "Failed to fetch block: " + err.Error(),
 			}
 		}
-		if lastBlockHash != nil && block.MsgBlock().Header.PrevBlock != *lastBlockHash {
+		if lastBlockHash != nil && block.MsgBlock().BlockHeader().PrevBlock != *lastBlockHash {
 			return nil, &btcjson.RPCError{
 				Code: btcjson.ErrRPCInvalidParameter,
 				Message: fmt.Sprintf("Block %v is not a child of %v",
@@ -2594,7 +2519,7 @@ func recoverFromReorg(chain *blockchain.BlockChain, minBlock, maxBlock int32,
 // descendantBlock returns the appropriate JSON-RPC error if a current block
 // fetched during a reorganize is not a direct child of the parent block hash.
 func descendantBlock(prevHash *chainhash.Hash, curBlock *btcutil.Block) error {
-	curHash := &curBlock.MsgBlock().Header.PrevBlock
+	curHash := &curBlock.MsgBlock().BlockHeader().PrevBlock
 	if !prevHash.IsEqual(curHash) {
 		rpcsLog.Errorf("Stopping rescan for reorged block %v "+
 			"(replaced by block %v)", prevHash, curHash)
@@ -2675,15 +2600,6 @@ fetchRange:
 				n.RegisterTxOutAddressRequests(wsc, cmd.Addresses)
 			}
 			close(pauseGuard)
-			if err != nil {
-				rpcsLog.Errorf("Error fetching best block "+
-					"hash: %v", err)
-				return nil, nil, &btcjson.RPCError{
-					Code: btcjson.ErrRPCDatabase,
-					Message: "Database error: " +
-						err.Error(),
-				}
-			}
 			if again {
 				continue
 			}
@@ -2772,7 +2688,7 @@ fetchRange:
 
 			n := btcjson.NewRescanProgressNtfn(
 				hashList[i].String(), blk.Height(),
-				blk.MsgBlock().Header.Timestamp.Unix(),
+				blk.MsgBlock().BlockHeader().Timestamp.Unix(),
 			)
 			mn, err := btcjson.MarshalCmd(btcjson.RpcVersion1, nil, n)
 			if err != nil {
@@ -2908,7 +2824,7 @@ func handleRescan(wsc *wsClient, icmd interface{}) (interface{}, error) {
 		}
 	}
 
-	// Notify websocket client of the finished rescan.  Due to how btcd
+	// Notify websocket client of the finished rescan.  Due to how pearld
 	// asynchronously queues notifications to not block calling code,
 	// there is no guarantee that any of the notifications created during
 	// rescan (such as rescanprogress, recvtx and redeemingtx) will be
@@ -2917,7 +2833,7 @@ func handleRescan(wsc *wsClient, icmd interface{}) (interface{}, error) {
 	// been sent.
 	n := btcjson.NewRescanFinishedNtfn(
 		lastBlockHash.String(), lastBlock.Height(),
-		lastBlock.MsgBlock().Header.Timestamp.Unix(),
+		lastBlock.MsgBlock().BlockHeader().Timestamp.Unix(),
 	)
 	if mn, err := btcjson.MarshalCmd(btcjson.RpcVersion1, nil, n); err != nil {
 		rpcsLog.Errorf("Failed to marshal rescan finished "+

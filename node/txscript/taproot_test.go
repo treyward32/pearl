@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2022 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,12 +12,12 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
 	secp "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,11 +38,11 @@ var (
 		hdkeychain.HardenedKeyStart,
 	}
 	expectedExternalAddresses = []string{
-		"bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
-		"bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh",
+		"prl1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqw2cjwh",
+		"prl1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0wasa64ncr",
 	}
 	expectedInternalAddresses = []string{
-		"bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7",
+		"prl1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqksfxq2",
 	}
 )
 
@@ -293,13 +293,15 @@ func TestTapscriptCommitmentVerification(t *testing.T) {
 	// make from 0 to 1 leaf
 	// ensure verifies properly
 	testCases := []struct {
+		treeMutateFunc func(*IndexedTapScriptTree)
+
+		ctrlBlockMutateFunc func(*ControlBlock)
+
 		numLeaves int
 
 		valid bool
 
-		treeMutateFunc func(*IndexedTapScriptTree)
-
-		ctrlBlockMutateFunc func(*ControlBlock)
+		expectedErr ErrorCode
 	}{
 		// A valid merkle proof of a single leaf.
 		{
@@ -322,11 +324,13 @@ func TestTapscriptCommitmentVerification(t *testing.T) {
 		// An invalid merkle proof, we modify the last byte of one of
 		// the leaves.
 		{
-			numLeaves: 4,
-			valid:     false,
+			numLeaves:   4,
+			valid:       false,
+			expectedErr: ErrTaprootMerkleProofInvalid,
 			treeMutateFunc: func(t *IndexedTapScriptTree) {
 				for _, leafProof := range t.LeafMerkleProofs {
-					leafProof.InclusionProof[0] ^= 1
+					proofLen := len(leafProof.InclusionProof)
+					leafProof.InclusionProof[proofLen-1] ^= 1
 				}
 			},
 		},
@@ -335,8 +339,9 @@ func TestTapscriptCommitmentVerification(t *testing.T) {
 			// An invalid series of proofs, we modify the control
 			// block to not match the parity of the final output
 			// key commitment.
-			numLeaves: 2,
-			valid:     false,
+			numLeaves:   2,
+			valid:       false,
+			expectedErr: ErrTaprootOutputKeyParityMismatch,
 			ctrlBlockMutateFunc: func(c *ControlBlock) {
 				c.OutputKeyYIsOdd = !c.OutputKeyYIsOdd
 			},
@@ -390,6 +395,15 @@ func TestTapscriptCommitmentVerification(t *testing.T) {
 					t.Fatalf("test case mismatch: expected "+
 						"valid=%v, got valid=%v", testCase.valid,
 						valid)
+				}
+
+				if !valid {
+					if !IsErrorCode(err, testCase.expectedErr) {
+						t.Fatalf("expected error "+
+							"code %v, got %v",
+							testCase.expectedErr,
+							err)
+					}
 				}
 			}
 

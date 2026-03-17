@@ -14,75 +14,75 @@ func TestMatchErrStr(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name        string
-		bitcoindErr error
-		matchStr    string
-		matched     bool
+		name      string
+		compatErr error
+		matchStr  string
+		matched   bool
 	}{
 		{
-			name:        "error without dashes",
-			bitcoindErr: errors.New("missing input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error without dashes",
+			compatErr: errors.New("missing input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str without dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "match str without dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "error with dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error with dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str with dashes",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "missing-input",
-			matched:     true,
+			name:      "match str with dashes",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "missing-input",
+			matched:   true,
 		},
 		{
-			name:        "error with title case and dash",
-			bitcoindErr: errors.New("Missing-Input"),
-			matchStr:    "missing input",
-			matched:     true,
+			name:      "error with title case and dash",
+			compatErr: errors.New("Missing-Input"),
+			matchStr:  "missing input",
+			matched:   true,
 		},
 		{
-			name:        "match str with title case and dash",
-			bitcoindErr: errors.New("missing-input"),
-			matchStr:    "Missing-Input",
-			matched:     true,
+			name:      "match str with title case and dash",
+			compatErr: errors.New("missing-input"),
+			matchStr:  "Missing-Input",
+			matched:   true,
 		},
 		{
-			name:        "unmatched error",
-			bitcoindErr: errors.New("missing input"),
-			matchStr:    "missingorspent",
-			matched:     false,
+			name:      "unmatched error",
+			compatErr: errors.New("missing input"),
+			matchStr:  "missingorspent",
+			matched:   false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched := matchErrStr(tc.bitcoindErr, tc.matchStr)
+			matched := matchErrStr(tc.compatErr, tc.matchStr)
 			require.Equal(t, tc.matched, matched)
 		})
 	}
 }
 
 // TestMapRPCErr checks that `MapRPCErr` can correctly map a given error to
-// the corresponding error in the `BtcdErrMap` or `BitcoindErrors` map.
+// the corresponding error in the `PearldErrMap` or `compatErrors` map.
 func TestMapRPCErr(t *testing.T) {
 	t.Parallel()
 
 	require := require.New(t)
 
-	// Get all known bitcoind errors.
-	bitcoindErrors := make([]error, 0, errSentinel)
+	// Get all known compatible fork errors.
+	compatErrors := make([]error, 0, errSentinel)
 	for i := uint32(0); i < uint32(errSentinel); i++ {
-		err := BitcoindRPCErr(i)
-		bitcoindErrors = append(bitcoindErrors, err)
+		err := CompatRPCErr(i)
+		compatErrors = append(compatErrors, err)
 	}
 
 	// An unknown error should be mapped to ErrUndefined.
@@ -91,30 +91,30 @@ func TestMapRPCErr(t *testing.T) {
 	require.ErrorIs(err, ErrUndefined)
 
 	// A known error should be mapped to the corresponding error in the
-	// `BtcdErrMap` or `bitcoindErrors` map.
-	for btcdErrStr, mappedErr := range BtcdErrMap {
-		err := MapRPCErr(errors.New(btcdErrStr))
+	// `PearldErrMap` or `compatErrors` map.
+	for pearldErrStr, mappedErr := range PearldErrMap {
+		err := MapRPCErr(errors.New(pearldErrStr))
 		require.ErrorIs(err, mappedErr)
 
 		err = MapRPCErr(mappedErr)
 		require.ErrorIs(err, mappedErr)
 	}
 
-	for _, bitcoindErr := range bitcoindErrors {
-		err = MapRPCErr(bitcoindErr)
-		require.ErrorIs(err, bitcoindErr)
+	for _, compatErr := range compatErrors {
+		err = MapRPCErr(compatErr)
+		require.ErrorIs(err, compatErr)
 	}
 }
 
-// TestBitcoindErrorSentinel checks that all defined BitcoindRPCErr errors are
+// TestCompatErrorSentinel checks that all defined CompatRPCErr errors are
 // added to the method `Error`.
-func TestBitcoindErrorSentinel(t *testing.T) {
+func TestCompatErrorSentinel(t *testing.T) {
 	t.Parallel()
 
 	rt := require.New(t)
 
 	for i := uint32(0); i < uint32(errSentinel); i++ {
-		err := BitcoindRPCErr(i)
+		err := CompatRPCErr(i)
 		rt.NotEqualf(err.Error(), "unknown error", "error code %d is "+
 			"not defined, make sure to update it inside the Error "+
 			"method", i)

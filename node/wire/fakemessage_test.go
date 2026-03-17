@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -15,19 +15,19 @@ type fakeMessage struct {
 	forceLenErr    bool
 }
 
-// BtcDecode doesn't do anything.  It just satisfies the wire.Message
+// PrlDecode doesn't do anything.  It just satisfies the wire.Message
 // interface.
-func (msg *fakeMessage) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
+func (msg *fakeMessage) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	return nil
 }
 
-// BtcEncode writes the payload field of the fake message or forces an error
+// PrlEncode writes the payload field of the fake message or forces an error
 // if the forceEncodeErr flag of the fake message is set.  It also satisfies the
 // wire.Message interface.
-func (msg *fakeMessage) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
+func (msg *fakeMessage) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	if msg.forceEncodeErr {
 		err := &MessageError{
-			Func:        "fakeMessage.BtcEncode",
+			Func:        "fakeMessage.PrlEncode",
 			Description: "intentional error",
 		}
 		return err

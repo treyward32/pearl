@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2018 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -23,12 +23,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // AddrManager provides a concurrency safe address manager for caching potential
-// peers on the bitcoin network.
+// peers on the Pearl network.
 type AddrManager struct {
 	mtx            sync.RWMutex
 	peersFile      string
@@ -1202,7 +1202,7 @@ func (a *AddrManager) GetBestLocalAddress(remoteAddr *wire.NetAddressV2) *wire.N
 	return bestAddress
 }
 
-// New returns a new bitcoin address manager.
+// New returns a new address manager.
 // Use Start to begin processing asynchronous address updates.
 func New(dataDir string, lookupFunc func(string) ([]net.IP, error)) *AddrManager {
 	am := AddrManager{

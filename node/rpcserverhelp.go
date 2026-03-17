@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2017 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
 )
 
 // helpDescsEnUS defines the English descriptions used for the help strings.
@@ -21,7 +21,7 @@ var helpDescsEnUS = map[string]string{
 		"The levelspec can either a debug level or of the form:\n" +
 		"<subsystem>=<level>,<subsystem2>=<level2>,...\n" +
 		"The valid debug levels are trace, debug, info, warn, error, and critical.\n" +
-		"The valid subsystems are AMGR, ADXR, BCDB, BMGR, BTCD, CHAN, DISC, PEER, RPCS, SCRP, SRVR, and TXMP.\n" +
+		"The valid subsystems are AMGR, ADXR, BCDB, BMGR, PRLD, CHAN, DISC, PEER, RPCS, SCRP, SRVR, and TXMP.\n" +
 		"Finally the keyword 'show' will return a list of the available subsystems.",
 	"debuglevel-levelspec":   "The debug level(s) to use or the keyword 'show'",
 	"debuglevel--condition0": "levelspec!=show",
@@ -52,7 +52,7 @@ var helpDescsEnUS = map[string]string{
 	"createrawtransaction-amounts":        "JSON object with the destination addresses as keys and amounts as values",
 	"createrawtransaction-amounts--key":   "address",
 	"createrawtransaction-amounts--value": "n.nnn",
-	"createrawtransaction-amounts--desc":  "The destination address as the key and the amount in BTC as the value",
+	"createrawtransaction-amounts--desc":  "The destination address as the key and the amount in PRL as the value",
 	"createrawtransaction-locktime":       "Locktime value; a non-zero value will also locktime-activate the inputs",
 	"createrawtransaction--result0":       "Hex-encoded bytes of the serialized transaction",
 
@@ -86,11 +86,11 @@ var helpDescsEnUS = map[string]string{
 	"scriptpubkeyresult-hex":       "Hex-encoded bytes of the script",
 	"scriptpubkeyresult-reqSigs":   "(DEPRECATED) The number of required signatures",
 	"scriptpubkeyresult-type":      "The type of the script (e.g. 'pubkeyhash')",
-	"scriptpubkeyresult-address":   "The bitcoin address associated with this script (only if a well-defined address exists)",
-	"scriptpubkeyresult-addresses": "(DEPRECATED) The bitcoin addresses associated with this script",
+	"scriptpubkeyresult-address":   "The address associated with this script (only if a well-defined address exists)",
+	"scriptpubkeyresult-addresses": "(DEPRECATED) The addresses associated with this script",
 
 	// Vout help.
-	"vout-value":        "The amount in BTC",
+	"vout-value":        "The amount in PRL",
 	"vout-n":            "The index of this transaction output",
 	"vout-scriptPubKey": "The public key script used to pay coins as a JSON object",
 
@@ -109,8 +109,8 @@ var helpDescsEnUS = map[string]string{
 	"decodescriptresult-asm":       "Disassembly of the script",
 	"decodescriptresult-reqSigs":   "(DEPRECATED) The number of required signatures",
 	"decodescriptresult-type":      "The type of the script (e.g. 'pubkeyhash')",
-	"decodescriptresult-address":   "The bitcoin address associated with this script (only if a well-defined address exists)",
-	"decodescriptresult-addresses": "(DEPRECATED) The bitcoin addresses associated with this script",
+	"decodescriptresult-address":   "The address associated with this script (only if a well-defined address exists)",
+	"decodescriptresult-addresses": "(DEPRECATED) The addresses associated with this script",
 	"decodescriptresult-p2sh":      "The script hash for use in pay-to-script-hash transactions (only present if the provided redeem script is not already a pay-to-script-hash script)",
 
 	// DecodeScriptCmd help.
@@ -118,12 +118,12 @@ var helpDescsEnUS = map[string]string{
 	"decodescript-hexscript": "Hex-encoded script",
 
 	// EstimateFeeCmd help.
-	"estimatefee--synopsis": "Estimate the fee per kilobyte in satoshis " +
+	"estimatefee--synopsis": "Estimate the fee per kilobyte in grains " +
 		"required for a transaction to be mined before a certain number of " +
 		"blocks have been generated.",
 	"estimatefee-numblocks": "The maximum number of blocks which can be " +
 		"generated before the transaction is mined.",
-	"estimatefee--result0": "Estimated fee per kilobyte in satoshis for a block to " +
+	"estimatefee--result0": "Estimated fee per kilobyte in grains for a block to " +
 		"be mined in the next NumBlocks blocks.",
 
 	// GenerateCmd help
@@ -186,7 +186,7 @@ var helpDescsEnUS = map[string]string{
 	"getblockchaininforesult-size_on_disk":         "The estimated size of the block and undo files on disk",
 	"getblockchaininforesult-initialblockdownload": "Estimate of whether this node is in Initial Block Download mode",
 	"getblockchaininforesult-softforks":            "The status of the super-majority soft-forks",
-	"getblockchaininforesult-unifiedsoftforks":     "The status of the super-majority soft-forks used by bitcoind on or after v0.19.0",
+	"getblockchaininforesult-unifiedsoftforks":     "The status of the super-majority soft-forks (unified format)",
 
 	// SoftForkDescription help.
 	"softforkdescription-reject":  "The current activation status of the softfork",
@@ -202,10 +202,10 @@ var helpDescsEnUS = map[string]string{
 	"softforks-bip9_softforks--desc":  "The status of any defined BIP0009 soft-fork deployments",
 
 	// UnifiedSoftForks help.
-	"unifiedsoftforks-softforks":        "The status of the super-majority soft-forks used by bitcoind on or after v0.19.0",
+	"unifiedsoftforks-softforks":        "The status of the super-majority soft-forks (unified format)",
 	"unifiedsoftforks-softforks--key":   "softforks",
-	"unifiedsoftforks-softforks--value": "An object describing an active softfork deployment used by bitcoind on or after v0.19.0",
-	"unifiedsoftforks-softforks--desc":  "JSON object describing an active softfork deployment used by bitcoind on or after v0.19.0",
+	"unifiedsoftforks-softforks--value": "An object describing an active softfork deployment",
+	"unifiedsoftforks-softforks--desc":  "JSON object describing an active softfork deployment",
 
 	// TxRawResult help.
 	"txrawresult-hex":           "Hex-encoded transaction",
@@ -220,7 +220,6 @@ var helpDescsEnUS = map[string]string{
 	"txrawresult-blocktime":     "Block time in seconds since the 1 Jan 1970 GMT",
 	"txrawresult-size":          "The size of the transaction in bytes",
 	"txrawresult-vsize":         "The virtual size of the transaction in bytes",
-	"txrawresult-weight":        "The transaction's weight (between vsize*4-3 and vsize*4)",
 	"txrawresult-hash":          "The wtxid of the transaction",
 
 	// SearchRawTransactionsResult help.
@@ -237,12 +236,12 @@ var helpDescsEnUS = map[string]string{
 	"searchrawtransactionsresult-blocktime":     "Block time in seconds since the 1 Jan 1970 GMT",
 	"searchrawtransactionsresult-size":          "The size of the transaction in bytes",
 	"searchrawtransactionsresult-vsize":         "The virtual size of the transaction in bytes",
-	"searchrawtransactionsresult-weight":        "The transaction's weight (between vsize*4-3 and vsize*4)",
 
 	// GetBlockVerboseResult help.
 	"getblockverboseresult-hash":              "The hash of the block (same as provided)",
 	"getblockverboseresult-confirmations":     "The number of confirmations",
-	"getblockverboseresult-size":              "The size of the block",
+	"getblockverboseresult-size":              "The size of the block in bytes",
+	"getblockverboseresult-vsize":             "The virtual size of the block",
 	"getblockverboseresult-height":            "The height of the block in the block chain",
 	"getblockverboseresult-version":           "The block version",
 	"getblockverboseresult-versionHex":        "The block version in hexadecimal",
@@ -250,13 +249,12 @@ var helpDescsEnUS = map[string]string{
 	"getblockverboseresult-tx":                "The transaction hashes (only when verbosity=1)",
 	"getblockverboseresult-rawtx":             "The transactions as JSON objects (only when verbosity=2)",
 	"getblockverboseresult-time":              "The block time in seconds since 1 Jan 1970 GMT",
-	"getblockverboseresult-nonce":             "The block nonce",
 	"getblockverboseresult-bits":              "The bits which represent the block difficulty",
 	"getblockverboseresult-difficulty":        "The proof-of-work difficulty as a multiple of the minimum difficulty",
+	"getblockverboseresult-proofofwork":       "The proof-of-work of the block",
 	"getblockverboseresult-previousblockhash": "The hash of the previous block",
 	"getblockverboseresult-nextblockhash":     "The hash of the next block (only if there is one)",
 	"getblockverboseresult-strippedsize":      "The size of the block without witness data",
-	"getblockverboseresult-weight":            "The weight of the block",
 
 	// GetBlockCountCmd help.
 	"getblockcount--synopsis": "Returns the number of blocks in the longest block chain.",
@@ -283,9 +281,9 @@ var helpDescsEnUS = map[string]string{
 	"getblockheaderverboseresult-versionHex":        "The block version in hexadecimal",
 	"getblockheaderverboseresult-merkleroot":        "Root hash of the merkle tree",
 	"getblockheaderverboseresult-time":              "The block time in seconds since 1 Jan 1970 GMT",
-	"getblockheaderverboseresult-nonce":             "The block nonce",
 	"getblockheaderverboseresult-bits":              "The bits which represent the block difficulty",
 	"getblockheaderverboseresult-difficulty":        "The proof-of-work difficulty as a multiple of the minimum difficulty",
+	"getblockheaderverboseresult-proofofwork":       "The proof-of-work of the block",
 	"getblockheaderverboseresult-previousblockhash": "The hash of the previous block",
 	"getblockheaderverboseresult-nextblockhash":     "The hash of the next block (only if there is one)",
 
@@ -293,8 +291,7 @@ var helpDescsEnUS = map[string]string{
 	"templaterequest-mode":         "This is 'template', 'proposal', or omitted",
 	"templaterequest-capabilities": "List of capabilities",
 	"templaterequest-longpollid":   "The long poll ID of a job to monitor for expiration; required and valid only for long poll requests ",
-	"templaterequest-sigoplimit":   "Number of signature operations allowed in blocks (this parameter is ignored)",
-	"templaterequest-sizelimit":    "Number of bytes allowed in blocks (this parameter is ignored)",
+	"templaterequest-vsizelimit":   "Maximum vsize allowed in blocks (this parameter is ignored)",
 	"templaterequest-maxversion":   "Highest supported block version number (this parameter is ignored)",
 	"templaterequest-target":       "The desired target for the block template (this parameter is ignored)",
 	"templaterequest-data":         "Hex-encoded block data (only for mode=proposal)",
@@ -305,10 +302,9 @@ var helpDescsEnUS = map[string]string{
 	"getblocktemplateresulttx-data":    "Hex-encoded transaction data (byte-for-byte)",
 	"getblocktemplateresulttx-hash":    "Hex-encoded transaction hash (little endian if treated as a 256-bit number)",
 	"getblocktemplateresulttx-depends": "Other transactions before this one (by 1-based index in the 'transactions'  list) that must be present in the final block if this one is",
-	"getblocktemplateresulttx-fee":     "Difference in value between transaction inputs and outputs (in Satoshi)",
-	"getblocktemplateresulttx-sigops":  "Total number of signature operations as counted for purposes of block limits",
+	"getblocktemplateresulttx-fee":     "Difference in value between transaction inputs and outputs (in Grain)",
 	"getblocktemplateresulttx-txid":    "The transaction id, can be different from hash.",
-	"getblocktemplateresulttx-weight":  "The weight of the transaction",
+	"getblocktemplateresulttx-vsize":   "The virtual size of the transaction",
 
 	// GetBlockTemplateResultAux help.
 	"getblocktemplateresultaux-flags": "Hex-encoded byte-for-byte data to include in the coinbase signature script",
@@ -318,13 +314,12 @@ var helpDescsEnUS = map[string]string{
 	"getblocktemplateresult-curtime":                    "Current time as seen by the server (recommended for block time); must fall within mintime/maxtime rules",
 	"getblocktemplateresult-height":                     "Height of the block to be solved",
 	"getblocktemplateresult-previousblockhash":          "Hex-encoded big-endian hash of the previous block",
-	"getblocktemplateresult-sigoplimit":                 "Number of sigops allowed in blocks ",
-	"getblocktemplateresult-sizelimit":                  "Number of bytes allowed in blocks",
+	"getblocktemplateresult-vsizelimit":                 "Maximum vsize allowed in blocks",
 	"getblocktemplateresult-transactions":               "Array of transactions as JSON objects",
 	"getblocktemplateresult-version":                    "The block version",
 	"getblocktemplateresult-coinbaseaux":                "Data that should be included in the coinbase signature script",
 	"getblocktemplateresult-coinbasetxn":                "Information about the coinbase transaction",
-	"getblocktemplateresult-coinbasevalue":              "Total amount available for the coinbase in Satoshi",
+	"getblocktemplateresult-coinbasevalue":              "Total amount available for the coinbase in Grain",
 	"getblocktemplateresult-workid":                     "This value must be returned with result if provided (not provided)",
 	"getblocktemplateresult-longpollid":                 "Identifier for long poll request which allows monitoring for expiration",
 	"getblocktemplateresult-longpolluri":                "An alternate URI to use for long poll requests if provided (not provided)",
@@ -338,7 +333,6 @@ var helpDescsEnUS = map[string]string{
 	"getblocktemplateresult-capabilities":               "List of server capabilities including 'proposal' to indicate support for block proposals",
 	"getblocktemplateresult-reject-reason":              "Reason the proposal was invalid as-is (only applies to proposal responses)",
 	"getblocktemplateresult-default_witness_commitment": "The witness commitment itself. Will be populated if the block has witness data",
-	"getblocktemplateresult-weightlimit":                "The current limit on the max allowed weight of a block",
 
 	// GetBlockTemplateCmd help.
 	"getblocktemplate--synopsis": "Returns a JSON object with information necessary to construct a block to mine or accepts a proposal to validate.\n" +
@@ -375,7 +369,7 @@ var helpDescsEnUS = map[string]string{
 	"getconnectioncount--result0":  "The number of connections",
 
 	// GetCurrentNetCmd help.
-	"getcurrentnet--synopsis": "Get bitcoin network the server is running on.",
+	"getcurrentnet--synopsis": "Get the network the server is running on.",
 	"getcurrentnet--result0":  "The network identifier",
 
 	// GetDifficultyCmd help.
@@ -386,10 +380,6 @@ var helpDescsEnUS = map[string]string{
 	"getgenerate--synopsis": "Returns if the server is set to generate coins (mine) or not.",
 	"getgenerate--result0":  "True if mining, false if not",
 
-	// GetHashesPerSecCmd help.
-	"gethashespersec--synopsis": "Returns a recent hashes per second performance measurement while generating coins (mining).",
-	"gethashespersec--result0":  "The number of hashes per second",
-
 	// InfoChainResult help.
 	"infochainresult-version":         "The version of the server",
 	"infochainresult-protocolversion": "The latest supported protocol version",
@@ -399,14 +389,14 @@ var helpDescsEnUS = map[string]string{
 	"infochainresult-proxy":           "The proxy used by the server",
 	"infochainresult-difficulty":      "The current target difficulty",
 	"infochainresult-testnet":         "Whether or not server is using testnet",
-	"infochainresult-relayfee":        "The minimum relay fee for non-free transactions in BTC/KB",
+	"infochainresult-relayfee":        "The minimum relay fee for non-free transactions in PRL/KB",
 	"infochainresult-errors":          "Any current errors",
 
 	// InfoWalletResult help.
 	"infowalletresult-version":         "The version of the server",
 	"infowalletresult-protocolversion": "The latest supported protocol version",
 	"infowalletresult-walletversion":   "The version of the wallet server",
-	"infowalletresult-balance":         "The total bitcoin balance of the wallet",
+	"infowalletresult-balance":         "The total pearl balance of the wallet",
 	"infowalletresult-blocks":          "The number of blocks processed",
 	"infowalletresult-timeoffset":      "The time offset",
 	"infowalletresult-connections":     "The number of connected peers",
@@ -416,8 +406,8 @@ var helpDescsEnUS = map[string]string{
 	"infowalletresult-keypoololdest":   "Seconds since 1 Jan 1970 GMT of the oldest pre-generated key in the key pool",
 	"infowalletresult-keypoolsize":     "The number of new keys that are pre-generated",
 	"infowalletresult-unlocked_until":  "The timestamp in seconds since 1 Jan 1970 GMT that the wallet is unlocked for transfers, or 0 if the wallet is locked",
-	"infowalletresult-paytxfee":        "The transaction fee set in BTC/KB",
-	"infowalletresult-relayfee":        "The minimum relay fee for non-free transactions in BTC/KB",
+	"infowalletresult-paytxfee":        "The transaction fee set in PRL/KB",
+	"infowalletresult-relayfee":        "The minimum relay fee for non-free transactions in PRL/KB",
 	"infowalletresult-errors":          "Any current errors",
 
 	// GetHeadersCmd help.
@@ -435,20 +425,20 @@ var helpDescsEnUS = map[string]string{
 	// GetMempoolInfoResult help.
 	"getmempoolinforesult-bytes": "Size in bytes of the mempool",
 	"getmempoolinforesult-size":  "Number of transactions in the mempool",
+	"getmempoolinforesult-cap":   "Maximum mempool size in bytes (0 = unlimited)",
 
 	// GetMiningInfoResult help.
-	"getmininginforesult-blocks":             "Height of the latest best block",
-	"getmininginforesult-currentblocksize":   "Size of the latest best block",
-	"getmininginforesult-currentblockweight": "Weight of the latest best block",
-	"getmininginforesult-currentblocktx":     "Number of transactions in the latest best block",
-	"getmininginforesult-difficulty":         "Current target difficulty",
-	"getmininginforesult-errors":             "Any current errors",
-	"getmininginforesult-generate":           "Whether or not server is set to generate coins",
-	"getmininginforesult-genproclimit":       "Number of processors to use for coin generation (-1 when disabled)",
-	"getmininginforesult-hashespersec":       "Recent hashes per second performance measurement while generating coins",
-	"getmininginforesult-networkhashps":      "Estimated network hashes per second for the most recent blocks",
-	"getmininginforesult-pooledtx":           "Number of transactions in the memory pool",
-	"getmininginforesult-testnet":            "Whether or not server is using testnet",
+	"getmininginforesult-blocks":            "Height of the latest best block",
+	"getmininginforesult-currentblocksize":  "Size of the latest best block in bytes",
+	"getmininginforesult-currentblockvsize": "Virtual size of the latest best block",
+	"getmininginforesult-currentblocktx":    "Number of transactions in the latest best block",
+	"getmininginforesult-difficulty":        "Current target difficulty",
+	"getmininginforesult-errors":            "Any current errors",
+	"getmininginforesult-generate":          "Whether or not server is set to generate coins",
+	"getmininginforesult-genproclimit":      "Number of processors to use for coin generation (-1 when disabled)",
+	"getmininginforesult-networkhashps":     "Estimated network hashes per second for the most recent blocks",
+	"getmininginforesult-pooledtx":          "Number of transactions in the memory pool",
+	"getmininginforesult-testnet":           "Whether or not server is using testnet",
 
 	// GetMiningInfoCmd help.
 	"getmininginfo--synopsis": "Returns a JSON object containing mining-related information.",
@@ -458,6 +448,39 @@ var helpDescsEnUS = map[string]string{
 	"getnetworkhashps-blocks":    "The number of blocks, or -1 for blocks since last difficulty change",
 	"getnetworkhashps-height":    "Perform estimate ending with this height or -1 for current best chain block height",
 	"getnetworkhashps--result0":  "Estimated hashes per second",
+
+	// GetNetworkInfoCmd help.
+	"getnetworkinfo--synopsis": "Returns an object containing various state info regarding P2P networking.",
+
+	// GetNetworkInfoResult help.
+	"getnetworkinforesult-version":            "The server version",
+	"getnetworkinforesult-subversion":         "The server subversion string",
+	"getnetworkinforesult-protocolversion":    "The protocol version",
+	"getnetworkinforesult-localservices":      "The services we offer to the network (hex)",
+	"getnetworkinforesult-localservicesnames": "The services we offer to the network, in human-readable form",
+	"getnetworkinforesult-localrelay":         "True if transaction relay is requested from peers",
+	"getnetworkinforesult-timeoffset":         "The time offset",
+	"getnetworkinforesult-connections":        "The total number of connections",
+	"getnetworkinforesult-connections_in":     "The number of inbound connections",
+	"getnetworkinforesult-connections_out":    "The number of outbound connections",
+	"getnetworkinforesult-networkactive":      "Whether P2P networking is enabled",
+	"getnetworkinforesult-networks":           "Information per network",
+	"getnetworkinforesult-relayfee":           "Minimum relay fee for transactions in PRL/kB",
+	"getnetworkinforesult-incrementalfee":     "Minimum fee increment for mempool limiting or BIP 125 replacement in PRL/kB",
+	"getnetworkinforesult-localaddresses":     "List of local addresses",
+	"getnetworkinforesult-warnings":           "Any network and blockchain warnings",
+
+	// NetworksResult help.
+	"networksresult-name":                        "Network (ipv4, ipv6 or onion)",
+	"networksresult-limited":                     "Whether the network is limited using -onlynet",
+	"networksresult-reachable":                   "Whether the network is reachable",
+	"networksresult-proxy":                       "The proxy that is used for this network, or empty if none",
+	"networksresult-proxy_randomize_credentials": "Whether randomized credentials are used",
+
+	// LocalAddressesResult help.
+	"localaddressesresult-address": "Network address",
+	"localaddressesresult-port":    "Network port",
+	"localaddressesresult-score":   "Relative score",
 
 	// GetNetTotalsCmd help.
 	"getnettotals--synopsis": "Returns a JSON object containing network traffic statistics.",
@@ -500,20 +523,20 @@ var helpDescsEnUS = map[string]string{
 	"getpeerinforesult-banscore":       "The ban score",
 	"getpeerinforesult-feefilter":      "The requested minimum fee a transaction must have to be announced to the peer",
 	"getpeerinforesult-syncnode":       "Whether or not the peer is the sync peer",
+	"getpeerinforesult-v2_connection":  "Whether or not the peer is a v2 connection",
 
 	// GetPeerInfoCmd help.
 	"getpeerinfo--synopsis": "Returns data about each connected network peer as an array of json objects.",
 
 	// GetRawMempoolVerboseResult help.
 	"getrawmempoolverboseresult-size":             "Transaction size in bytes",
-	"getrawmempoolverboseresult-fee":              "Transaction fee in bitcoins",
+	"getrawmempoolverboseresult-fee":              "Transaction fee in pearls",
 	"getrawmempoolverboseresult-time":             "Local time transaction entered pool in seconds since 1 Jan 1970 GMT",
 	"getrawmempoolverboseresult-height":           "Block height when transaction entered the pool",
 	"getrawmempoolverboseresult-startingpriority": "Priority when transaction entered the pool",
 	"getrawmempoolverboseresult-currentpriority":  "Current priority",
 	"getrawmempoolverboseresult-depends":          "Unconfirmed transactions used as inputs for this transaction",
 	"getrawmempoolverboseresult-vsize":            "The virtual size of a transaction",
-	"getrawmempoolverboseresult-weight":           "The transaction's weight (between vsize*4-3 and vsize*4)",
 
 	// GetRawMempoolCmd help.
 	"getrawmempool--synopsis":   "Returns information about all of the transactions currently in the memory pool.",
@@ -533,7 +556,7 @@ var helpDescsEnUS = map[string]string{
 	// GetTxOutResult help.
 	"gettxoutresult-bestblock":     "The block hash that contains the transaction output",
 	"gettxoutresult-confirmations": "The number of confirmations",
-	"gettxoutresult-value":         "The transaction amount in BTC",
+	"gettxoutresult-value":         "The transaction amount in PRL",
 	"gettxoutresult-scriptPubKey":  "The public key script used to pay coins as a JSON object",
 	"gettxoutresult-version":       "The transaction version",
 	"gettxoutresult-coinbase":      "Whether or not the transaction is a coinbase",
@@ -566,7 +589,7 @@ var helpDescsEnUS = map[string]string{
 		"Transactions pulled from the mempool will have the 'confirmations' field set to 0.\n" +
 		"Usage of this RPC requires the optional --addrindex flag to be activated, otherwise all responses will simply return with an error stating the address index has not yet been built.\n" +
 		"Similarly, until the address index has caught up with the current best height, all requests will return an error response in order to avoid serving stale data.",
-	"searchrawtransactions-address":     "The Bitcoin address to search for",
+	"searchrawtransactions-address":     "The Pearl address to search for",
 	"searchrawtransactions-verbose":     "Specifies the transaction is returned as a JSON object instead of hex-encoded string",
 	"searchrawtransactions--condition0": "verbose=0",
 	"searchrawtransactions--condition1": "verbose=1",
@@ -580,9 +603,9 @@ var helpDescsEnUS = map[string]string{
 	// SendRawTransactionCmd help.
 	"sendrawtransaction--synopsis":    "Submits the serialized, hex-encoded transaction to the local peer and relays it to the network.",
 	"sendrawtransaction-hextx":        "Serialized, hex-encoded signed transaction",
-	"sendrawtransaction-feesetting":   "Whether or not to allow insanely high fees in bitcoind < v0.19.0 or the max fee rate for bitcoind v0.19.0 and later (btcd does not yet implement this parameter, so it has no effect)",
+	"sendrawtransaction-feesetting":   "Maximum fee rate in PRL/kvB (0 = no limit)",
 	"sendrawtransaction--result0":     "The hash of the transaction",
-	"allowhighfeesormaxfeerate-value": "Either the boolean value for the allowhighfees parameter in bitcoind < v0.19.0 or the numerical value for the maxfeerate field in bitcoind v0.19.0 and later",
+	"allowhighfeesormaxfeerate-value": "Numeric value for the maxfeerate field",
 
 	// SetGenerateCmd help.
 	"setgenerate--synopsis":    "Set the server to generate coins (mine) or not.",
@@ -596,8 +619,8 @@ var helpDescsEnUS = map[string]string{
 	"signmessagewithprivkey--result0":  "The signature of the message encoded in base 64",
 
 	// StopCmd help.
-	"stop--synopsis": "Shutdown btcd.",
-	"stop--result0":  "The string 'btcd stopping.'",
+	"stop--synopsis": "Shutdown pearld.",
+	"stop--result0":  "The string 'pearld stopping.'",
 
 	// SubmitBlockOptions help.
 	"submitblockoptions-workid": "This parameter is currently ignored",
@@ -612,7 +635,7 @@ var helpDescsEnUS = map[string]string{
 
 	// ValidateAddressResult help.
 	"validateaddresschainresult-isvalid":         "Whether or not the address is valid",
-	"validateaddresschainresult-address":         "The bitcoin address (only when isvalid is true)",
+	"validateaddresschainresult-address":         "The Pearl address (only when isvalid is true)",
 	"validateaddresschainresult-isscript":        "If the key is a script",
 	"validateaddresschainresult-iswitness":       "If the address is a witness address",
 	"validateaddresschainresult-witness_version": "The version number of the witness program",
@@ -620,12 +643,12 @@ var helpDescsEnUS = map[string]string{
 
 	// ValidateAddressCmd help.
 	"validateaddress--synopsis": "Verify an address is valid.",
-	"validateaddress-address":   "Bitcoin address to validate",
+	"validateaddress-address":   "Pearl address to validate",
 
 	// VerifyChainCmd help.
 	"verifychain--synopsis": "Verifies the block chain database.\n" +
 		"The actual checks performed by the checklevel parameter are implementation specific.\n" +
-		"For btcd this is:\n" +
+		"For pearld this is:\n" +
 		"checklevel=0 - Look up each block and ensure it can be loaded from the database.\n" +
 		"checklevel=1 - Perform basic context-free sanity checks on each block.",
 	"verifychain-checklevel": "How thorough the block verification is",
@@ -634,7 +657,7 @@ var helpDescsEnUS = map[string]string{
 
 	// VerifyMessageCmd help.
 	"verifymessage--synopsis": "Verify a signed message.",
-	"verifymessage-address":   "The bitcoin address to use for the signature",
+	"verifymessage-address":   "The Pearl address to use for the signature",
 	"verifymessage-signature": "The base-64 encoded signature provided by the signer",
 	"verifymessage-message":   "The signed message",
 	"verifymessage--result0":  "Whether or not the signature verified",
@@ -672,7 +695,7 @@ var helpDescsEnUS = map[string]string{
 	"outpoint-index": "The index of the outpoint",
 
 	// NotifySpentCmd help.
-	"notifyspent--synopsis": "Send a redeemingtx notification when a transaction spending an outpoint appears in mempool (if relayed to this btcd instance) and when such a transaction first appears in a newly-attached block.",
+	"notifyspent--synopsis": "Send a redeemingtx notification when a transaction spending an outpoint appears in mempool (if relayed to this pearld instance) and when such a transaction first appears in a newly-attached block.",
 	"notifyspent-outpoints": "List of transaction outpoints to monitor.",
 
 	// StopNotifySpentCmd help.
@@ -729,7 +752,7 @@ var helpDescsEnUS = map[string]string{
 	// TestMempoolAcceptCmd help.
 	"testmempoolaccept--synopsis":  "Returns result of mempool acceptance tests indicating if raw transaction(s) would be accepted by mempool.",
 	"testmempoolaccept-rawtxns":    "Serialized transactions to test.",
-	"testmempoolaccept-maxfeerate": "Maximum acceptable fee rate in BTC/kB",
+	"testmempoolaccept-maxfeerate": "Maximum acceptable fee rate in PRL/kB",
 
 	// TestMempoolAcceptCmd result help.
 	"testmempoolacceptresult-txid":             "The transaction hash in hex.",
@@ -740,7 +763,7 @@ var helpDescsEnUS = map[string]string{
 	"testmempoolacceptresult-reject-reason":    "Rejection string (only present when 'allowed' is false).",
 	"testmempoolacceptresult-fees":             "Transaction fees (only present if 'allowed' is true).",
 	"testmempoolacceptfees-base":               "Transaction fees (only present if 'allowed' is true).",
-	"testmempoolacceptfees-effective-feerate":  "The effective feerate in BTC per KvB.",
+	"testmempoolacceptfees-effective-feerate":  "The effective feerate in PRL per KvB.",
 	"testmempoolacceptfees-effective-includes": "Transactions whose fees and vsizes are included in effective-feerate. Each item is a transaction wtxid in hex.",
 
 	// GetTxSpendingPrevOutCmd help.
@@ -782,12 +805,12 @@ var rpcResultTypes = map[string][]interface{}{
 	"getcurrentnet":          {(*uint32)(nil)},
 	"getdifficulty":          {(*float64)(nil)},
 	"getgenerate":            {(*bool)(nil)},
-	"gethashespersec":        {(*float64)(nil)},
 	"getheaders":             {(*[]string)(nil)},
 	"getinfo":                {(*btcjson.InfoChainResult)(nil)},
 	"getmempoolinfo":         {(*btcjson.GetMempoolInfoResult)(nil)},
 	"getmininginfo":          {(*btcjson.GetMiningInfoResult)(nil)},
 	"getnettotals":           {(*btcjson.GetNetTotalsResult)(nil)},
+	"getnetworkinfo":         {(*btcjson.GetNetworkInfoResult)(nil)},
 	"getnetworkhashps":       {(*float64)(nil)},
 	"getnodeaddresses":       {(*[]btcjson.GetNodeAddressesResult)(nil)},
 	"getpeerinfo":            {(*[]btcjson.GetPeerInfoResult)(nil)},

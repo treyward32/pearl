@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2016 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -9,13 +9,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
 )
 
-// TestBtcdExtCustomResults ensures any results that have custom marshalling
+// TestPearldExtCustomResults ensures any results that have custom marshalling
 // work as intended.
 // and unmarshal code of results are as expected.
-func TestBtcdExtCustomResults(t *testing.T) {
+func TestPearldExtCustomResults(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {

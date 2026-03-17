@@ -1,13 +1,13 @@
 mempool
 =======
 
-[![Build Status](https://github.com/btcsuite/btcd/workflows/Build%20and%20Test/badge.svg)](https://github.com/btcsuite/btcd/actions)
+[![Build Status](https://github.com/pearl-research-labs/pearl/workflows/Build%20and%20Test/badge.svg)](https://github.com/pearl-research-labs/pearl/actions)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/btcsuite/btcd/mempool)
+[![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](https://pkg.go.dev/github.com/pearl-research-labs/pearl/node/mempool)
 
-Package mempool provides a policy-enforced pool of unmined bitcoin transactions.
+Package mempool provides a policy-enforced pool of unmined Pearl transactions.
 
-A key responsibility of the bitcoin network is mining user-generated transactions
+A key responsibility of the Pearl network is mining user-generated transactions
 into blocks.  In order to facilitate this, the mining process relies on having a
 readily-available source of transactions to include in a block that is being
 solved.
@@ -26,7 +26,7 @@ for a transaction to be considered standard are that it is of the most-recently
 supported version, finalized, does not exceed a specific size, and only consists
 of specific script forms.
 
-Since this package does not deal with other bitcoin specifics such as network
+Since this package does not deal with other Pearl specifics such as network
 communication and transaction relay, it returns a list of transactions that were
 accepted which gives the caller a high level of flexibility in how they want to
 proceed.  Typically, this will involve things such as relaying the transactions
@@ -34,7 +34,7 @@ to other peers on the network and notifying the mining process that new
 transactions are available.
 
 This package has intentionally been designed so it can be used as a standalone
-package for any projects needing the ability create an in-memory pool of bitcoin
+package for any projects needing the ability create an in-memory pool of Pearl
 transactions that are not only valid by consensus rules, but also adhere to a
 configurable policy.
 
@@ -71,10 +71,12 @@ be an exhaustive list.
 - Manual control of transaction removal
   - Recursive removal of all dependent transactions
 
-## Installation and Updating
+## Installation
+
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
 
 ```bash
-$ go get -u github.com/btcsuite/btcd/mempool
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## License

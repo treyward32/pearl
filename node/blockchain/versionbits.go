@@ -1,18 +1,14 @@
-// Copyright (c) 2016-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package blockchain
 
 import (
-	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
 )
 
 const (
-	// vbLegacyBlockVersion is the highest legacy block version before the
-	// version bits scheme became active.
-	vbLegacyBlockVersion = 4
-
 	// vbTopBits defines the bits to set in the version to signal that the
 	// version bits scheme is being used.
 	vbTopBits = 0x20000000
@@ -134,6 +130,13 @@ func (c bitConditionChecker) IsSpeedy() bool {
 	return false
 }
 
+// ForceActive returns if the deployment should be forced to transition to the
+// active state. This is useful on certain testnet, where we we'd like for a
+// deployment to always be active.
+func (c bitConditionChecker) ForceActive(node *blockNode) bool {
+	return false
+}
+
 // deploymentChecker provides a thresholdConditionChecker which can be used to
 // test a specific deployment rule.  This is required for properly detecting
 // and activating consensus rule changes.
@@ -156,8 +159,7 @@ var _ thresholdConditionChecker = deploymentChecker{}
 func (c deploymentChecker) HasStarted(blkNode *blockNode) bool {
 	// Can't fail as we make sure to set the clock above when we
 	// instantiate *BlockChain.
-	header := blkNode.Header()
-	started, _ := c.deployment.DeploymentStarter.HasStarted(&header)
+	started, _ := c.deployment.DeploymentStarter.HasStarted(blkNode)
 
 	return started
 }
@@ -172,8 +174,7 @@ func (c deploymentChecker) HasStarted(blkNode *blockNode) bool {
 func (c deploymentChecker) HasEnded(blkNode *blockNode) bool {
 	// Can't fail as we make sure to set the clock above when we
 	// instantiate *BlockChain.
-	header := blkNode.Header()
-	ended, _ := c.deployment.DeploymentEnder.HasEnded(&header)
+	ended, _ := c.deployment.DeploymentEnder.HasEnded(blkNode)
 
 	return ended
 }
@@ -207,15 +208,9 @@ func (c deploymentChecker) MinerConfirmationWindow() uint32 {
 }
 
 // EligibleToActivate returns true if a custom deployment can transition from
-// the LockedIn to the Active state. For normal deployments, this always
-// returns true. However, some deployments add extra rules like a minimum
-// activation height, which can be abstracted into a generic arbitrary check at
-// the final state via this method.
-//
-// This implementation always returns true, unless a minimum activation height
-// is specified.
-//
-// This is part of the thresholdConditionChecker interface implementation.
+// the LockedIn to the Active state. In addition to the traditional minimum
+// activation height (MinActivationHeight), an optional AlwaysActiveHeight can
+// force the deployment to be active after a specified height.
 func (c deploymentChecker) EligibleToActivate(blkNode *blockNode) bool {
 	// No activation height, so it's always ready to go.
 	if c.deployment.MinActivationHeight == 0 {
@@ -247,6 +242,28 @@ func (c deploymentChecker) Condition(node *blockNode) (bool, error) {
 	version := uint32(node.version)
 	return (version&vbTopMask == vbTopBits) && (version&conditionMask != 0),
 		nil
+}
+
+// ForceActive returns if the deployment should be forced to transition to the
+// active state. This is useful on certain testnet, where we we'd like for a
+// deployment to always be active.
+func (c deploymentChecker) ForceActive(node *blockNode) bool {
+	if node == nil {
+		return false
+	}
+
+	// If the deployment has a nonzero AlwaysActiveHeight and the next
+	// block’s height is at or above that threshold, then force the state
+	// to Active.
+	effectiveHeight := c.deployment.EffectiveAlwaysActiveHeight()
+	if uint32(node.height)+1 >= effectiveHeight {
+		log.Debugf("Force activating deployment: next block "+
+			"height %d >= EffectiveAlwaysActiveHeight %d",
+			uint32(node.height)+1, effectiveHeight)
+		return true
+	}
+
+	return false
 }
 
 // calcNextBlockVersion calculates the expected version of the block after the

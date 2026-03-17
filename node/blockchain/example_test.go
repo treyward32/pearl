@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,16 +10,16 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/database"
-	_ "github.com/btcsuite/btcd/database/ffldb"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/database"
+	_ "github.com/pearl-research-labs/pearl/node/database/ffldb"
 )
 
 // This example demonstrates how to create a new chain instance and use
 // ProcessBlock to attempt to add a block to the chain.  As the package
-// overview documentation describes, this includes all of the Bitcoin consensus
+// overview documentation describes, this includes all of the Pearl consensus
 // rules.  This example intentionally attempts to insert a duplicate genesis
 // block to illustrate how an invalid block is handled.
 func ExampleBlockChain_ProcessBlock() {
@@ -39,7 +39,7 @@ func ExampleBlockChain_ProcessBlock() {
 	defer db.Close()
 
 	// Create a new BlockChain instance using the underlying database for
-	// the main bitcoin network.  This example does not demonstrate some
+	// the main Pearl network.  This example does not demonstrate some
 	// of the other available configuration options such as specifying a
 	// notification callback and signature cache.  Also, the caller would
 	// ordinarily keep a reference to the median time source and add time
@@ -69,7 +69,7 @@ func ExampleBlockChain_ProcessBlock() {
 	fmt.Printf("Block accepted. Is it an orphan?: %v", isOrphan)
 
 	// Output:
-	// Failed to process block: already have block 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f
+	// Failed to process block: already have block 3fbb093723ee8c6fd4c4b739923444dbe29f3ec0d2e668476a81771e56993dae
 }
 
 // This example demonstrates how to convert the compact "bits" in a block header

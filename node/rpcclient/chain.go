@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2017 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -10,9 +10,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // FutureGetBestBlockHashResult is a future promise to deliver the result of a
@@ -84,7 +84,7 @@ func (c *Client) waitForGetBlockRes(respChan chan *Response, hash string,
 	res, err := ReceiveFuture(respChan)
 
 	// If we receive an invalid parameter error, then we may be
-	// communicating with a btcd node which only understands the legacy
+	// communicating with a pearld node which only understands the legacy
 	// request, so we'll try that.
 	if err, ok := err.(*btcjson.RPCError); ok &&
 		err.Code == btcjson.ErrRPCInvalidParams.Code {
@@ -275,8 +275,8 @@ func (c *Client) GetBlockVerboseTx(blockHash *chainhash.Hash) (*btcjson.GetBlock
 // GetBlockCountAsync RPC invocation (or an applicable error).
 type FutureGetBlockCountResult chan *Response
 
-// Receive waits for the Response promised by the future and returns the number
-// of blocks in the longest block chain.
+// Receive waits for the Response promised by the future and returns the height
+// of the most-work fully-validated chain. The genesis block has height 0.
 func (r FutureGetBlockCountResult) Receive() (int64, error) {
 	res, err := ReceiveFuture(r)
 	if err != nil {
@@ -302,7 +302,8 @@ func (c *Client) GetBlockCountAsync() FutureGetBlockCountResult {
 	return c.SendCmd(cmd)
 }
 
-// GetBlockCount returns the number of blocks in the longest block chain.
+// GetBlockCount returns the height of the most-work fully-validated chain.
+// The genesis block has height 0.
 func (c *Client) GetBlockCount() (int64, error) {
 	return c.GetBlockCountAsync().Receive()
 }
@@ -437,25 +438,15 @@ func unmarshalPartialGetBlockChainInfoResult(res []byte) (*btcjson.GetBlockChain
 
 // unmarshalGetBlockChainInfoResultSoftForks properly unmarshals the softforks
 // related fields into the GetBlockChainInfoResult instance.
+// All supported backends (pearld and compatible forks) use the unified format.
 func unmarshalGetBlockChainInfoResultSoftForks(chainInfo *btcjson.GetBlockChainInfoResult,
-	version BackendVersion, res []byte) error {
+	res []byte) error {
 
-	// Versions of bitcoind on or after v0.19.0 use the unified format.
-	if version.SupportUnifiedSoftForks() {
-		var softForks btcjson.UnifiedSoftForks
-		if err := json.Unmarshal(res, &softForks); err != nil {
-			return err
-		}
-		chainInfo.UnifiedSoftForks = &softForks
-	} else {
-
-		// All other versions use the original format.
-		var softForks btcjson.SoftForks
-		if err := json.Unmarshal(res, &softForks); err != nil {
-			return err
-		}
-		chainInfo.SoftForks = &softForks
+	var softForks btcjson.UnifiedSoftForks
+	if err := json.Unmarshal(res, &softForks); err != nil {
+		return err
 	}
+	chainInfo.UnifiedSoftForks = &softForks
 
 	return nil
 }
@@ -472,14 +463,7 @@ func (r FutureGetBlockChainInfoResult) Receive() (*btcjson.GetBlockChainInfoResu
 		return nil, err
 	}
 
-	// Inspect the version to determine how we'll need to parse the
-	// softforks from the response.
-	version, err := r.client.BackendVersion()
-	if err != nil {
-		return nil, err
-	}
-
-	err = unmarshalGetBlockChainInfoResultSoftForks(chainInfo, version, res)
+	err = unmarshalGetBlockChainInfoResultSoftForks(chainInfo, res)
 	if err != nil {
 		return nil, err
 	}
@@ -885,7 +869,7 @@ func (c *Client) EstimateFeeAsync(numBlocks int64) FutureEstimateFeeResult {
 	return c.SendCmd(cmd)
 }
 
-// EstimateFee provides an estimated fee  in bitcoins per kilobyte.
+// EstimateFee provides an estimated fee in pearls per kilobyte.
 func (c *Client) EstimateFee(numBlocks int64) (float64, error) {
 	return c.EstimateFeeAsync(numBlocks).Receive()
 }
@@ -1104,14 +1088,14 @@ func (c *Client) GetTxOutSetInfo() (*btcjson.GetTxOutSetInfoResult, error) {
 // FutureRescanBlocksResult is a future promise to deliver the result of a
 // RescanBlocksAsync RPC invocation (or an applicable error).
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrrpcclient.
 type FutureRescanBlocksResult chan *Response
 
 // Receive waits for the Response promised by the future and returns the
 // discovered rescanblocks data.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrrpcclient.
 func (r FutureRescanBlocksResult) Receive() ([]btcjson.RescannedBlock, error) {
 	res, err := ReceiveFuture(r)
@@ -1134,7 +1118,7 @@ func (r FutureRescanBlocksResult) Receive() ([]btcjson.RescannedBlock, error) {
 //
 // See RescanBlocks for the blocking version and more details.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrrpcclient.
 func (c *Client) RescanBlocksAsync(blockHashes []chainhash.Hash) FutureRescanBlocksResult {
 	strBlockHashes := make([]string, len(blockHashes))
@@ -1150,7 +1134,7 @@ func (c *Client) RescanBlocksAsync(blockHashes []chainhash.Hash) FutureRescanBlo
 // the client's loaded transaction filter.  The blocks do not need to be on the
 // main chain, but they do need to be adjacent to each other.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrrpcclient.
 func (c *Client) RescanBlocks(blockHashes []chainhash.Hash) ([]btcjson.RescannedBlock, error) {
 	return c.RescanBlocksAsync(blockHashes).Receive()

@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,17 +9,15 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash"
 	"strings"
 
 	"golang.org/x/crypto/ripemd160"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/xmss"
 )
 
 // An opcode defines the information related to a txscript opcode.  opfunc, if
@@ -33,9 +31,9 @@ type opcode struct {
 	opfunc func(*opcode, []byte, *Engine) error
 }
 
-// These constants are the values of the official opcodes used on the btc wiki,
-// in bitcoin core and in most if not all other references and software related
-// to handling BTC scripts.
+// These constants are the values of the official opcodes used on the wiki,
+// in Bitcoin Core and in most if not all other references and software related
+// to handling scripts.
 const (
 	OP_0                   = 0x00 // 0
 	OP_FALSE               = 0x00 // 0 - AKA OP_0
@@ -263,7 +261,7 @@ const (
 	OP_UNKNOWN219          = 0xdb // 219
 	OP_UNKNOWN220          = 0xdc // 220
 	OP_UNKNOWN221          = 0xdd // 221
-	OP_UNKNOWN222          = 0xde // 222
+	OP_CHECKXMSSSIG        = 0xde // 222
 	OP_UNKNOWN223          = 0xdf // 223
 	OP_UNKNOWN224          = 0xe0 // 224
 	OP_UNKNOWN225          = 0xe1 // 225
@@ -445,7 +443,7 @@ var opcodeArray = [256]opcode{
 	OP_TUCK:         {OP_TUCK, "OP_TUCK", 1, opcodeTuck},
 
 	// Splice opcodes.
-	OP_CAT:    {OP_CAT, "OP_CAT", 1, opcodeDisabled},
+	OP_CAT:    {OP_CAT, "OP_CAT", 1, opcodeCat},
 	OP_SUBSTR: {OP_SUBSTR, "OP_SUBSTR", 1, opcodeDisabled},
 	OP_LEFT:   {OP_LEFT, "OP_LEFT", 1, opcodeDisabled},
 	OP_RIGHT:  {OP_RIGHT, "OP_RIGHT", 1, opcodeDisabled},
@@ -502,6 +500,7 @@ var opcodeArray = [256]opcode{
 	OP_CHECKMULTISIG:       {OP_CHECKMULTISIG, "OP_CHECKMULTISIG", 1, opcodeCheckMultiSig},
 	OP_CHECKMULTISIGVERIFY: {OP_CHECKMULTISIGVERIFY, "OP_CHECKMULTISIGVERIFY", 1, opcodeCheckMultiSigVerify},
 	OP_CHECKSIGADD:         {OP_CHECKSIGADD, "OP_CHECKSIGADD", 1, opcodeCheckSigAdd},
+	OP_CHECKXMSSSIG:        {OP_CHECKXMSSSIG, "OP_CHECKXMSSSIG", 1, opcodeCheckXmssSig},
 
 	// Reserved opcodes.
 	OP_NOP1:  {OP_NOP1, "OP_NOP1", 1, opcodeNop},
@@ -549,7 +548,6 @@ var opcodeArray = [256]opcode{
 	OP_UNKNOWN219: {OP_UNKNOWN219, "OP_UNKNOWN219", 1, opcodeInvalid},
 	OP_UNKNOWN220: {OP_UNKNOWN220, "OP_UNKNOWN220", 1, opcodeInvalid},
 	OP_UNKNOWN221: {OP_UNKNOWN221, "OP_UNKNOWN221", 1, opcodeInvalid},
-	OP_UNKNOWN222: {OP_UNKNOWN222, "OP_UNKNOWN222", 1, opcodeInvalid},
 	OP_UNKNOWN223: {OP_UNKNOWN223, "OP_UNKNOWN223", 1, opcodeInvalid},
 	OP_UNKNOWN224: {OP_UNKNOWN224, "OP_UNKNOWN224", 1, opcodeInvalid},
 	OP_UNKNOWN225: {OP_UNKNOWN225, "OP_UNKNOWN225", 1, opcodeInvalid},
@@ -619,7 +617,6 @@ var opcodeOnelineRepls = map[string]string{
 var successOpcodes = map[byte]struct{}{
 	OP_RESERVED:     {}, // 80
 	OP_VER:          {}, // 98
-	OP_CAT:          {}, // 126
 	OP_SUBSTR:       {}, // 127
 	OP_LEFT:         {}, // 128
 	OP_RIGHT:        {}, // 129
@@ -671,7 +668,6 @@ var successOpcodes = map[byte]struct{}{
 	OP_UNKNOWN219:   {}, // 219
 	OP_UNKNOWN220:   {}, // 220
 	OP_UNKNOWN221:   {}, // 221
-	OP_UNKNOWN222:   {}, // 222
 	OP_UNKNOWN223:   {}, // 223
 	OP_UNKNOWN224:   {}, // 224
 	OP_UNKNOWN225:   {}, // 225
@@ -814,52 +810,24 @@ func opcodeN(op *opcode, data []byte, vm *Engine) error {
 	return nil
 }
 
-// opcodeNop is a common handler for the NOP family of opcodes.  As the name
-// implies it generally does nothing, however, it will return an error when
-// the flag to discourage use of NOPs is set for select opcodes.
+// opcodeNop is a common handler for the NOP family of opcodes. OP_NOP itself
+// is a true no-op. NOP1, NOP4-NOP10 are reserved and always return an error.
 func opcodeNop(op *opcode, data []byte, vm *Engine) error {
 	switch op.value {
 	case OP_NOP1, OP_NOP4, OP_NOP5,
 		OP_NOP6, OP_NOP7, OP_NOP8, OP_NOP9, OP_NOP10:
 
-		if vm.hasFlag(ScriptDiscourageUpgradableNops) {
-			str := fmt.Sprintf("%v reserved for soft-fork "+
-				"upgrades", op.name)
-			return scriptError(ErrDiscourageUpgradableNOPs, str)
-		}
+		str := fmt.Sprintf("%v reserved for soft-fork upgrades", op.name)
+		return scriptError(ErrDiscourageUpgradableNOPs, str)
 	}
 	return nil
 }
 
-// popIfBool enforces the "minimal if" policy during script execution if the
-// particular flag is set.  If so, in order to eliminate an additional source
-// of nuisance malleability, post-segwit for version 0 witness programs, we now
-// require the following: for OP_IF and OP_NOT_IF, the top stack item MUST
-// either be an empty byte slice, or [0x01]. Otherwise, the item at the top of
-// the stack will be popped and interpreted as a boolean.
+// popIfBool enforces the "minimal if" policy during script execution.
+// For OP_IF and OP_NOT_IF, the top stack item MUST either be an empty byte
+// slice, or [0x01].
 func popIfBool(vm *Engine) (bool, error) {
-	// When not in witness execution mode, not executing a v0 witness
-	// program, or not doing tapscript execution, or the minimal if flag
-	// isn't set pop the top stack item as a normal bool.
-	switch {
-	// Minimal if is always on for taproot execution.
-	case vm.isWitnessVersionActive(TaprootWitnessVersion):
-		break
-
-	// If this isn't the base segwit version, then we'll coerce the stack
-	// element as a bool as normal.
-	case !vm.isWitnessVersionActive(BaseSegwitWitnessVersion):
-		fallthrough
-
-	// If the minimal if flag isn't set, then we don't need any extra
-	// checks here.
-	case !vm.hasFlag(ScriptVerifyMinimalIf):
-		return vm.dstack.PopBool()
-	}
-
-	// At this point, a v0 or v1 witness program is being executed and the
-	// minimal if flag is set, so enforce additional constraints on the top
-	// stack item.
+	// Enforce minimal-if constraints on the top stack item.
 	so, err := vm.dstack.PopByteArray()
 	if err != nil {
 		return false, err
@@ -1046,20 +1014,8 @@ func verifyLockTime(txLockTime, threshold, lockTime int64) error {
 
 // opcodeCheckLockTimeVerify compares the top item on the data stack to the
 // LockTime field of the transaction containing the script signature
-// validating if the transaction outputs are spendable yet.  If flag
-// ScriptVerifyCheckLockTimeVerify is not set, the code continues as if OP_NOP2
-// were executed.
+// validating if the transaction outputs are spendable yet.
 func opcodeCheckLockTimeVerify(op *opcode, data []byte, vm *Engine) error {
-	// If the ScriptVerifyCheckLockTimeVerify script flag is not set, treat
-	// opcode as OP_NOP2 instead.
-	if !vm.hasFlag(ScriptVerifyCheckLockTimeVerify) {
-		if vm.hasFlag(ScriptDiscourageUpgradableNops) {
-			return scriptError(ErrDiscourageUpgradableNOPs,
-				"OP_NOP2 reserved for soft-fork upgrades")
-		}
-		return nil
-	}
-
 	// The current transaction locktime is a uint32 resulting in a maximum
 	// locktime of 2^32-1 (the year 2106).  However, scriptNums are signed
 	// and therefore a standard 4-byte scriptNum would only support up to a
@@ -1120,20 +1076,8 @@ func opcodeCheckLockTimeVerify(op *opcode, data []byte, vm *Engine) error {
 
 // opcodeCheckSequenceVerify compares the top item on the data stack to the
 // LockTime field of the transaction containing the script signature
-// validating if the transaction outputs are spendable yet.  If flag
-// ScriptVerifyCheckSequenceVerify is not set, the code continues as if OP_NOP3
-// were executed.
+// validating if the transaction outputs are spendable yet.
 func opcodeCheckSequenceVerify(op *opcode, data []byte, vm *Engine) error {
-	// If the ScriptVerifyCheckSequenceVerify script flag is not set, treat
-	// opcode as OP_NOP3 instead.
-	if !vm.hasFlag(ScriptVerifyCheckSequenceVerify) {
-		if vm.hasFlag(ScriptDiscourageUpgradableNops) {
-			return scriptError(ErrDiscourageUpgradableNOPs,
-				"OP_NOP3 reserved for soft-fork upgrades")
-		}
-		return nil
-	}
-
 	// The current transaction sequence is a uint32 resulting in a maximum
 	// sequence of 2^32-1.  However, scriptNums are signed and therefore a
 	// standard 4-byte scriptNum would only support up to a maximum of
@@ -1375,6 +1319,50 @@ func opcodeSwap(op *opcode, data []byte, vm *Engine) error {
 // Stack transformation: [... x1 x2] -> [... x2 x1 x2]
 func opcodeTuck(op *opcode, data []byte, vm *Engine) error {
 	return vm.dstack.Tuck()
+}
+
+// opcodeCat concatenates the top two stack items.
+//
+// Stack transformation: [... x1 x2] -> [... x1|x2]
+func opcodeCat(op *opcode, data []byte, vm *Engine) error {
+	// OP_CAT is only enabled in tapscript (BIP 347).
+	if vm.tapscriptCtx == nil {
+		return scriptError(ErrDisabledOpcode, "attempt to execute disabled OP_CAT in non-tapscript context")
+	}
+
+	// OP_CAT requires at least 2 elements
+	if vm.dstack.Depth() < 2 {
+		return scriptError(ErrInvalidStackOperation,
+			"opcode OP_CAT requires at least 2 items on stack")
+	}
+	vch2, err := vm.dstack.PopByteArray()
+	if err != nil {
+		return err
+	}
+	vch1, err := vm.dstack.PopByteArray()
+	if err != nil {
+		return err
+	}
+
+	// Check size limit
+	resultLen := len(vch1) + len(vch2)
+	if resultLen > MaxScriptElementSize {
+		return scriptError(ErrElementTooBig, fmt.Sprintf("concatenated element size %d exceeds max size", resultLen))
+	}
+
+	// Tapscript cost: ceil(concat_size / 64)
+	cost := int32((resultLen + 63) / 64)
+	if err := vm.tapscriptCtx.tallyOpCost(cost); err != nil {
+		return err
+	}
+
+	// Concatenate: vch1 | vch2
+	result := make([]byte, resultLen)
+	copy(result, vch1)
+	copy(result[len(vch1):], vch2)
+
+	vm.dstack.PushByteArray(result)
+	return nil
 }
 
 // opcodeSize pushes the size of the top item of the data stack onto the data
@@ -1951,14 +1939,8 @@ func opcodeHash256(op *opcode, data []byte, vm *Engine) error {
 func opcodeCodeSeparator(op *opcode, data []byte, vm *Engine) error {
 	vm.lastCodeSep = int(vm.tokenizer.ByteIndex())
 
-	if vm.taprootCtx != nil {
-		vm.taprootCtx.codeSepPos = uint32(vm.tokenizer.OpcodePosition())
-	} else if vm.witnessProgram == nil &&
-		vm.hasFlag(ScriptVerifyConstScriptCode) {
-
-		// Disable OP_CODESEPARATOR for non-segwit scripts.
-		str := "OP_CODESEPARATOR used in non-segwit script"
-		return scriptError(ErrCodeSeparator, str)
+	if vm.tapscriptCtx != nil {
+		vm.tapscriptCtx.codeSepPos = uint32(vm.tokenizer.OpcodePosition())
 	}
 
 	return nil
@@ -1989,111 +1971,131 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		return err
 	}
 
-	// The signature actually needs to be longer than this, but at
-	// least 1 byte is needed for the hash type below.  The full length is
-	// checked depending on the script flags and upon parsing the signature.
-	//
-	// This only applies if tapscript verification isn't active, as this
-	// check is done within the sighash itself.
-	if vm.taprootCtx == nil && len(fullSigBytes) < 1 {
-		vm.dstack.PushBool(false)
+	// OP_CHECKSIG is only valid in tapscript context on this network.
+	if vm.tapscriptCtx == nil {
+		str := "OP_CHECKSIG is only supported in tapscript context"
+		return scriptError(ErrInternal, str)
+	}
+
+	// Account for changes in the sig ops budget after this
+	// execution, but only for non-empty signatures.
+	if len(fullSigBytes) > 0 {
+		if err := vm.tapscriptCtx.tallysigOp(); err != nil {
+			return err
+		}
+	}
+
+	// Empty public keys immediately cause execution to fail.
+	if len(pkBytes) == 0 {
+		return scriptError(ErrTaprootPubkeyIsEmpty, "")
+	}
+
+	// If the signature was an empty vector, push an empty vector
+	// and continue execution.
+	if len(fullSigBytes) == 0 {
+		vm.dstack.PushByteArray([]byte{})
 		return nil
 	}
 
-	var sigVerifier signatureVerifier
-	switch {
-	// If no witness program is active, then we're verifying under the
-	// base consensus rules.
-	case vm.witnessProgram == nil:
-		sigVerifier, err = newBaseSigVerifier(
-			pkBytes, fullSigBytes, vm,
-		)
-		if err != nil {
-			var scriptErr Error
-			if errors.As(err, &scriptErr) {
-				return err
-			}
-
-			vm.dstack.PushBool(false)
-			return nil
-		}
-
-	// If the base segwit version is active, then we'll create the verifier
-	// that factors in those new consensus rules.
-	case vm.isWitnessVersionActive(BaseSegwitWitnessVersion):
-		sigVerifier, err = newBaseSegwitSigVerifier(
-			pkBytes, fullSigBytes, vm,
-		)
-		if err != nil {
-			var scriptErr Error
-			if errors.As(err, &scriptErr) {
-				return err
-			}
-
-			vm.dstack.PushBool(false)
-			return nil
-		}
-
-	// Otherwise, this is routine tapscript execution.
-	case vm.taprootCtx != nil:
-		// Account for changes in the sig ops budget after this
-		// execution, but only for non-empty signatures.
-		if len(fullSigBytes) > 0 {
-			if err := vm.taprootCtx.tallysigOp(); err != nil {
-				return err
-			}
-		}
-
-		// Empty public keys immediately cause execution to fail.
-		if len(pkBytes) == 0 {
-			return scriptError(ErrTaprootPubkeyIsEmpty, "")
-		}
-
-		// If this is tapscript execution, and the signature was
-		// actually an empty vector, then we push on an empty vector
-		// and continue execution from there, but only if the pubkey
-		// isn't empty.
-		if len(fullSigBytes) == 0 {
-			vm.dstack.PushByteArray([]byte{})
-			return nil
-		}
-
-		// If the constructor fails immediately, then it's because
-		// the public key size is zero, so we'll fail all script
-		// execution.
-		sigVerifier, err = newBaseTapscriptSigVerifier(
-			pkBytes, fullSigBytes, vm,
-		)
-		if err != nil {
-			return err
-		}
-
-	default:
-		// We skip segwit v1 in isolation here, as the v1 rules aren't
-		// used in script execution (for sig verification) and are only
-		// part of the top-level key-spend verification which we
-		// already skipped.
-		//
-		// In other words, this path shouldn't ever be reached
-		//
-		// TODO(roasbeef): return an error?
+	sigVerifier, err := newBaseTapscriptSigVerifier(
+		pkBytes, fullSigBytes, vm,
+	)
+	if err != nil {
+		return err
 	}
 
 	result := sigVerifier.Verify()
 	valid := result.sigValid
 
-	if vm.hasFlag(ScriptVerifyConstScriptCode) && result.sigMatch {
-		str := "non-const script code"
-		return scriptError(ErrNonConstScriptCode, str)
+	// Null-fail: invalid signature must be empty.
+	if !valid && len(fullSigBytes) != 0 {
+		str := "signature not empty on failed checksig"
+		return scriptError(ErrNullFail, str)
 	}
 
-	switch {
-	// For tapscript, and prior execution with null fail active, if the
-	// signature is invalid, then this MUST be an empty signature.
-	case !valid && vm.taprootCtx != nil && len(fullSigBytes) != 0:
-		fallthrough
-	case !valid && vm.hasFlag(ScriptVerifyNullFail) && len(fullSigBytes) > 0:
-		str := "signature not empty on failed checksig"
+	vm.dstack.PushBool(valid)
+	return nil
+}
+
+// opcodeCheckXmssSig verifies an XMSS post-quantum signature.
+// The signature is split into 5 chunks of 468 bytes each to fit within
+// the 520-byte stack element limit.
+// Stack transformation: [... sig1 sig2 sig3 sig4 sig5 pubkey] -> [... bool]
+func opcodeCheckXmssSig(op *opcode, data []byte, vm *Engine) error {
+	// OP_CHECKXMSSSIG is only valid in tapscript context.
+	// In non-tapscript contexts, behave like OP_UNKNOWN (Err and dont modify stack).
+	if vm.tapscriptCtx == nil {
+		str := fmt.Sprintf("attempt to execute invalid opcode %s", op.name)
+		return scriptError(ErrReservedOpcode, str)
+	}
+
+	const numSigChunks = 5
+	const sigChunkSize = xmss.SignatureLen / numSigChunks // 468 bytes = 2340 / 5
+
+	// Pop the public key (64 bytes for XMSS).
+	pkBytes, err := vm.dstack.PopByteArray()
+	if err != nil {
+		return err
+	}
+
+	// Pop the 5 signature chunks [sig1, sig2, sig3, sig4, sig5]
+	sigChunks := make([][]byte, numSigChunks)
+	for i := range numSigChunks {
+		chunk, err := vm.dstack.PopByteArray()
+		if err != nil {
+			return err
+		}
+		sigChunks[numSigChunks-1-i] = chunk
+	}
+
+	// Validate public key length.
+	if len(pkBytes) != xmss.PKLen {
+		vm.dstack.PushBool(false)
+		return nil
+	}
+
+	// Validate each signature chunk is exactly sigChunkSize bytes.
+	for _, chunk := range sigChunks {
+		if len(chunk) != sigChunkSize {
+			vm.dstack.PushBool(false)
+			return nil
+		}
+	}
+
+	// XMSS_SHAKE256_5_256 verification is capped at 67 * 16 + 5 hashes
+	if err := vm.tapscriptCtx.tallyOpCost(1000); err != nil {
+		return err
+	}
+
+	// Concatenate signature chunks.
+	sigBytes := make([]byte, 0, xmss.SignatureLen)
+	for _, chunk := range sigChunks {
+		sigBytes = append(sigBytes, chunk...)
+	}
+
+	// Compute the sighash for tapscript verification (same as OP_CHECKSIG).
+	sigHash, err := vm.CalcTapscriptSigHash(
+		vm.hashCache, SigHashDefault, &vm.tx, vm.txIdx, vm.prevOutFetcher,
+	)
+	if err != nil {
+		vm.dstack.PushBool(false)
+		return nil
+	}
+
+	var pk [xmss.PKLen]byte
+	var msg [xmss.MsgLen]byte
+	var sig [xmss.SignatureLen]byte
+
+	copy(pk[:], pkBytes)
+	copy(msg[:], sigHash) // sigHash is 32 bytes, same as XMSS_MsgLen
+	copy(sig[:], sigBytes)
+
+	// Verify the XMSS signature.
+	valid := xmss.Verify(pk, msg, sig)
+
+	// NullFail: if signature is invalid and non-empty, fail.
+	if !valid {
+		str := "invalid XMSS signature"
 		return scriptError(ErrNullFail, str)
 	}
 
@@ -2127,7 +2129,7 @@ func opcodeCheckSigAdd(op *opcode, data []byte, vm *Engine) error {
 	// This op code can only be used if tapsript execution is active.
 	// Before the soft fork, this opcode was marked as an invalid reserved
 	// op code.
-	if vm.taprootCtx == nil {
+	if vm.tapscriptCtx == nil {
 		str := fmt.Sprintf("attempt to execute invalid opcode %s", op.name)
 		return scriptError(ErrReservedOpcode, str)
 	}
@@ -2150,7 +2152,7 @@ func opcodeCheckSigAdd(op *opcode, data []byte, vm *Engine) error {
 	// limit.
 	if len(sigBytes) != 0 {
 		// Account for changes in the sig ops budget after this execution.
-		if err := vm.taprootCtx.tallysigOp(); err != nil {
+		if err := vm.tapscriptCtx.tallysigOp(); err != nil {
 			return err
 		}
 	}
@@ -2194,266 +2196,11 @@ func opcodeCheckSigAdd(op *opcode, data []byte, vm *Engine) error {
 	return nil
 }
 
-// parsedSigInfo houses a raw signature along with its parsed form and a flag
-// for whether or not it has already been parsed.  It is used to prevent parsing
-// the same signature multiple times when verifying a multisig.
-type parsedSigInfo struct {
-	signature       []byte
-	parsedSignature *ecdsa.Signature
-	parsed          bool
-}
-
-// opcodeCheckMultiSig treats the top item on the stack as an integer number of
-// public keys, followed by that many entries as raw data representing the public
-// keys, followed by the integer number of signatures, followed by that many
-// entries as raw data representing the signatures.
-//
-// Due to a bug in the original Satoshi client implementation, an additional
-// dummy argument is also required by the consensus rules, although it is not
-// used.  The dummy value SHOULD be an OP_0, although that is not required by
-// the consensus rules.  When the ScriptStrictMultiSig flag is set, it must be
-// OP_0.
-//
-// All of the aforementioned stack items are replaced with a bool which
-// indicates if the requisite number of signatures were successfully verified.
-//
-// See the opcodeCheckSigVerify documentation for more details about the process
-// for verifying each signature.
-//
-// Stack transformation:
-// [... dummy [sig ...] numsigs [pubkey ...] numpubkeys] -> [... bool]
+// opcodeCheckMultiSig always returns an error because OP_CHECKMULTISIG is
+// disabled on this network. Only tapscript's OP_CHECKSIGADD is supported.
 func opcodeCheckMultiSig(op *opcode, data []byte, vm *Engine) error {
-	// If we're doing tapscript execution, then this op code is disabled.
-	if vm.taprootCtx != nil {
-		str := fmt.Sprintf("OP_CHECKMULTISIG and " +
-			"OP_CHECKMULTISIGVERIFY are disabled during " +
-			"tapscript execution")
-		return scriptError(ErrTapscriptCheckMultisig, str)
-	}
-
-	numKeys, err := vm.dstack.PopInt()
-	if err != nil {
-		return err
-	}
-
-	numPubKeys := int(numKeys.Int32())
-	if numPubKeys < 0 {
-		str := fmt.Sprintf("number of pubkeys %d is negative",
-			numPubKeys)
-		return scriptError(ErrInvalidPubKeyCount, str)
-	}
-	if numPubKeys > MaxPubKeysPerMultiSig {
-		str := fmt.Sprintf("too many pubkeys: %d > %d",
-			numPubKeys, MaxPubKeysPerMultiSig)
-		return scriptError(ErrInvalidPubKeyCount, str)
-	}
-	vm.numOps += numPubKeys
-	if vm.numOps > MaxOpsPerScript {
-		str := fmt.Sprintf("exceeded max operation limit of %d",
-			MaxOpsPerScript)
-		return scriptError(ErrTooManyOperations, str)
-	}
-
-	pubKeys := make([][]byte, 0, numPubKeys)
-	for i := 0; i < numPubKeys; i++ {
-		pubKey, err := vm.dstack.PopByteArray()
-		if err != nil {
-			return err
-		}
-		pubKeys = append(pubKeys, pubKey)
-	}
-
-	numSigs, err := vm.dstack.PopInt()
-	if err != nil {
-		return err
-	}
-	numSignatures := int(numSigs.Int32())
-	if numSignatures < 0 {
-		str := fmt.Sprintf("number of signatures %d is negative",
-			numSignatures)
-		return scriptError(ErrInvalidSignatureCount, str)
-
-	}
-	if numSignatures > numPubKeys {
-		str := fmt.Sprintf("more signatures than pubkeys: %d > %d",
-			numSignatures, numPubKeys)
-		return scriptError(ErrInvalidSignatureCount, str)
-	}
-
-	signatures := make([]*parsedSigInfo, 0, numSignatures)
-	for i := 0; i < numSignatures; i++ {
-		signature, err := vm.dstack.PopByteArray()
-		if err != nil {
-			return err
-		}
-		sigInfo := &parsedSigInfo{signature: signature}
-		signatures = append(signatures, sigInfo)
-	}
-
-	// A bug in the original Satoshi client implementation means one more
-	// stack value than should be used must be popped.  Unfortunately, this
-	// buggy behavior is now part of the consensus and a hard fork would be
-	// required to fix it.
-	dummy, err := vm.dstack.PopByteArray()
-	if err != nil {
-		return err
-	}
-
-	// Since the dummy argument is otherwise not checked, it could be any
-	// value which unfortunately provides a source of malleability.  Thus,
-	// there is a script flag to force an error when the value is NOT 0.
-	if vm.hasFlag(ScriptStrictMultiSig) && len(dummy) != 0 {
-		str := fmt.Sprintf("multisig dummy argument has length %d "+
-			"instead of 0", len(dummy))
-		return scriptError(ErrSigNullDummy, str)
-	}
-
-	// Get script starting from the most recent OP_CODESEPARATOR.
-	script := vm.subScript()
-
-	// Remove the signature in pre version 0 segwit scripts since there is
-	// no way for a signature to sign itself.
-	if !vm.isWitnessVersionActive(0) {
-		for _, sigInfo := range signatures {
-			var match bool
-			script, match = removeOpcodeByData(script, sigInfo.signature)
-			if vm.hasFlag(ScriptVerifyConstScriptCode) && match {
-				str := fmt.Sprintf("got match of %v in %v", sigInfo.signature,
-					script)
-				return scriptError(ErrNonConstScriptCode, str)
-			}
-		}
-	}
-
-	success := true
-	numPubKeys++
-	pubKeyIdx := -1
-	signatureIdx := 0
-	for numSignatures > 0 {
-		// When there are more signatures than public keys remaining,
-		// there is no way to succeed since too many signatures are
-		// invalid, so exit early.
-		pubKeyIdx++
-		numPubKeys--
-		if numSignatures > numPubKeys {
-			success = false
-			break
-		}
-
-		sigInfo := signatures[signatureIdx]
-		pubKey := pubKeys[pubKeyIdx]
-
-		// The order of the signature and public key evaluation is
-		// important here since it can be distinguished by an
-		// OP_CHECKMULTISIG NOT when the strict encoding flag is set.
-
-		rawSig := sigInfo.signature
-		if len(rawSig) == 0 {
-			// Skip to the next pubkey if signature is empty.
-			continue
-		}
-
-		// Split the signature into hash type and signature components.
-		hashType := SigHashType(rawSig[len(rawSig)-1])
-		signature := rawSig[:len(rawSig)-1]
-
-		// Only parse and check the signature encoding once.
-		var parsedSig *ecdsa.Signature
-		if !sigInfo.parsed {
-			if err := vm.checkHashTypeEncoding(hashType); err != nil {
-				return err
-			}
-			if err := vm.checkSignatureEncoding(signature); err != nil {
-				return err
-			}
-
-			// Parse the signature.
-			var err error
-			if vm.hasFlag(ScriptVerifyStrictEncoding) ||
-				vm.hasFlag(ScriptVerifyDERSignatures) {
-
-				parsedSig, err = ecdsa.ParseDERSignature(signature)
-			} else {
-				parsedSig, err = ecdsa.ParseSignature(signature)
-			}
-			sigInfo.parsed = true
-			if err != nil {
-				continue
-			}
-			sigInfo.parsedSignature = parsedSig
-		} else {
-			// Skip to the next pubkey if the signature is invalid.
-			if sigInfo.parsedSignature == nil {
-				continue
-			}
-
-			// Use the already parsed signature.
-			parsedSig = sigInfo.parsedSignature
-		}
-
-		if err := vm.checkPubKeyEncoding(pubKey); err != nil {
-			return err
-		}
-
-		// Parse the pubkey.
-		parsedPubKey, err := btcec.ParsePubKey(pubKey)
-		if err != nil {
-			continue
-		}
-
-		// Generate the signature hash based on the signature hash type.
-		var hash []byte
-		if vm.isWitnessVersionActive(0) {
-			var sigHashes *TxSigHashes
-			if vm.hashCache != nil {
-				sigHashes = vm.hashCache
-			} else {
-				sigHashes = NewTxSigHashes(
-					&vm.tx, vm.prevOutFetcher,
-				)
-			}
-
-			hash, err = calcWitnessSignatureHashRaw(script, sigHashes, hashType,
-				&vm.tx, vm.txIdx, vm.inputAmount)
-			if err != nil {
-				return err
-			}
-		} else {
-			hash = calcSignatureHash(script, hashType, &vm.tx, vm.txIdx)
-		}
-
-		var valid bool
-		if vm.sigCache != nil {
-			var sigHash chainhash.Hash
-			copy(sigHash[:], hash)
-
-			valid = vm.sigCache.Exists(sigHash, signature, pubKey)
-			if !valid && parsedSig.Verify(hash, parsedPubKey) {
-				vm.sigCache.Add(sigHash, signature, pubKey)
-				valid = true
-			}
-		} else {
-			valid = parsedSig.Verify(hash, parsedPubKey)
-		}
-
-		if valid {
-			// PubKey verified, move on to the next signature.
-			signatureIdx++
-			numSignatures--
-		}
-	}
-
-	if !success && vm.hasFlag(ScriptVerifyNullFail) {
-		for _, sig := range signatures {
-			if len(sig.signature) > 0 {
-				str := "not all signatures empty on failed checkmultisig"
-				return scriptError(ErrNullFail, str)
-			}
-		}
-	}
-
-	vm.dstack.PushBool(success)
-	return nil
+	str := "OP_CHECKMULTISIG and OP_CHECKMULTISIGVERIFY are disabled"
+	return scriptError(ErrTapscriptCheckMultisig, str)
 }
 
 // opcodeCheckMultiSigVerify is a combination of opcodeCheckMultiSig and

@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 //
 // Permission to use, copy, modify, and distribute this software for any
 // purpose with or without fee is hereby granted, provided that the above
@@ -18,9 +18,8 @@ import (
 	"os"
 	"strings"
 
-	"google.golang.org/grpc/grpclog"
-
 	"github.com/btcsuite/btclog"
+	"google.golang.org/grpc/grpclog"
 )
 
 // UseLogger sets the logger to use for the gRPC server.

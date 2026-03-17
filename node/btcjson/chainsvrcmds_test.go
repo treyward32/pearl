@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,9 +12,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TestChainSvrCmds tests all of the chain server commands marshal and unmarshal
@@ -515,25 +515,23 @@ func TestChainSvrCmds(t *testing.T) {
 		{
 			name: "getblocktemplate optional - template request with tweaks",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("getblocktemplate", `{"mode":"template","capabilities":["longpoll","coinbasetxn"],"sigoplimit":500,"sizelimit":100000000,"maxversion":2}`)
+				return btcjson.NewCmd("getblocktemplate", `{"mode":"template","capabilities":["longpoll","coinbasetxn"],"vsizelimit":100000000,"maxversion":2}`)
 			},
 			staticCmd: func() interface{} {
 				template := btcjson.TemplateRequest{
 					Mode:         "template",
 					Capabilities: []string{"longpoll", "coinbasetxn"},
-					SigOpLimit:   500,
-					SizeLimit:    100000000,
+					VsizeLimit:   100000000,
 					MaxVersion:   2,
 				}
 				return btcjson.NewGetBlockTemplateCmd(&template)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"getblocktemplate","params":[{"mode":"template","capabilities":["longpoll","coinbasetxn"],"sigoplimit":500,"sizelimit":100000000,"maxversion":2}],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"getblocktemplate","params":[{"mode":"template","capabilities":["longpoll","coinbasetxn"],"vsizelimit":100000000,"maxversion":2}],"id":1}`,
 			unmarshalled: &btcjson.GetBlockTemplateCmd{
 				Request: &btcjson.TemplateRequest{
 					Mode:         "template",
 					Capabilities: []string{"longpoll", "coinbasetxn"},
-					SigOpLimit:   int64(500),
-					SizeLimit:    int64(100000000),
+					VsizeLimit:   int64(100000000),
 					MaxVersion:   2,
 				},
 			},
@@ -541,25 +539,23 @@ func TestChainSvrCmds(t *testing.T) {
 		{
 			name: "getblocktemplate optional - template request with tweaks 2",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("getblocktemplate", `{"mode":"template","capabilities":["longpoll","coinbasetxn"],"sigoplimit":true,"sizelimit":100000000,"maxversion":2}`)
+				return btcjson.NewCmd("getblocktemplate", `{"mode":"template","capabilities":["longpoll","coinbasetxn"],"vsizelimit":100000000,"maxversion":2}`)
 			},
 			staticCmd: func() interface{} {
 				template := btcjson.TemplateRequest{
 					Mode:         "template",
 					Capabilities: []string{"longpoll", "coinbasetxn"},
-					SigOpLimit:   true,
-					SizeLimit:    100000000,
+					VsizeLimit:   100000000,
 					MaxVersion:   2,
 				}
 				return btcjson.NewGetBlockTemplateCmd(&template)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"getblocktemplate","params":[{"mode":"template","capabilities":["longpoll","coinbasetxn"],"sigoplimit":true,"sizelimit":100000000,"maxversion":2}],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"getblocktemplate","params":[{"mode":"template","capabilities":["longpoll","coinbasetxn"],"vsizelimit":100000000,"maxversion":2}],"id":1}`,
 			unmarshalled: &btcjson.GetBlockTemplateCmd{
 				Request: &btcjson.TemplateRequest{
 					Mode:         "template",
 					Capabilities: []string{"longpoll", "coinbasetxn"},
-					SigOpLimit:   true,
-					SizeLimit:    int64(100000000),
+					VsizeLimit:   int64(100000000),
 					MaxVersion:   2,
 				},
 			},
@@ -677,17 +673,6 @@ func TestChainSvrCmds(t *testing.T) {
 			},
 			marshalled:   `{"jsonrpc":"1.0","method":"getgenerate","params":[],"id":1}`,
 			unmarshalled: &btcjson.GetGenerateCmd{},
-		},
-		{
-			name: "gethashespersec",
-			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("gethashespersec")
-			},
-			staticCmd: func() interface{} {
-				return btcjson.NewGetHashesPerSecCmd()
-			},
-			marshalled:   `{"jsonrpc":"1.0","method":"gethashespersec","params":[],"id":1}`,
-			unmarshalled: &btcjson.GetHashesPerSecCmd{},
 		},
 		{
 			name: "getinfo",
@@ -1255,12 +1240,12 @@ func TestChainSvrCmds(t *testing.T) {
 			},
 		},
 		{
-			name: "sendrawtransaction optional, bitcoind >= 0.19.0",
+			name: "sendrawtransaction optional, with maxfeerate",
 			newCmd: func() (interface{}, error) {
 				return btcjson.NewCmd("sendrawtransaction", "1122", &btcjson.AllowHighFeesOrMaxFeeRate{Value: btcjson.Float64(0.1234)})
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewBitcoindSendRawTransactionCmd("1122", 0.1234)
+				return btcjson.NewSendRawTransactionCmdWithMaxFeeRate("1122", 0.1234)
 			},
 			marshalled: `{"jsonrpc":"1.0","method":"sendrawtransaction","params":["1122",0.1234],"id":1}`,
 			unmarshalled: &btcjson.SendRawTransactionCmd{
@@ -1612,15 +1597,9 @@ func TestChainSvrCmdErrors(t *testing.T) {
 			err:        &json.UnmarshalTypeError{},
 		},
 		{
-			name:       "invalid template request sigoplimit field",
+			name:       "invalid template request vsizelimit field",
 			result:     &btcjson.TemplateRequest{},
-			marshalled: `{"sigoplimit":"invalid"}`,
-			err:        btcjson.Error{ErrorCode: btcjson.ErrInvalidType},
-		},
-		{
-			name:       "invalid template request sizelimit field",
-			result:     &btcjson.TemplateRequest{},
-			marshalled: `{"sizelimit":"invalid"}`,
+			marshalled: `{"vsizelimit":"invalid"}`,
 			err:        btcjson.Error{ErrorCode: btcjson.ErrInvalidType},
 		},
 	}

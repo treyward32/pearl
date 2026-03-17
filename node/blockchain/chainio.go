@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 
 	// latestUtxoSetBucketVersion is the current version of the utxo set
 	// bucket that is used to track all unspent outputs.
-	latestUtxoSetBucketVersion = 2
+	latestUtxoSetBucketVersion = 1
 
 	// latestSpendJournalBucketVersion is the current version of the spend
 	// journal bucket that is used to track all spent transactions for use
@@ -46,6 +46,14 @@ var (
 	// heightIndexBucketName is the name of the db bucket used to house to
 	// the block height -> block hash index.
 	heightIndexBucketName = []byte("heightidx")
+
+	// statusIndexBucketName is the name of the db bucket used to house
+	// the block hash -> block status index.
+	statusIndexBucketName = []byte("statusidx")
+
+	// vsizeIndexBucketName is the name of the db bucket used to house
+	// the block hash -> block vsize index.
+	vsizeIndexBucketName = []byte("vsize")
 
 	// chainStateKeyName is the name of the db key used to store the best
 	// chain state.
@@ -69,7 +77,7 @@ var (
 
 	// utxoSetBucketName is the name of the db bucket used to house the
 	// unspent transaction output set.
-	utxoSetBucketName = []byte("utxosetv2")
+	utxoSetBucketName = []byte("utxoset")
 
 	// byteOrder is the preferred byte order used for serializing numeric
 	// fields for storage in the database.
@@ -170,23 +178,17 @@ func dbFetchOrCreateVersion(dbTx database.Tx, key []byte, defaultVersion uint32)
 //
 // NOTE: This format is NOT self describing.  The additional details such as
 // the number of entries (transaction inputs) are expected to come from the
-// block itself and the utxo set (for legacy entries).  The rationale in doing
-// this is to save space.  This is also the reason the spent outputs are
-// serialized in the reverse order they are spent because later transactions are
-// allowed to spend outputs from earlier ones in the same block.
-//
-// The reserved field below used to keep track of the version of the containing
-// transaction when the height in the header code was non-zero, however the
-// height is always non-zero now, but keeping the extra reserved field allows
-// backwards compatibility.
+// block itself.  The rationale in doing this is to save space.  This is also
+// the reason the spent outputs are serialized in the reverse order they are
+// spent because later transactions are allowed to spend outputs from earlier
+// ones in the same block.
 //
 // The serialized format is:
 //
-//   [<header code><reserved><compressed txout>],...
+//   [<header code><compressed txout>],...
 //
 //   Field                Type     Size
 //   header code          VLQ      variable
-//   reserved             byte     1
 //   compressed txout
 //     compressed amount  VLQ      variable
 //     compressed script  []byte   variable
@@ -198,51 +200,44 @@ func dbFetchOrCreateVersion(dbTx database.Tx, key []byte, defaultVersion uint32)
 // Example 1:
 // From block 170 in main blockchain.
 //
-//    1300320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c
-//    <><><------------------------------------------------------------------>
-//     | |                                  |
-//     | reserved                  compressed txout
+//    13320511db93e1dcdb8a016b49840f8c53bc1eb68a382e97b1482ecad7b148a6909a5c
+//    <><------------------------------------------------------------------>
+//     |                                  |
+//     |                         compressed txout
 //    header code
 //
 //  - header code: 0x13 (coinbase, height 9)
-//  - reserved: 0x00
 //  - compressed txout 0:
-//    - 0x32: VLQ-encoded compressed amount for 5000000000 (50 BTC)
+//    - 0x32: VLQ-encoded compressed amount for 5000000000 (50 PRL)
 //    - 0x05: special script type pay-to-pubkey
 //    - 0x11...5c: x-coordinate of the pubkey
 //
 // Example 2:
 // Adapted from block 100025 in main blockchain.
 //
-//    8b99700091f20f006edbc6c4d31bae9f1ccc38538a114bf42de65e868b99700086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec
-//    <----><><----------------------------------------------><----><><---------------------------------------------->
-//     |    |                         |                        |    |                         |
-//     |    reserved         compressed txout                  |    reserved         compressed txout
-//    header code                                          header code
+//    8b997091f20f006edbc6c4d31bae9f1ccc38538a114bf42de65e868b997086c64700b2fb57eadf61e106a100a7445a8c3f67898841ec
+//    <----><----------------------------------------------><----><---------------------------------------------->
+//     |                         |                            |                         |
+//     |                 compressed txout                     |                 compressed txout
+//    header code                                        header code
 //
 //  - Last spent output:
 //    - header code: 0x8b9970 (not coinbase, height 100024)
-//    - reserved: 0x00
 //    - compressed txout:
-//      - 0x91f20f: VLQ-encoded compressed amount for 34405000000 (344.05 BTC)
+//      - 0x91f20f: VLQ-encoded compressed amount for 34405000000 (344.05 PRL)
 //      - 0x00: special script type pay-to-pubkey-hash
 //      - 0x6e...86: pubkey hash
 //  - Second to last spent output:
 //    - header code: 0x8b9970 (not coinbase, height 100024)
-//    - reserved: 0x00
 //    - compressed txout:
-//      - 0x86c647: VLQ-encoded compressed amount for 13761000000 (137.61 BTC)
+//      - 0x86c647: VLQ-encoded compressed amount for 13761000000 (137.61 PRL)
 //      - 0x00: special script type pay-to-pubkey-hash
 //      - 0xb2...ec: pubkey hash
 // -----------------------------------------------------------------------------
 
 // SpentTxOut contains a spent transaction output and potentially additional
 // contextual information such as whether or not it was contained in a coinbase
-// transaction, the version of the transaction it was contained in, and which
-// block height the containing transaction was included in.  As described in
-// the comments above, the additional contextual information will only be valid
-// when this spent txout is spending the last unspent output of the containing
-// transaction.
+// transaction and which block height the containing transaction was included in.
 type SpentTxOut struct {
 	// Amount is the amount of the output.
 	Amount int64
@@ -299,12 +294,6 @@ func spentTxOutHeaderCode(stxo *SpentTxOut) uint64 {
 // serialize the passed stxo according to the format described above.
 func spentTxOutSerializeSize(stxo *SpentTxOut) int {
 	size := serializeSizeVLQ(spentTxOutHeaderCode(stxo))
-	if stxo.Height > 0 {
-		// The legacy v1 spend journal format conditionally tracked the
-		// containing transaction version when the height was non-zero,
-		// so this is required for backwards compat.
-		size += serializeSizeVLQ(0)
-	}
 	return size + compressedTxOutSize(uint64(stxo.Amount), stxo.PkScript)
 }
 
@@ -315,12 +304,6 @@ func spentTxOutSerializeSize(stxo *SpentTxOut) int {
 func putSpentTxOut(target []byte, stxo *SpentTxOut) int {
 	headerCode := spentTxOutHeaderCode(stxo)
 	offset := putVLQ(target, headerCode)
-	if stxo.Height > 0 {
-		// The legacy v1 spend journal format conditionally tracked the
-		// containing transaction version when the height was non-zero,
-		// so this is required for backwards compat.
-		offset += putVLQ(target[offset:], 0)
-	}
 	return offset + putCompressedTxOut(target[offset:], uint64(stxo.Amount),
 		stxo.PkScript)
 }
@@ -347,17 +330,6 @@ func decodeSpentTxOut(serialized []byte, stxo *SpentTxOut) (int, error) {
 	// Bits 1-x encode height of containing transaction.
 	stxo.IsCoinBase = code&0x01 != 0
 	stxo.Height = int32(code >> 1)
-	if stxo.Height > 0 {
-		// The legacy v1 spend journal format conditionally tracked the
-		// containing transaction version when the height was non-zero,
-		// so this is required for backwards compat.
-		_, bytesRead := deserializeVLQ(serialized[offset:])
-		offset += bytesRead
-		if offset >= len(serialized) {
-			return offset, errDeserialize("unexpected end of data " +
-				"after reserved")
-		}
-	}
 
 	// Decode the compressed txout.
 	amount, pkScript, bytesRead, err := decodeCompressedTxOut(
@@ -453,10 +425,6 @@ func serializeSpendJournalEntry(stxos []SpentTxOut) []byte {
 
 // dbFetchSpendJournalEntry fetches the spend journal entry for the passed block
 // and deserializes it into a slice of spent txout entries.
-//
-// NOTE: Legacy entries will not have the coinbase flag or height set unless it
-// was the final output spend in the containing transaction.  It is up to the
-// caller to handle this properly by looking the information up in the utxo set.
 func dbFetchSpendJournalEntry(dbTx database.Tx, block *btcutil.Block) ([]SpentTxOut, error) {
 	// Exclude the coinbase transaction since it can't spend anything.
 	spendBucket := dbTx.Metadata().Bucket(spendJournalBucketName)
@@ -517,7 +485,7 @@ func dbPruneSpendJournalEntry(dbTx database.Tx, blockHashes []chainhash.Hash) er
 // The unspent transaction output (utxo) set consists of an entry for each
 // unspent output using a format that is optimized to reduce space using domain
 // specific compression algorithms.  This format is a slightly modified version
-// of the format used in Bitcoin Core.
+// of the format used by Bitcoin Core.
 //
 // Each entry is keyed by an outpoint as specified below.  It is important to
 // note that the key encoding uses a VLQ, which employs an MSB encoding so
@@ -556,7 +524,7 @@ func dbPruneSpendJournalEntry(dbTx database.Tx, blockHashes []chainhash.Hash) er
 //
 //  - header code: 0x03 (coinbase, height 1)
 //  - compressed txout:
-//    - 0x32: VLQ-encoded compressed amount for 5000000000 (50 BTC)
+//    - 0x32: VLQ-encoded compressed amount for 5000000000 (50 PRL)
 //    - 0x04: special script type pay-to-pubkey
 //    - 0x96...52: x-coordinate of the pubkey
 //
@@ -571,7 +539,7 @@ func dbPruneSpendJournalEntry(dbTx database.Tx, blockHashes []chainhash.Hash) er
 //
 //  - header code: 0x8cf316 (not coinbase, height 113931)
 //  - compressed txout:
-//    - 0x8009: VLQ-encoded compressed amount for 15000000 (0.15 BTC)
+//    - 0x8009: VLQ-encoded compressed amount for 15000000 (0.15 PRL)
 //    - 0x00: special script type pay-to-pubkey-hash
 //    - 0xb8...58: pubkey hash
 //
@@ -586,7 +554,7 @@ func dbPruneSpendJournalEntry(dbTx database.Tx, blockHashes []chainhash.Hash) er
 //
 //  - header code: 0xa8a258 (not coinbase, height 338156)
 //  - compressed txout:
-//    - 0x8ba5b9e763: VLQ-encoded compressed amount for 366875659 (3.66875659 BTC)
+//    - 0x8ba5b9e763: VLQ-encoded compressed amount for 366875659 (3.66875659 PRL)
 //    - 0x01: special script type pay-to-script-hash
 //    - 0x1d...e6: script hash
 // -----------------------------------------------------------------------------
@@ -1075,21 +1043,24 @@ func (b *BlockChain) createChainState() error {
 	// Create a new node from the genesis block and set it as the best node.
 	genesisBlock := btcutil.NewBlock(b.chainParams.GenesisBlock)
 	genesisBlock.SetHeight(0)
-	header := &genesisBlock.MsgBlock().Header
-	node := newBlockNode(header, nil)
-	node.status = statusDataStored | statusValid
-	b.bestChain.SetTip(node)
+	header := genesisBlock.MsgBlock().BlockHeader()
+	status := statusDataStored | statusValid
+	vsize := GetBlockVsize(genesisBlock)
+	genesisBlockNode := newBlockNode(header, nil, status, vsize)
+	b.bestChain.SetTip(genesisBlockNode)
 
 	// Add the new node to the index which is used for faster lookups.
-	b.index.addNode(node)
+	b.index.addNode(genesisBlockNode)
 
 	// Initialize the state related to the best block.  Since it is the
 	// genesis block, use its timestamp for the median time.
 	numTxns := uint64(len(genesisBlock.MsgBlock().Transactions))
 	blockSize := uint64(genesisBlock.MsgBlock().SerializeSize())
-	blockWeight := uint64(GetBlockWeight(genesisBlock))
-	b.stateSnapshot = newBestState(node, blockSize, blockWeight, numTxns,
-		numTxns, time.Unix(node.timestamp, 0))
+	blockVsize := uint64(genesisBlockNode.vsize)
+	b.stateSnapshot = newBestState(genesisBlockNode, blockSize, blockVsize, numTxns,
+		numTxns, time.Unix(genesisBlockNode.timestamp, 0),
+		time.Unix(genesisBlockNode.timestamp, 0),
+	)
 
 	// Create the initial the database chain state including creating the
 	// necessary index buckets and inserting the genesis block.
@@ -1112,6 +1083,18 @@ func (b *BlockChain) createChainState() error {
 		// Create the bucket that houses the chain block height to hash
 		// index.
 		_, err = meta.CreateBucket(heightIndexBucketName)
+		if err != nil {
+			return err
+		}
+
+		// Create the bucket that houses the block hash to status index.
+		_, err = meta.CreateBucket(statusIndexBucketName)
+		if err != nil {
+			return err
+		}
+
+		// Create the bucket that houses the block vsize index.
+		_, err = meta.CreateBucket(vsizeIndexBucketName)
 		if err != nil {
 			return err
 		}
@@ -1142,27 +1125,33 @@ func (b *BlockChain) createChainState() error {
 			return err
 		}
 
-		// Save the genesis block to the block index database.
-		err = dbStoreBlockNode(dbTx, node)
+		// Store the genesis block status in the block index database.
+		err = dbStoreBlockStatus(dbTx, genesisBlockNode.hash, genesisBlockNode.status)
+		if err != nil {
+			return err
+		}
+
+		// Store the genesis block vsize in the vsize index.
+		err = dbStoreBlockVsize(dbTx, genesisBlockNode.hash, genesisBlockNode.vsize)
 		if err != nil {
 			return err
 		}
 
 		// Add the genesis block hash to height and height to hash
 		// mappings to the index.
-		err = dbPutBlockIndex(dbTx, &node.hash, node.height)
+		err = dbPutBlockIndex(dbTx, &genesisBlockNode.hash, genesisBlockNode.height)
 		if err != nil {
 			return err
 		}
 
 		// Store the current best chain state into the database.
-		err = dbPutBestState(dbTx, b.stateSnapshot, node.workSum)
+		err = dbPutBestState(dbTx, b.stateSnapshot, genesisBlockNode.workSum)
 		if err != nil {
 			return err
 		}
 
 		// Store the genesis block into the database.
-		return dbStoreBlock(dbTx, genesisBlock)
+		return dbStoreBlock(dbTx, genesisBlock, genesisBlockNode.vsize)
 	})
 	return err
 }
@@ -1173,10 +1162,9 @@ func (b *BlockChain) createChainState() error {
 func (b *BlockChain) initChainState() error {
 	// Determine the state of the chain database. We may need to initialize
 	// everything from scratch or upgrade certain buckets.
-	var initialized, hasBlockIndex bool
+	var initialized bool
 	err := b.db.View(func(dbTx database.Tx) error {
 		initialized = dbTx.Metadata().Get(chainStateKeyName) != nil
-		hasBlockIndex = dbTx.Metadata().Bucket(blockIndexBucketName) != nil
 		return nil
 	})
 	if err != nil {
@@ -1187,13 +1175,6 @@ func (b *BlockChain) initChainState() error {
 		// At this point the database has not already been initialized, so
 		// initialize both it and the chain state to the genesis block.
 		return b.createChainState()
-	}
-
-	if !hasBlockIndex {
-		err := migrateBlockIndex(b.db)
-		if err != nil {
-			return nil
-		}
 	}
 
 	// Attempt to load the chain state from the database.
@@ -1222,9 +1203,17 @@ func (b *BlockChain) initChainState() error {
 		var lastNode *blockNode
 		cursor := blockIndexBucket.Cursor()
 		for ok := cursor.First(); ok; ok = cursor.Next() {
-			header, status, err := deserializeBlockRow(cursor.Value())
+			var header wire.BlockHeader
+			headerBytes := cursor.Value()
+			err := header.Deserialize(bytes.NewReader(headerBytes))
 			if err != nil {
 				return err
+			}
+			blockHash := header.BlockHash()
+
+			status, err := dbFetchBlockStatus(dbTx, blockHash)
+			if err != nil {
+				return fmt.Errorf("initChainState: Could not find status for block %s: %w", blockHash, err)
 			}
 
 			// Determine the parent block node. Since we iterate block headers
@@ -1232,7 +1221,6 @@ func (b *BlockChain) initChainState() error {
 			// very good chance the previous header processed is the parent.
 			var parent *blockNode
 			if lastNode == nil {
-				blockHash := header.BlockHash()
 				if !blockHash.IsEqual(b.chainParams.GenesisHash) {
 					return AssertError(fmt.Sprintf("initChainState: Expected "+
 						"first entry in block index to be genesis block, "+
@@ -1251,11 +1239,15 @@ func (b *BlockChain) initChainState() error {
 				}
 			}
 
+			// Load vsize from database
+			vsize, err := dbFetchBlockVsize(dbTx, blockHash)
+			if err != nil {
+				return err
+			}
+
 			// Initialize the block node for the block, connect it,
 			// and add it to the block index.
-			node := new(blockNode)
-			initBlockNode(node, header, parent)
-			node.status = status
+			node := newBlockNode(&header, parent, status, vsize)
 			b.index.addNode(node)
 
 			lastNode = node
@@ -1301,11 +1293,13 @@ func (b *BlockChain) initChainState() error {
 		}
 
 		// Initialize the state related to the best block.
-		blockSize := uint64(len(blockBytes))
-		blockWeight := uint64(GetBlockWeight(btcutil.NewBlock(&block)))
+		blockSize := uint64(block.SerializeSize())
+		blockVsize := uint64(GetBlockVsize(btcutil.NewBlock(&block)))
 		numTxns := uint64(len(block.Transactions))
-		b.stateSnapshot = newBestState(tip, blockSize, blockWeight,
-			numTxns, state.totalTxns, CalcPastMedianTime(tip))
+		b.stateSnapshot = newBestState(tip, blockSize, blockVsize,
+			numTxns, state.totalTxns, CalcPastMedianTime(tip),
+			time.Unix(tip.timestamp, 0),
+		)
 
 		return nil
 	})
@@ -1338,34 +1332,6 @@ func deserializeBlockRow(blockRow []byte) (*wire.BlockHeader, blockStatus, error
 	return &header, blockStatus(statusByte), nil
 }
 
-// dbFetchHeaderByHash uses an existing database transaction to retrieve the
-// block header for the provided hash.
-func dbFetchHeaderByHash(dbTx database.Tx, hash *chainhash.Hash) (*wire.BlockHeader, error) {
-	headerBytes, err := dbTx.FetchBlockHeader(hash)
-	if err != nil {
-		return nil, err
-	}
-
-	var header wire.BlockHeader
-	err = header.Deserialize(bytes.NewReader(headerBytes))
-	if err != nil {
-		return nil, err
-	}
-
-	return &header, nil
-}
-
-// dbFetchHeaderByHeight uses an existing database transaction to retrieve the
-// block header for the provided height.
-func dbFetchHeaderByHeight(dbTx database.Tx, height int32) (*wire.BlockHeader, error) {
-	hash, err := dbFetchHashByHeight(dbTx, height)
-	if err != nil {
-		return nil, err
-	}
-
-	return dbFetchHeaderByHash(dbTx, hash)
-}
-
 // dbFetchBlockByNode uses an existing database transaction to retrieve the
 // raw block for the provided node, deserialize it, and return a btcutil.Block
 // with the height set.
@@ -1386,31 +1352,131 @@ func dbFetchBlockByNode(dbTx database.Tx, node *blockNode) (*btcutil.Block, erro
 	return block, nil
 }
 
-// dbStoreBlockNode stores the block header and validation status to the block
-// index bucket. This overwrites the current entry if there exists one.
-func dbStoreBlockNode(dbTx database.Tx, node *blockNode) error {
-	// Serialize block data to be stored.
-	w := bytes.NewBuffer(make([]byte, 0, blockHdrSize+1))
-	header := node.Header()
-	err := header.Serialize(w)
-	if err != nil {
-		return err
+func dbStoreBlockStatus(dbTx database.Tx, blockHash chainhash.Hash, status blockStatus) error {
+	blockStatusBucket := dbTx.Metadata().Bucket(statusIndexBucketName)
+	return blockStatusBucket.Put(blockHash[:], []byte{byte(status)})
+}
+
+func dbFetchBlockStatus(dbTx database.Tx, blockHash chainhash.Hash) (blockStatus, error) {
+	blockStatusBucket := dbTx.Metadata().Bucket(statusIndexBucketName)
+	statusBytes := blockStatusBucket.Get(blockHash[:])
+	if statusBytes == nil {
+		return statusNone, fmt.Errorf("block %s not found", blockHash)
 	}
-	err = w.WriteByte(byte(node.status))
+	return blockStatus(statusBytes[0]), nil
+}
+
+// dbStoreBlockVsize stores the vsize for a block in the database.
+func dbStoreBlockVsize(dbTx database.Tx, blockHash chainhash.Hash, vsize int64) error {
+	vsizeIndexBucket := dbTx.Metadata().Bucket(vsizeIndexBucketName)
+
+	// Serialize vsize as 8 bytes (int64)
+	var buf [8]byte
+	byteOrder.PutUint64(buf[:], uint64(vsize))
+	return vsizeIndexBucket.Put(blockHash[:], buf[:])
+}
+
+// dbFetchBlockVsize retrieves the vsize for a block from the database.
+func dbFetchBlockVsize(dbTx database.Tx, blockHash chainhash.Hash) (int64, error) {
+	vsizeIndexBucket := dbTx.Metadata().Bucket(vsizeIndexBucketName)
+
+	vsizeBytes := vsizeIndexBucket.Get(blockHash[:])
+	if vsizeBytes == nil {
+		return 0, fmt.Errorf("vsize not found for block %s", blockHash)
+	}
+
+	if len(vsizeBytes) != 8 {
+		return 0, fmt.Errorf("invalid vsize data for block %s", blockHash)
+	}
+
+	vsize := int64(byteOrder.Uint64(vsizeBytes))
+	return vsize, nil
+}
+
+// dbFetchCertificate retrieves a certificate for a block from the database.
+// It fetches the full block and extracts the certificate from it.
+func dbFetchCertificate(dbTx database.Tx, blockHash chainhash.Hash) (wire.BlockCertificate, error) {
+	// Fetch the block data from database
+	blockBytes, err := dbTx.FetchBlock(&blockHash)
+	if err != nil {
+		return nil, err
+	}
+
+	// Deserialize the block to extract certificate
+	var block wire.MsgBlock
+	err = block.Deserialize(bytes.NewReader(blockBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize block: %w", err)
+	}
+
+	// Return the certificate from the block header
+	return block.BlockCertificate(), nil
+}
+
+// dbStoreBlock stores the provided block in the database. The block header is
+// written to the block index bucket and full block data is written to ffldb.
+func dbStoreBlockHeader(dbTx database.Tx, blockHeader *wire.BlockHeader, height uint32) error {
+	// Serialize block data to be stored. This is just the serialized header.
+	w := bytes.NewBuffer(make([]byte, 0, blockHdrSize)) // TODO Or: should optimize this to use pre-allocated buffer
+	err := blockHeader.Serialize(w)
 	if err != nil {
 		return err
 	}
 	value := w.Bytes()
 
 	// Write block header data to block index bucket.
+	blockHash := blockHeader.BlockHash()
 	blockIndexBucket := dbTx.Metadata().Bucket(blockIndexBucketName)
-	key := blockIndexKey(&node.hash, uint32(node.height))
+	key := blockIndexKey(&blockHash, height)
 	return blockIndexBucket.Put(key, value)
 }
 
-// dbStoreBlock stores the provided block in the database if it is not already
-// there. The full block data is written to ffldb.
-func dbStoreBlock(dbTx database.Tx, block *btcutil.Block) error {
+func dbFetchBlockHeader(dbTx database.Tx, blockHash chainhash.Hash, height uint32) (*wire.BlockHeader, error) {
+	blockIndexBucket := dbTx.Metadata().Bucket(blockIndexBucketName)
+	key := blockIndexKey(&blockHash, height)
+	value := blockIndexBucket.Get(key)
+	if value == nil {
+		return nil, fmt.Errorf("block %s not found", blockHash)
+	}
+	var header wire.BlockHeader
+	err := header.Deserialize(bytes.NewReader(value))
+	if err != nil {
+		return nil, err
+	}
+	return &header, nil
+}
+
+// dbStoreBlock stores the provided block in the database. The block header is
+// written to the block index bucket, vsize to vsize index, and full block data
+// is written to ffldb.
+func dbStoreBlock(dbTx database.Tx, block *btcutil.Block, vsize int64) error {
+	if block.Height() == btcutil.BlockHeightUnknown {
+		return fmt.Errorf("cannot store block %s with unknown height",
+			block.Hash())
+	}
+
+	// First store block header in the block index bucket.
+	err := dbStoreBlockHeader(dbTx, block.MsgBlock().BlockHeader(),
+		uint32(block.Height()))
+	if err != nil {
+		return err
+	}
+
+	// Store block status in the status index to indicate that the block is persisted in the database.
+	err = dbStoreBlockStatus(dbTx, *block.Hash(), statusDataStored)
+	if err != nil {
+		return err
+	}
+
+	// Store block vsize in the vsize index.
+	err = dbStoreBlockVsize(dbTx, *block.Hash(), vsize)
+	if err != nil {
+		return err
+	}
+
+	// Then store block data in ffldb if we haven't already.
+	// Note: Certificate is part of the block serialization (certificate-first),
+	// so it's automatically stored with the block. No separate indexing needed.
 	hasBlock, err := dbTx.HasBlock(block.Hash())
 	if err != nil {
 		return err

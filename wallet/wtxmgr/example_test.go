@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -6,21 +6,20 @@ package wtxmgr
 
 import (
 	"fmt"
-	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 var (
 	// Spends: bogus
-	// Outputs: 10 BTC
+	// Outputs: 10 PRL
 	exampleTxRecordA *TxRecord
 
 	// Spends: A:0
-	// Outputs: 5 BTC, 5 BTC
+	// Outputs: 5 PRL, 5 PRL
 	exampleTxRecordB *TxRecord
 )
 
@@ -44,13 +43,13 @@ var exampleBlock100 = makeBlockMeta(100)
 
 // This example demonstrates reporting the Store balance given an unmined and
 // mined transaction given 0, 1, and 6 block confirmations.
-func ExampleStore_Balance(t *testing.T) {
-	s, db, teardown, err := testStore(t)
-	defer teardown()
+func ExampleStore_Balance() {
+	s, db, cleanup, err := exampleStore()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	defer cleanup()
 
 	// Prints balances for 0 block confirmations, 1 confirmation, and 6
 	// confirmations.
@@ -80,7 +79,7 @@ func ExampleStore_Balance(t *testing.T) {
 		fmt.Printf("%v, %v, %v\n", zeroConfBal, oneConfBal, sixConfBal)
 	}
 
-	// Insert a transaction which outputs 10 BTC unmined and mark the output
+	// Insert a transaction which outputs 10 PRL unmined and mark the output
 	// as a credit.
 	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		ns := tx.ReadWriteBucket(namespaceKey)
@@ -110,23 +109,23 @@ func ExampleStore_Balance(t *testing.T) {
 	printBalances(105)
 
 	// Output:
-	// 10 BTC, 0 BTC, 0 BTC
-	// 10 BTC, 10 BTC, 0 BTC
-	// 10 BTC, 10 BTC, 10 BTC
+	// 10 PRL, 0 PRL, 0 PRL
+	// 10 PRL, 10 PRL, 0 PRL
+	// 10 PRL, 10 PRL, 10 PRL
 }
 
-func ExampleStore_Rollback(t *testing.T) {
-	s, db, teardown, err := testStore(t)
-	defer teardown()
+func ExampleStore_Rollback() {
+	s, db, cleanup, err := exampleStore()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	defer cleanup()
 
 	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		ns := tx.ReadWriteBucket(namespaceKey)
 
-		// Insert a transaction which outputs 10 BTC in a block at height 100.
+		// Insert a transaction which outputs 10 PRL in a block at height 100.
 		err := s.InsertTx(ns, exampleTxRecordA, &exampleBlock100)
 		if err != nil {
 			return err
@@ -158,14 +157,14 @@ func ExampleStore_Rollback(t *testing.T) {
 	// -1
 }
 
-func Example_basicUsage(t *testing.T) {
+func Example_basicUsage() {
 	// Open the database.
-	db, dbTeardown, err := testDB(t)
-	defer dbTeardown()
+	db, cleanup, err := exampleDB()
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
+	defer cleanup()
 
 	// Open a read-write transaction to operate on the database.
 	dbtx, err := db.BeginReadWriteTx()
@@ -188,13 +187,13 @@ func Example_basicUsage(t *testing.T) {
 		fmt.Println(err)
 		return
 	}
-	s, err := Open(b, &chaincfg.TestNet3Params)
+	s, err := Open(b, &chaincfg.TestNetParams)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	// Insert an unmined transaction that outputs 10 BTC to a wallet address
+	// Insert an unmined transaction that outputs 10 PRL to a wallet address
 	// at output 0.
 	err = s.InsertTx(b, exampleTxRecordA, nil)
 	if err != nil {
@@ -208,7 +207,7 @@ func Example_basicUsage(t *testing.T) {
 	}
 
 	// Insert a second transaction which spends the output, and creates two
-	// outputs.  Mark the second one (5 BTC) as wallet change.
+	// outputs.  Mark the second one (5 PRL) as wallet change.
 	err = s.InsertTx(b, exampleTxRecordB, nil)
 	if err != nil {
 		fmt.Println(err)
@@ -251,6 +250,6 @@ func Example_basicUsage(t *testing.T) {
 	}
 
 	// Output:
-	// 5 BTC
+	// 5 PRL
 	// true
 }

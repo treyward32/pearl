@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,12 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil/bech32"
+	"github.com/pearl-research-labs/pearl/node/btcutil/bech32"
 )
 
 // This example demonstrates how to decode a bech32 encoded string.
 func ExampleDecode() {
-	encoded := "bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7k7grplx"
+	encoded := "prl1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kag2tja"
 	hrp, decoded, err := bech32.Decode(encoded)
 	if err != nil {
 		fmt.Println("Error:", err)
@@ -24,7 +24,7 @@ func ExampleDecode() {
 	fmt.Println("Decoded Data:", hex.EncodeToString(decoded))
 
 	// Output:
-	// Decoded human-readable part: bc
+	// Decoded human-readable part: prl
 	// Decoded Data: 010e140f070d1a001912060b0d081504140311021d030c1d03040f1814060e1e160e140f070d1a001912060b0d081504140311021d030c1d03040f1814060e1e16
 }
 

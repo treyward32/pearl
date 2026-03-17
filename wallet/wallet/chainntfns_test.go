@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 const (
@@ -54,11 +54,11 @@ func createMockChainConn(genesis *wire.MsgBlock, n uint32,
 	c.blocks[genesisHash] = genesis
 
 	for i := uint32(1); i <= n; i++ {
-		prevTimestamp := c.blocks[c.blockHashes[i-1]].Header.Timestamp
+		prevTimestamp := c.blocks[c.blockHashes[i-1]].BlockHeader().Timestamp
 		block := &wire.MsgBlock{
-			Header: wire.BlockHeader{
+			MsgHeader: wire.MsgHeader{BlockHeader: wire.BlockHeader{
 				Timestamp: prevTimestamp.Add(blockInterval),
-			},
+			}},
 		}
 
 		blockHash := block.BlockHash()
@@ -98,7 +98,7 @@ func (c *mockChainConn) GetBlockHeader(hash *chainhash.Hash) (*wire.BlockHeader,
 		return nil, fmt.Errorf("header for block %v not found", hash)
 	}
 
-	return &block.Header, nil
+	return block.BlockHeader(), nil
 }
 
 // mockBirthdayStore is a mock in-memory implementation of the birthdayStore interface
@@ -210,7 +210,7 @@ func TestBirthdaySanityCheckLowerEstimate(t *testing.T) {
 
 	// We'll start by defining our birthday timestamp to be around the
 	// timestamp of the 1337th block.
-	genesisTimestamp := chainParams.GenesisBlock.Header.Timestamp
+	genesisTimestamp := chainParams.GenesisBlock.BlockHeader().Timestamp
 	birthday := genesisTimestamp.Add(1337 * defaultBlockInterval)
 
 	// We'll establish a connection to a mock chain of 5000 blocks.
@@ -263,7 +263,7 @@ func TestBirthdaySanityCheckHigherEstimate(t *testing.T) {
 
 	// We'll start by defining our birthday timestamp to be around the
 	// timestamp of the 1337th block.
-	genesisTimestamp := chainParams.GenesisBlock.Header.Timestamp
+	genesisTimestamp := chainParams.GenesisBlock.BlockHeader().Timestamp
 	birthday := genesisTimestamp.Add(1337 * defaultBlockInterval)
 
 	// We'll establish a connection to a mock chain of 5000 blocks.
@@ -280,7 +280,7 @@ func TestBirthdaySanityCheckHigherEstimate(t *testing.T) {
 		birthdayBlock: &waddrmgr.BlockStamp{
 			Hash:      bestBlock.BlockHash(),
 			Height:    5000,
-			Timestamp: bestBlock.Header.Timestamp,
+			Timestamp: bestBlock.BlockHeader().Timestamp,
 		},
 		birthdayBlockVerified: false,
 		syncedTo: waddrmgr.BlockStamp{

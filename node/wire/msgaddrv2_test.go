@@ -41,6 +41,15 @@ func TestAddrV2Decode(t *testing.T) {
 			false,
 			1,
 		},
+		// Truncated address.
+		{
+			[]byte{
+				0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x04,
+				0x7f, 0x00, 0x00,
+			},
+			true,
+			0,
+		},
 	}
 
 	t.Logf("Running %d tests", len(tests))
@@ -48,7 +57,7 @@ func TestAddrV2Decode(t *testing.T) {
 		r := bytes.NewReader(test.buf)
 		m := &MsgAddrV2{}
 
-		err := m.BtcDecode(r, 0, LatestEncoding)
+		err := m.PrlDecode(r, 0, LatestEncoding)
 		if test.expectedError {
 			if err == nil {
 				t.Errorf("Test #%d expected error", i)

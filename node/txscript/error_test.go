@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -21,10 +21,8 @@ func TestErrorCodeStringer(t *testing.T) {
 		{ErrInvalidFlags, "ErrInvalidFlags"},
 		{ErrInvalidIndex, "ErrInvalidIndex"},
 		{ErrUnsupportedAddress, "ErrUnsupportedAddress"},
-		{ErrTooManyRequiredSigs, "ErrTooManyRequiredSigs"},
 		{ErrTooMuchNullData, "ErrTooMuchNullData"},
 		{ErrUnsupportedScriptVersion, "ErrUnsupportedScriptVersion"},
-		{ErrNotMultisigScript, "ErrNotMultisigScript"},
 		{ErrEarlyReturn, "ErrEarlyReturn"},
 		{ErrEmptyStack, "ErrEmptyStack"},
 		{ErrEvalFalse, "ErrEvalFalse"},
@@ -34,8 +32,6 @@ func TestErrorCodeStringer(t *testing.T) {
 		{ErrElementTooBig, "ErrElementTooBig"},
 		{ErrTooManyOperations, "ErrTooManyOperations"},
 		{ErrStackOverflow, "ErrStackOverflow"},
-		{ErrInvalidPubKeyCount, "ErrInvalidPubKeyCount"},
-		{ErrInvalidSignatureCount, "ErrInvalidSignatureCount"},
 		{ErrNumberTooBig, "ErrNumberTooBig"},
 		{ErrVerify, "ErrVerify"},
 		{ErrEqualVerify, "ErrEqualVerify"},
@@ -98,6 +94,9 @@ func TestErrorCodeStringer(t *testing.T) {
 		{ErrTaprootMaxSigOps, "ErrTaprootMaxSigOps"},
 		{ErrNonConstScriptCode, "ErrNonConstScriptCode"},
 		{ErrCodeSeparator, "ErrCodeSeparator"},
+		{ErrMerkleRootNoKeyPathSpend, "ErrMerkleRootNoKeyPathSpend"},
+		{ErrMerkleRootMerkleProofInvalid, "ErrMerkleRootMerkleProofInvalid"},
+		{ErrMerkleRootControlBlockInvalidParity, "ErrMerkleRootControlBlockInvalidParity"},
 		{0xffff, "Unknown ErrorCode (65535)"},
 	}
 

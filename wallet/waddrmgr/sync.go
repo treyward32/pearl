@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,8 +7,8 @@ package waddrmgr
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 // BlockStamp defines a block (by height and a unique hash) and is used to mark
@@ -49,8 +49,8 @@ func newSyncState(startBlock, syncedTo *BlockStamp) *syncState {
 // marked as unsynced back to the oldest known point any of the addresses have
 // appeared in the block chain.
 func (m *Manager) SetSyncedTo(ns walletdb.ReadWriteBucket, bs *BlockStamp) error {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
+	m.syncStateMtx.Lock()
+	defer m.syncStateMtx.Unlock()
 
 	// Use the stored start blockstamp and reset recent hashes and height
 	// when the provided blockstamp is nil.
@@ -74,8 +74,8 @@ func (m *Manager) SetSyncedTo(ns walletdb.ReadWriteBucket, bs *BlockStamp) error
 // can use this information for intelligently initiating rescans to sync back to
 // the best chain from the last known good block.
 func (m *Manager) SyncedTo() BlockStamp {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
+	m.syncStateMtx.RLock()
+	defer m.syncStateMtx.RUnlock()
 
 	return m.syncState.syncedTo
 }

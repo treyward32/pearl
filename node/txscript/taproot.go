@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2022 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,11 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	secp "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TapscriptLeafVersion represents the various possible versions of a tapscript
@@ -48,6 +48,18 @@ const (
 	// tree.
 	ControlBlockMaxSize = ControlBlockBaseSize + (ControlBlockNodeSize *
 		ControlBlockMaxNodeCount)
+)
+
+const (
+	// MerkleRootControlBlockBaseSize is the base size of a P2MR control
+	// block. Unlike Taproot's 33 bytes (version + 32-byte internal key),
+	// P2MR has no internal key, so the base is just 1 byte (version/leaf).
+	MerkleRootControlBlockBaseSize = 1
+
+	// MerkleRootControlBlockMaxSize is the max possible size of a P2MR
+	// control block: 1 byte + up to 128 * 32 bytes of Merkle proof.
+	MerkleRootControlBlockMaxSize = MerkleRootControlBlockBaseSize +
+		(ControlBlockNodeSize * ControlBlockMaxNodeCount)
 )
 
 // VerifyTaprootKeySpend attempts to verify a top-level taproot key spend,
@@ -150,31 +162,41 @@ func (c *ControlBlock) ToBytes() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// RootHash calculates the root hash of a tapscript given the revealed script.
-func (c *ControlBlock) RootHash(revealedScript []byte) []byte {
+// computeMerkleRootFromProof reconstructs a Merkle root from a revealed
+// script and an inclusion proof. This is the shared algorithm used by both
+// Taproot (P2TR) and Pay-to-Merkle-Root (P2MR) control blocks -- the
+// commitment construction is identical, only the final check differs
+// (tweaked key for Taproot, direct root comparison for P2MR).
+func computeMerkleRootFromProof(leafVersion TapscriptLeafVersion,
+	inclusionProof []byte, revealedScript []byte) []byte {
+
 	// We'll start by creating a new tapleaf from the revealed script,
 	// this'll serve as the initial hash we'll use to incrementally
-	// reconstruct the merkle root using the control block elements.
-	merkleAccumulator := NewTapLeaf(c.LeafVersion, revealedScript).TapHash()
+	// reconstruct the merkle root using the inclusion proof elements.
+	merkleAccumulator := NewTapLeaf(leafVersion, revealedScript).TapHash()
 
-	// Now that we have our initial hash, we'll parse the control block one
-	// node at a time to build up our merkle accumulator into the taproot
-	// commitment.
-	//
-	// The control block is a series of nodes that serve as an inclusion
-	// proof as we can start hashing with our leaf, with each internal
-	// branch, until we reach the root.
-	numNodes := len(c.InclusionProof) / ControlBlockNodeSize
+	// Now that we have our initial hash, we'll parse the inclusion proof
+	// one node at a time to build up our merkle accumulator into the
+	// final commitment. The proof is a series of 32-byte sibling hashes;
+	// at each step we combine the accumulator with the next sibling until
+	// we reach the root.
+	numNodes := len(inclusionProof) / ControlBlockNodeSize
 	for nodeOffset := 0; nodeOffset < numNodes; nodeOffset++ {
-		// Extract the new node using our index to serve as a 32-byte
-		// offset.
+		// Extract the next sibling using our index as a 32-byte offset.
 		leafOffset := 32 * nodeOffset
-		nextNode := c.InclusionProof[leafOffset : leafOffset+32]
+		nextNode := inclusionProof[leafOffset : leafOffset+32]
 
 		merkleAccumulator = tapBranchHash(merkleAccumulator[:], nextNode)
 	}
 
 	return merkleAccumulator[:]
+}
+
+// RootHash calculates the root hash of a tapscript given the revealed script.
+func (c *ControlBlock) RootHash(revealedScript []byte) []byte {
+	return computeMerkleRootFromProof(
+		c.LeafVersion, c.InclusionProof, revealedScript,
+	)
 }
 
 // ParseControlBlock attempts to parse the raw bytes of a control block. An
@@ -353,7 +375,10 @@ func VerifyTaprootLeafCommitment(controlBlock *ControlBlock,
 	expectedWitnessProgram := schnorr.SerializePubKey(taprootKey)
 	if !bytes.Equal(expectedWitnessProgram, taprootWitnessProgram) {
 
-		return scriptError(ErrTaprootMerkleProofInvalid, "")
+		str := fmt.Sprintf("derived witness program: %x, expected: "+
+			"%x, using tapscript_root: %x", expectedWitnessProgram,
+			taprootWitnessProgram, rootHash)
+		return scriptError(ErrTaprootMerkleProofInvalid, str)
 	}
 
 	// Finally, we'll verify that the parity of the y coordinate of the
@@ -369,6 +394,103 @@ func VerifyTaprootLeafCommitment(controlBlock *ControlBlock,
 
 	// Otherwise, if we reach here, the commitment opening is valid and
 	// execution can continue.
+	return nil
+}
+
+// MerkleRootControlBlock houses the control block for a P2MR (BIP 360)
+// script-path spend. Unlike Taproot's ControlBlock, there is no internal
+// key -- the witness program commits directly to the Merkle root.
+type MerkleRootControlBlock struct {
+	// LeafVersion is the leaf version of the tapscript leaf being spent.
+	LeafVersion TapscriptLeafVersion
+
+	// InclusionProof is the Merkle inclusion proof (series of 32-byte
+	// sibling hashes).
+	InclusionProof []byte
+}
+
+// RootHash computes the Merkle root from the revealed script and inclusion
+// proof. Uses the same tagged-hash algorithm as Taproot.
+func (c *MerkleRootControlBlock) RootHash(revealedScript []byte) []byte {
+	return computeMerkleRootFromProof(
+		c.LeafVersion, c.InclusionProof, revealedScript,
+	)
+}
+
+// ToBytes serializes the P2MR control block for use as a witness item.
+func (c *MerkleRootControlBlock) ToBytes() ([]byte, error) {
+	var b bytes.Buffer
+
+	// BIP 360 requires the parity bit to be 1.
+	leafVersionAndParity := byte(c.LeafVersion) | 0x01
+	if err := b.WriteByte(leafVersionAndParity); err != nil {
+		return nil, err
+	}
+
+	if _, err := b.Write(c.InclusionProof); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
+
+// ParseMerkleRootControlBlock parses a raw P2MR control block. The format is
+// 1 + 32*m bytes: one version/parity byte followed by 0 or more 32-byte
+// Merkle proof nodes. Unlike Taproot, there is no internal key.
+func ParseMerkleRootControlBlock(ctrlBlock []byte) (*MerkleRootControlBlock, error) {
+	switch {
+	case len(ctrlBlock) < MerkleRootControlBlockBaseSize:
+		str := fmt.Sprintf("min size is %v bytes, P2MR control block "+
+			"is %v bytes", MerkleRootControlBlockBaseSize,
+			len(ctrlBlock))
+		return nil, scriptError(ErrControlBlockTooSmall, str)
+
+	case len(ctrlBlock) > MerkleRootControlBlockMaxSize:
+		str := fmt.Sprintf("max size is %v, P2MR control block "+
+			"is %v bytes", MerkleRootControlBlockMaxSize,
+			len(ctrlBlock))
+		return nil, scriptError(ErrControlBlockTooLarge, str)
+
+	case (len(ctrlBlock)-MerkleRootControlBlockBaseSize)%ControlBlockNodeSize != 0:
+		str := fmt.Sprintf("P2MR control block proof is not a "+
+			"multiple of 32: %v",
+			len(ctrlBlock)-MerkleRootControlBlockBaseSize)
+		return nil, scriptError(ErrControlBlockInvalidLength, str)
+	}
+
+	// BIP 360 requires the parity bit (lowest bit of c[0]) to be 1.
+	if ctrlBlock[0]&0x01 != 0x01 {
+		str := "P2MR control block parity bit must be 1"
+		return nil, scriptError(
+			ErrMerkleRootControlBlockInvalidParity, str,
+		)
+	}
+
+	leafVersion := TapscriptLeafVersion(ctrlBlock[0] & TaprootLeafMask)
+	proofBytes := ctrlBlock[1:]
+
+	return &MerkleRootControlBlock{
+		LeafVersion:    leafVersion,
+		InclusionProof: proofBytes,
+	}, nil
+}
+
+// VerifyMerkleRootLeafCommitment verifies that the revealed script is
+// committed in the Merkle root stored as the witness program. Unlike
+// Taproot's VerifyTaprootLeafCommitment, there is no internal key tweak
+// and no parity check -- the Merkle root is compared directly.
+func VerifyMerkleRootLeafCommitment(controlBlock *MerkleRootControlBlock,
+	witnessProgram []byte, revealedScript []byte) error {
+
+	rootHash := controlBlock.RootHash(revealedScript)
+
+	if !bytes.Equal(rootHash, witnessProgram) {
+		str := fmt.Sprintf("P2MR Merkle proof invalid: computed "+
+			"root %x, witness program %x", rootHash,
+			witnessProgram)
+		return scriptError(ErrMerkleRootMerkleProofInvalid, str)
+	}
+
 	return nil
 }
 

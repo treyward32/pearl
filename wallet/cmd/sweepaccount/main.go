@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,23 +9,23 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/internal/cfgutil"
-	"github.com/btcsuite/btcwallet/netparams"
-	"github.com/btcsuite/btcwallet/wallet/txauthor"
-	"github.com/btcsuite/btcwallet/wallet/txrules"
-	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/jessevdk/go-flags"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/internal/cfgutil"
+	"github.com/pearl-research-labs/pearl/wallet/netparams"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txauthor"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txrules"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txsizes"
 	"golang.org/x/term"
 )
 
 var (
-	walletDataDirectory = btcutil.AppDataDir("btcwallet", false)
+	walletDataDirectory = btcutil.AppDataDir("oyster", false)
 	newlineBytes        = []byte{'\n'}
 )
 
@@ -41,10 +41,9 @@ func errContext(err error, context string) error {
 
 // Flags.
 var opts = struct {
-	TestNet3              bool                `long:"testnet" description:"Use the test bitcoin network (version 3)"`
-	TestNet4              bool                `long:"testnet" description:"Use the test bitcoin network (version 3)"`
-	SimNet                bool                `long:"simnet" description:"Use the simulation bitcoin network"`
-	RegressionNet         bool                `long:"regtest" description:"Use the regression bitcoin network"`
+	TestNet               bool                `long:"testnet" description:"Use the test Pearl network"`
+	SimNet                bool                `long:"simnet" description:"Use the simulation Pearl network"`
+	RegressionNet         bool                `long:"regtest" description:"Use the regression Pearl network"`
 	RPCConnect            string              `short:"c" long:"connect" description:"Hostname[:port] of wallet RPC server"`
 	RPCUsername           string              `short:"u" long:"rpcuser" description:"Wallet RPC username"`
 	RPCCertificateFile    string              `long:"cafile" description:"Wallet RPC TLS certificate"`
@@ -53,8 +52,7 @@ var opts = struct {
 	DestinationAccount    string              `long:"destacct" description:"Account to send sweeped outputs to"`
 	RequiredConfirmations int64               `long:"minconf" description:"Required confirmations to include an output"`
 }{
-	TestNet3:              false,
-	TestNet4:              false,
+	TestNet:               false,
 	SimNet:                false,
 	RegressionNet:         false,
 	RPCConnect:            "localhost",
@@ -84,10 +82,7 @@ func init() {
 	}
 
 	numNets := 0
-	if opts.TestNet3 {
-		numNets++
-	}
-	if opts.TestNet4 {
+	if opts.TestNet {
 		numNets++
 	}
 	if opts.SimNet {
@@ -97,13 +92,11 @@ func init() {
 		numNets++
 	}
 	if numNets > 1 {
-		fatalf("Multiple bitcoin networks may not be used simultaneously")
+		fatalf("Multiple Pearl networks may not be used simultaneously")
 	}
 	var activeNet = &netparams.MainNetParams
-	if opts.TestNet3 {
-		activeNet = &netparams.TestNet3Params
-	} else if opts.TestNet4 {
-		activeNet = &netparams.TestNet4Params
+	if opts.TestNet {
+		activeNet = &netparams.TestNetParams
 	} else if opts.SimNet {
 		activeNet = &netparams.SimNetParams
 	} else if opts.RegressionNet {
@@ -211,9 +204,6 @@ func makeInputSource(outputs []btcjson.ListUnspentResult) txauthor.InputSource {
 // all correlated previous input value.  A non-change address is created by this
 // function.
 func makeDestinationScriptSource(rpcClient *rpcclient.Client, accountName string) *txauthor.ChangeSource {
-
-	// GetNewAddress always returns a P2PKH address since it assumes
-	// BIP-0044.
 	newChangeScript := func() ([]byte, error) {
 		destinationAddress, err := rpcClient.GetNewAddress(accountName)
 		if err != nil {
@@ -223,7 +213,7 @@ func makeDestinationScriptSource(rpcClient *rpcclient.Client, accountName string
 	}
 
 	return &txauthor.ChangeSource{
-		ScriptSize: txsizes.P2PKHPkScriptSize,
+		ScriptSize: txsizes.P2TROutputSize,
 		NewScript:  newChangeScript,
 	}
 }
@@ -364,7 +354,7 @@ func promptSecret(what string) (string, error) {
 }
 
 func saneOutputValue(amount btcutil.Amount) bool {
-	return amount >= 0 && amount <= btcutil.MaxSatoshi
+	return amount >= 0 && amount <= btcutil.MaxGrain
 }
 
 func parseOutPoint(input *btcjson.ListUnspentResult) (wire.OutPoint, error) {

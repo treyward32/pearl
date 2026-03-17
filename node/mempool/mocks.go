@@ -3,10 +3,10 @@ package mempool
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -122,4 +122,17 @@ func (m *MockTxMempool) CheckSpend(op wire.OutPoint) *btcutil.Tx {
 	}
 
 	return args.Get(0).(*btcutil.Tx)
+}
+
+// PoolBytes returns the total serialized byte size of all transactions in the
+// main pool.
+func (m *MockTxMempool) PoolBytes() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
+}
+
+// MaxMempoolSize returns the configured maximum mempool size in bytes.
+func (m *MockTxMempool) MaxMempoolSize() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
 }

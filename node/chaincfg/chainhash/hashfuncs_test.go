@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -149,5 +149,65 @@ func TestDoubleHashFuncs(t *testing.T) {
 				test.out)
 			continue
 		}
+	}
+}
+
+// BenchmarkDoubleHashRawSizes tests the DoubleHashRaw function with various data sizes.
+func BenchmarkDoubleHashRawSizes(b *testing.B) {
+	sizes := []int{
+		80,              // Typical transaction size
+		1024,            // 1KB
+		10 * 1024,       // 10KB
+		100 * 1024,      // 100KB
+		1024 * 1024,     // 1MB
+		2 * 1024 * 1024, // 2MB
+	}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
+			// Create data of specified size
+			data := make([]byte, size)
+			for i := range data {
+				data[i] = byte(i % 256)
+			}
+
+			// Create a serialize function that writes the data
+			serialize := func(w io.Writer) error {
+				_, err := w.Write(data)
+				return err
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				DoubleHashRaw(serialize)
+			}
+		})
+	}
+}
+
+// BenchmarkDoubleHashBSizes tests the DoubleHashB function with various data sizes.
+func BenchmarkDoubleHashBSizes(b *testing.B) {
+	sizes := []int{
+		80,              // Typical transaction size
+		1024,            // 1KB
+		10 * 1024,       // 10KB
+		100 * 1024,      // 100KB
+		1024 * 1024,     // 1MB
+		2 * 1024 * 1024, // 2MB
+	}
+
+	for _, size := range sizes {
+		b.Run(fmt.Sprintf("%d_bytes", size), func(b *testing.B) {
+			// Create data of specified size
+			data := make([]byte, size)
+			for i := range data {
+				data[i] = byte(i % 256)
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				DoubleHashB(data)
+			}
+		})
 	}
 }

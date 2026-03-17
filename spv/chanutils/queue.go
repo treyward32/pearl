@@ -3,7 +3,7 @@ package chanutils
 import (
 	"sync"
 
-	"github.com/lightninglabs/neutrino/cache/lru"
+	"github.com/pearl-research-labs/pearl/spv/cache/lru"
 )
 
 const (

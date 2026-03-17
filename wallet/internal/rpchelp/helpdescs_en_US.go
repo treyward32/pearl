@@ -1,4 +1,4 @@
-// Copyright (c) 2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -51,8 +51,8 @@ var helpDescsEnUS = map[string]string{
 	"getbalance-account":     "DEPRECATED -- The account name to query the balance for, or \"*\" to consider all accounts (default=\"*\")",
 	"getbalance--condition0": "account != \"*\"",
 	"getbalance--condition1": "account = \"*\"",
-	"getbalance--result0":    "The balance of 'account' valued in bitcoin",
-	"getbalance--result1":    "The balance of all accounts valued in bitcoin",
+	"getbalance--result0":    "The balance of 'account' valued in PRL",
+	"getbalance--result1":    "The balance of all accounts valued in PRL",
 
 	// GetBestBlockHashCmd help.
 	"getbestblockhash--synopsis": "Returns the hash of the newest block in the best chain that wallet has finished syncing with.",
@@ -74,7 +74,7 @@ var helpDescsEnUS = map[string]string{
 	"infowalletresult-proxy":           "The proxy used by the server",
 	"infowalletresult-difficulty":      "The current target difficulty",
 	"infowalletresult-testnet":         "Whether or not server is using testnet",
-	"infowalletresult-relayfee":        "The minimum relay fee for non-free transactions in BTC/KB",
+	"infowalletresult-relayfee":        "The minimum relay fee for non-free transactions in PRL/KB",
 	"infowalletresult-errors":          "Any current errors",
 	"infowalletresult-paytxfee":        "The increment used each time more fee is required for an authored transaction",
 	"infowalletresult-balance":         "The balance of all accounts calculated with one block confirmation",
@@ -87,25 +87,27 @@ var helpDescsEnUS = map[string]string{
 	"getnewaddress--synopsis":   "Generates and returns a new payment address.",
 	"getnewaddress-account":     "DEPRECATED -- Account name the new address will belong to (default=\"default\")",
 	"getnewaddress-addresstype": "The address type to use. Options are \"legacy\", \"p2sh-segwit\", and \"bech32\".(default=\"legacy\")",
+	"getnewaddress-pq":          "If true, derive a post-quantum resistant address (default=false)",
 	"getnewaddress--result0":    "The payment address",
 
 	// GetRawChangeAddressCmd help.
 	"getrawchangeaddress--synopsis":   "Generates and returns a new internal payment address for use as a change address in raw transactions.",
 	"getrawchangeaddress-account":     "Account name the new internal address will belong to (default=\"default\")",
 	"getrawchangeaddress-addresstype": "The address type to use. Options are \"legacy\", \"p2sh-segwit\", and \"bech32\".(default=\"legacy\")",
+	"getrawchangeaddress-pq":          "If true, derive a post-quantum resistant address (default=false)",
 	"getrawchangeaddress--result0":    "The internal payment address",
 
 	// GetReceivedByAccountCmd help.
 	"getreceivedbyaccount--synopsis": "DEPRECATED -- Returns the total amount received by addresses of some account, including spent outputs.",
 	"getreceivedbyaccount-account":   "Account name to query total received amount for",
 	"getreceivedbyaccount-minconf":   "Minimum number of block confirmations required before an output's value is included in the total",
-	"getreceivedbyaccount--result0":  "The total received amount valued in bitcoin",
+	"getreceivedbyaccount--result0":  "The total received amount valued in PRL",
 
 	// GetReceivedByAddressCmd help.
 	"getreceivedbyaddress--synopsis": "Returns the total amount received by a single address, including spent outputs.",
 	"getreceivedbyaddress-address":   "Payment address which received outputs to include in total",
 	"getreceivedbyaddress-minconf":   "Minimum number of block confirmations required before an output's value is included in the total",
-	"getreceivedbyaddress--result0":  "The total received amount valued in bitcoin",
+	"getreceivedbyaddress--result0":  "The total received amount valued in PRL",
 
 	// GetTransactionCmd help.
 	"gettransaction--synopsis":        "Returns a JSON object with details regarding a transaction relevant to this wallet.",
@@ -121,7 +123,7 @@ var helpDescsEnUS = map[string]string{
 	"help--result1":    "Help for specified command",
 
 	// GetTransactionResult help.
-	"gettransactionresult-amount":          "The total amount this transaction credits to the wallet, valued in bitcoin",
+	"gettransactionresult-amount":          "The total amount this transaction credits to the wallet, valued in PRL",
 	"gettransactionresult-fee":             "The total input value minus the total output value, or 0 if 'txid' is not a sent transaction",
 	"gettransactionresult-confirmations":   "The number of block confirmations of the transaction",
 	"gettransactionresult-blockhash":       "The hash of the block this transaction is mined in, or the empty string if unmined",
@@ -156,9 +158,9 @@ var helpDescsEnUS = map[string]string{
 	// ListAccountsCmd help.
 	"listaccounts--synopsis":       "DEPRECATED -- Returns a JSON object of all accounts and their balances.",
 	"listaccounts-minconf":         "Minimum number of block confirmations required before an unspent output's value is included in the balance",
-	"listaccounts--result0--desc":  "JSON object with account names as keys and bitcoin amounts as values",
+	"listaccounts--result0--desc":  "JSON object with account names as keys and PRL amounts as values",
 	"listaccounts--result0--key":   "The account name",
-	"listaccounts--result0--value": "The account balance valued in bitcoin",
+	"listaccounts--result0--value": "The account balance valued in PRL",
 
 	// ListLockUnspentCmd help.
 	"listlockunspent--synopsis": "Returns a JSON array of outpoints marked as locked (with lockunspent) for this wallet session.",
@@ -175,7 +177,7 @@ var helpDescsEnUS = map[string]string{
 
 	// ListReceivedByAccountResult help.
 	"listreceivedbyaccountresult-account":       "The name of the account",
-	"listreceivedbyaccountresult-amount":        "Total amount received by payment addresses of the account valued in bitcoin",
+	"listreceivedbyaccountresult-amount":        "Total amount received by payment addresses of the account valued in PRL",
 	"listreceivedbyaccountresult-confirmations": "Number of block confirmations of the most recent transaction relevant to the account",
 
 	// ListReceivedByAddressCmd help.
@@ -187,7 +189,7 @@ var helpDescsEnUS = map[string]string{
 	// ListReceivedByAddressResult help.
 	"listreceivedbyaddressresult-account":           "DEPRECATED -- Unset",
 	"listreceivedbyaddressresult-address":           "The payment address",
-	"listreceivedbyaddressresult-amount":            "Total amount received by the payment address valued in bitcoin",
+	"listreceivedbyaddressresult-amount":            "Total amount received by the payment address valued in PRL",
 	"listreceivedbyaddressresult-confirmations":     "Number of block confirmations of the most recent transaction relevant to the address",
 	"listreceivedbyaddressresult-txids":             "Transaction hashes of all transactions involving this address",
 	"listreceivedbyaddressresult-involvesWatchonly": "Unset",
@@ -210,7 +212,7 @@ var helpDescsEnUS = map[string]string{
 	"listtransactionsresult-account":            "DEPRECATED -- Unset",
 	"listtransactionsresult-address":            "Payment address for a transaction output",
 	"listtransactionsresult-category":           `The kind of transaction: "send" for sent transactions, "immature" for immature coinbase outputs, "generate" for mature coinbase outputs, or "recv" for all other received outputs.  Note: A single output may be included multiple times under different categories`,
-	"listtransactionsresult-amount":             "The value of the transaction output valued in bitcoin",
+	"listtransactionsresult-amount":             "The value of the transaction output valued in PRL",
 	"listtransactionsresult-fee":                "The total input value minus the total output value for sent transactions",
 	"listtransactionsresult-confirmations":      "The number of block confirmations of the transaction",
 	"listtransactionsresult-generated":          "Whether the transaction output is a coinbase output",
@@ -251,7 +253,7 @@ var helpDescsEnUS = map[string]string{
 	"listunspentresult-account":       "The account associated with the receiving payment address",
 	"listunspentresult-scriptPubKey":  "The output script encoded as a hexadecimal string",
 	"listunspentresult-redeemScript":  "Unset",
-	"listunspentresult-amount":        "The amount of the output valued in bitcoin",
+	"listunspentresult-amount":        "The amount of the output valued in PRL",
 	"listunspentresult-confirmations": "The number of block confirmations of the transaction",
 	"listunspentresult-spendable":     "Whether the output is entirely controlled by wallet keys/scripts (false for partially controlled multisig outputs or outputs to watch-only addresses)",
 
@@ -267,22 +269,24 @@ var helpDescsEnUS = map[string]string{
 	// SendFromCmd help.
 	"sendfrom--synopsis": "DEPRECATED -- Authors, signs, and sends a transaction that outputs some amount to a payment address.\n" +
 		"A change output is automatically included to send extra output value back to the original account.",
-	"sendfrom-fromaccount": "Account to pick unspent outputs from",
-	"sendfrom-toaddress":   "Address to pay",
-	"sendfrom-amount":      "Amount to send to the payment address valued in bitcoin",
-	"sendfrom-minconf":     "Minimum number of block confirmations required before a transaction output is eligible to be spent",
-	"sendfrom-comment":     "Unused",
-	"sendfrom-commentto":   "Unused",
-	"sendfrom--result0":    "The transaction hash of the sent transaction",
+	"sendfrom-fromaccount":  "Account to pick unspent outputs from",
+	"sendfrom-toaddress":    "Address to pay",
+	"sendfrom-amount":       "Amount to send to the payment address valued in PRL",
+	"sendfrom-feerateperkb": "Fee rate in PRL per kilobyte for the transaction",
+	"sendfrom-minconf":      "Minimum number of block confirmations required before a transaction output is eligible to be spent",
+	"sendfrom-comment":      "Unused",
+	"sendfrom-commentto":    "Unused",
+	"sendfrom--result0":     "The transaction hash of the sent transaction",
 
 	// SendManyCmd help.
 	"sendmany--synopsis": "Authors, signs, and sends a transaction that outputs to many payment addresses.\n" +
 		"A change output is automatically included to send extra output value back to the original account.",
 	"sendmany-fromaccount":    "DEPRECATED -- Account to pick unspent outputs from",
 	"sendmany-amounts":        "Pairs of payment addresses and the output amount to pay each",
-	"sendmany-amounts--desc":  "JSON object using payment addresses as keys and output amounts valued in bitcoin to send to each address",
+	"sendmany-amounts--desc":  "JSON object using payment addresses as keys and output amounts valued in PRL to send to each address",
 	"sendmany-amounts--key":   "Address to pay",
-	"sendmany-amounts--value": "Amount to send to the payment address valued in bitcoin",
+	"sendmany-amounts--value": "Amount to send to the payment address valued in PRL",
+	"sendmany-feerateperkb":   "Fee rate in PRL per kilobyte for the transaction",
 	"sendmany-minconf":        "Minimum number of block confirmations required before a transaction output is eligible to be spent",
 	"sendmany-comment":        "Unused",
 	"sendmany--result0":       "The transaction hash of the sent transaction",
@@ -291,15 +295,16 @@ var helpDescsEnUS = map[string]string{
 	"sendtoaddress--synopsis": "Authors, signs, and sends a transaction that outputs some amount to a payment address.\n" +
 		"Unlike sendfrom, outputs are always chosen from the default account.\n" +
 		"A change output is automatically included to send extra output value back to the original account.",
-	"sendtoaddress-address":   "Address to pay",
-	"sendtoaddress-amount":    "Amount to send to the payment address valued in bitcoin",
-	"sendtoaddress-comment":   "Unused",
-	"sendtoaddress-commentto": "Unused",
-	"sendtoaddress--result0":  "The transaction hash of the sent transaction",
+	"sendtoaddress-address":      "Address to pay",
+	"sendtoaddress-amount":       "Amount to send to the payment address valued in PRL",
+	"sendtoaddress-feerateperkb": "Fee rate in PRL per kilobyte for the transaction",
+	"sendtoaddress-comment":      "Unused",
+	"sendtoaddress-commentto":    "Unused",
+	"sendtoaddress--result0":     "The transaction hash of the sent transaction",
 
 	// SetTxFeeCmd help.
 	"settxfee--synopsis": "Modify the increment used each time more fee is required for an authored transaction.",
-	"settxfee-amount":    "The new fee increment valued in bitcoin",
+	"settxfee-amount":    "The new fee increment valued in PRL",
 	"settxfee--result0":  "The boolean 'true'",
 
 	// SignMessageCmd help.
@@ -331,7 +336,7 @@ var helpDescsEnUS = map[string]string{
 	// ValidateAddressCmd help.
 	"validateaddress--synopsis": "Verify that an address is valid.\n" +
 		"Extra details are returned if the address is controlled by this wallet.\n" +
-		"The following fields are valid only when the address is controlled by this wallet (ismine=true): isscript, pubkey, iscompressed, account, addresses, hex, script, and sigsrequired.\n" +
+		"The following fields are valid only when the address is controlled by this wallet (ismine=true): isscript, pubkey, iscompressed, account, addresses, hex, and script.\n" +
 		"The following fields are only valid when address has an associated public key: pubkey, iscompressed.\n" +
 		"The following fields are only valid when address is a pay-to-script-hash address: addresses, hex, and script.\n" +
 		"If the address is a multisig address controlled by this wallet, the multisig fields will be left unset if the wallet is locked since the redeem script cannot be decrypted.",
@@ -349,7 +354,6 @@ var helpDescsEnUS = map[string]string{
 	"validateaddresswalletresult-addresses":    "All associated payment addresses of the script if address is a multisig address (only when isvalid is true)",
 	"validateaddresswalletresult-hex":          "The redeem script ",
 	"validateaddresswalletresult-script":       "The class of redeem script for a multisig address",
-	"validateaddresswalletresult-sigsrequired": "The number of required signatures to redeem outputs to the multisig address",
 
 	// VerifyMessageCmd help.
 	"verifymessage--synopsis": "Verify a message was signed with the associated private key of some address.",
@@ -392,7 +396,7 @@ var helpDescsEnUS = map[string]string{
 	// GetUnconfirmedBalanceCmd help.
 	"getunconfirmedbalance--synopsis": "Calculates the unspent output value of all unmined transaction outputs for an account.",
 	"getunconfirmedbalance-account":   "The account to query the unconfirmed balance for (default=\"default\")",
-	"getunconfirmedbalance--result0":  "Total amount of all unmined unspent outputs of the account valued in bitcoin.",
+	"getunconfirmedbalance--result0":  "Total amount of all unmined unspent outputs of the account valued in PRL.",
 
 	// ListAddressTransactionsCmd help.
 	"listaddresstransactions--synopsis": "Returns a JSON array of objects containing verbose details for wallet transactions pertaining some addresses.",
@@ -411,4 +415,17 @@ var helpDescsEnUS = map[string]string{
 	// WalletIsLockedCmd help.
 	"walletislocked--synopsis": "Returns whether or not the wallet is locked.",
 	"walletislocked--result0":  "Whether the wallet is locked",
+
+	// ChainSyncedCmd help.
+	"chainsynced--synopsis": "Returns whether the wallet's chain backend is synced to the best block.",
+	"chainsynced--result0":  "Whether the chain is synced",
+
+	// GetSyncProgressCmd help.
+	"getsyncprogress--synopsis":                  "Returns the current SPV sync progress across block headers, filter headers, and blocks.",
+	"getsyncprogressresult-header_height":        "The height of the best block header synced so far",
+	"getsyncprogressresult-filter_header_height": "The height of the best filter header synced so far",
+	"getsyncprogressresult-block_height":         "The height of the best full block the wallet has processed",
+	"getsyncprogressresult-best_peer_height":     "The best block height reported by connected peers",
+	"getsyncprogressresult-synced":               "Whether the wallet considers the chain fully synced",
+	"getsyncprogress--result0":                   "",
 }

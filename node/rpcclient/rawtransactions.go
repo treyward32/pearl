@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,16 +10,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
-	// defaultMaxFeeRate is the default maximum fee rate in BTC/kvB enforced
-	// by bitcoind v0.19.0 or after for transaction broadcast.
-	defaultMaxFeeRate btcjson.BTCPerkvB = 0.1
+	// defaultMaxFeeRate is the default maximum fee rate in PRL/kvB for
+	// transaction broadcast.
+	defaultMaxFeeRate btcjson.PRLPerkvB = 0.1
 )
 
 // SigHashType enumerates the available signature hashing types that the
@@ -33,7 +33,7 @@ const (
 
 	// SigHashNone indicates NONE of the outputs should be signed.  This
 	// can be thought of as specifying the signer does not care where the
-	// bitcoins go.
+	// funds go.
 	SigHashNone SigHashType = "NONE"
 
 	// SigHashSingle indicates that a SINGLE output should be signed.  This
@@ -296,7 +296,7 @@ func (c *Client) CreateRawTransactionAsync(inputs []btcjson.TransactionInput,
 
 	convertedAmts := make(map[string]float64, len(amounts))
 	for addr, amount := range amounts {
-		convertedAmts[addr.String()] = amount.ToBTC()
+		convertedAmts[addr.String()] = amount.ToPRL()
 	}
 	cmd := btcjson.NewCreateRawTransactionCmd(inputs, convertedAmts, lockTime)
 	return c.SendCmd(cmd)
@@ -350,30 +350,13 @@ func (c *Client) SendRawTransactionAsync(tx *wire.MsgTx, allowHighFees bool) Fut
 		txHex = hex.EncodeToString(buf.Bytes())
 	}
 
-	// Due to differences in the sendrawtransaction API for different
-	// backends, we'll need to inspect our version and construct the
-	// appropriate request.
-	version, err := c.BackendVersion()
-	if err != nil {
-		return newFutureError(err)
+	// Use the MaxFeeRate field. A 0 MaxFeeRate is interpreted as a maximum
+	// fee rate not being enforced.
+	var maxFeeRate btcjson.PRLPerkvB
+	if !allowHighFees {
+		maxFeeRate = defaultMaxFeeRate
 	}
-
-	var cmd *btcjson.SendRawTransactionCmd
-	// Starting from bitcoind v0.19.0, the MaxFeeRate field should be used.
-	//
-	// When unified softforks format is supported, it's 0.19 and above.
-	if version.SupportUnifiedSoftForks() {
-		// Using a 0 MaxFeeRate is interpreted as a maximum fee rate not
-		// being enforced by bitcoind.
-		var maxFeeRate btcjson.BTCPerkvB
-		if !allowHighFees {
-			maxFeeRate = defaultMaxFeeRate
-		}
-		cmd = btcjson.NewBitcoindSendRawTransactionCmd(txHex, maxFeeRate)
-	} else {
-		// Otherwise, use the AllowHighFees field.
-		cmd = btcjson.NewSendRawTransactionCmd(txHex, &allowHighFees)
-	}
+	cmd := btcjson.NewSendRawTransactionCmdWithMaxFeeRate(txHex, maxFeeRate)
 
 	return c.SendCmd(cmd)
 }
@@ -915,7 +898,7 @@ func (r FutureTestMempoolAcceptResult) Receive() (
 //
 // See TestMempoolAccept for the blocking version and more details.
 func (c *Client) TestMempoolAcceptAsync(txns []*wire.MsgTx,
-	maxFeeRate btcjson.BTCPerkvB) FutureTestMempoolAcceptResult {
+	maxFeeRate btcjson.PRLPerkvB) FutureTestMempoolAcceptResult {
 
 	// Due to differences in the testmempoolaccept API for different
 	// backends, we'll need to inspect our version and construct the
@@ -970,9 +953,9 @@ func (c *Client) TestMempoolAcceptAsync(txns []*wire.MsgTx,
 		// Serialize the transaction and convert to hex string.
 		buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
 
-		// TODO(yy): add similar checks found in `BtcDecode` to
-		// `BtcEncode` - atm it just serializes bytes without any
-		// bitcoin-specific checks.
+		// TODO(yy): add similar checks found in `PrlDecode` to
+		// `PrlEncode` - atm it just serializes bytes without any
+		// protocol-specific checks.
 		if err := tx.Serialize(buf); err != nil {
 			err = fmt.Errorf("%w: %v", ErrInvalidParam, err)
 			return newFutureError(err)
@@ -982,7 +965,7 @@ func (c *Client) TestMempoolAcceptAsync(txns []*wire.MsgTx,
 		rawTxns = append(rawTxns, rawTx)
 
 		// Sanity check the provided tx is valid, which can be removed
-		// once we have similar checks added in `BtcEncode`.
+		// once we have similar checks added in `PrlEncode`.
 		//
 		// NOTE: must be performed after buf.Bytes is copied above.
 		//
@@ -1010,7 +993,7 @@ func (c *Client) TestMempoolAcceptAsync(txns []*wire.MsgTx,
 //
 // The maximum number of transactions allowed is 25.
 func (c *Client) TestMempoolAccept(txns []*wire.MsgTx,
-	maxFeeRate btcjson.BTCPerkvB) ([]*btcjson.TestMempoolAcceptResult, error) {
+	maxFeeRate btcjson.PRLPerkvB) ([]*btcjson.TestMempoolAcceptResult, error) {
 
 	return c.TestMempoolAcceptAsync(txns, maxFeeRate).Receive()
 }

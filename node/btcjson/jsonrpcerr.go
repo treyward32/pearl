@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -79,7 +79,7 @@ const (
 
 // Peer-to-peer client errors.
 const (
-	// ErrRPCClientNotConnected indicates that Bitcoin is not connected.
+	// ErrRPCClientNotConnected indicates that the node is not connected.
 	ErrRPCClientNotConnected RPCErrorCode = -9
 
 	// ErrRPCClientInInitialDownload indicates that client is still downloading
@@ -154,7 +154,7 @@ const (
 	// which does not exist. It can also indicate an attempt to unload a
 	// wallet that was not previously loaded.
 	//
-	// Not to be confused with ErrRPCNoWallet, which is specific to btcd.
+	// Not to be confused with ErrRPCNoWallet, which is specific to pearld.
 	ErrRPCWalletNotFound RPCErrorCode = -18
 
 	// ErrRPCWalletNotSpecified indicates that no wallet was specified, for
@@ -182,7 +182,7 @@ const (
 	ErrRPCTxAlreadyInChain  RPCErrorCode = -27
 )
 
-// Errors that are specific to btcd.
+// Errors that are specific to pearld.
 const (
 	ErrRPCNoWallet      RPCErrorCode = -1
 	ErrRPCUnimplemented RPCErrorCode = -1

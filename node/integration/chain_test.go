@@ -4,15 +4,20 @@
 package integration
 
 import (
+	"bytes"
+	"runtime"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/integration/rpctest"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,8 +31,8 @@ func TestGetTxSpendingPrevOut(t *testing.T) {
 	t.Parallel()
 
 	// Boilerplate codetestDir to make a pruned node.
-	btcdCfg := []string{"--rejectnonstd", "--debuglevel=debug"}
-	r, err := rpctest.New(&chaincfg.SimNetParams, nil, btcdCfg, "")
+	pearldCfg := []string{"--rejectnonstd", "--debuglevel=debug"}
+	r, err := rpctest.New(&chaincfg.SimNetParams, nil, pearldCfg, "")
 	require.NoError(t, err)
 
 	// Setup the node.
@@ -106,7 +111,7 @@ func TestGetTxSpendingPrevOut(t *testing.T) {
 // createTxInMempool creates a tx and puts it in the mempool.
 func createTxInMempool(t *testing.T, r *rpctest.Harness) *wire.MsgTx {
 	// Create a fresh output for usage within the test below.
-	const outputValue = btcutil.SatoshiPerBitcoin
+	const outputValue = btcutil.GrainPerPearl
 	outputKey, testOutput, testPkScript, err := makeTestOutput(
 		r, t, outputValue,
 	)
@@ -129,18 +134,110 @@ func createTxInMempool(t *testing.T, r *rpctest.Harness) *wire.MsgTx {
 
 	tx.AddTxOut(&wire.TxOut{
 		PkScript: addrScript,
-		Value:    outputValue - 1000,
+		Value:    outputValue - 20000,
 	})
 
-	sigScript, err := txscript.SignatureScript(
-		tx, 0, testPkScript, txscript.SigHashAll, outputKey, true,
+	// For Taproot, we need to create a witness signature instead of a script signature
+	sigHashes := txscript.NewTxSigHashes(tx, txscript.NewCannedPrevOutputFetcher(
+		testPkScript, outputValue,
+	))
+	witness, err := txscript.TaprootWitnessSignature(
+		tx, sigHashes, 0, outputValue, testPkScript, txscript.SigHashDefault, outputKey,
 	)
 	require.NoError(t, err)
-	tx.TxIn[0].SignatureScript = sigScript
+	tx.TxIn[0].Witness = witness
 
 	// Send the tx.
 	_, err = r.Client.SendRawTransaction(tx, true)
 	require.NoError(t, err)
 
 	return tx
+}
+
+// makeTestOutput creates an on-chain output paying to a freshly generated
+// Taproot output with the specified amount.
+func makeTestOutput(r *rpctest.Harness, t *testing.T,
+	amt btcutil.Amount) (*btcec.PrivateKey, *wire.OutPoint, []byte, error) {
+
+	// Create a fresh key, then send some coins to an address spendable by
+	// that key.
+	key, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Using the key created above, generate a Taproot pkScript which it's able to
+	// spend. We'll use a key-spend only taproot output (no script path).
+	taprootKey := txscript.ComputeTaprootKeyNoScript(key.PubKey())
+	taprootAddr, err := btcutil.NewAddressTaproot(
+		schnorr.SerializePubKey(taprootKey), r.ActiveNet,
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	selfAddrScript, err := txscript.PayToAddrScript(taprootAddr)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	output := &wire.TxOut{PkScript: selfAddrScript, Value: 1e8}
+
+	// Next, create and broadcast a transaction paying to the output.
+	fundTx, err := r.CreateTransaction([]*wire.TxOut{output}, 100, true)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	txHash, err := r.Client.SendRawTransaction(fundTx, true)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// The transaction created above should be included within the next
+	// generated block.
+	blockHash, err := r.Client.Generate(1)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	assertTxInBlock(r, t, blockHash[0], txHash)
+
+	// Locate the output index of the coins spendable by the key we
+	// generated above, this is needed in order to create a proper utxo for
+	// this output.
+	var outputIndex uint32
+	if bytes.Equal(fundTx.TxOut[0].PkScript, selfAddrScript) {
+		outputIndex = 0
+	} else {
+		outputIndex = 1
+	}
+
+	utxo := &wire.OutPoint{
+		Hash:  fundTx.TxHash(),
+		Index: outputIndex,
+	}
+
+	return key, utxo, selfAddrScript, nil
+}
+
+// assertTxInBlock asserts a transaction with the specified txid is found
+// within the block with the passed block hash.
+func assertTxInBlock(r *rpctest.Harness, t *testing.T, blockHash *chainhash.Hash,
+	txid *chainhash.Hash) {
+
+	block, err := r.Client.GetBlock(blockHash)
+	if err != nil {
+		t.Fatalf("unable to get block: %v", err)
+	}
+	if len(block.Transactions) < 2 {
+		t.Fatal("target transaction was not mined")
+	}
+
+	for _, txn := range block.Transactions {
+		txHash := txn.TxHash()
+		if txn.TxHash() == txHash {
+			return
+		}
+	}
+
+	_, _, line, _ := runtime.Caller(1)
+	t.Fatalf("assertion failed at line %v: txid %v was not found in "+
+		"block %v", line, txid, blockHash)
 }

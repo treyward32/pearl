@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,10 +9,10 @@ package txrules
 import (
 	"errors"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // DefaultRelayFeePerKb is the default minimum relay fee policy for a mempool.
@@ -43,7 +43,7 @@ func CheckOutput(output *wire.TxOut, relayFeePerKb btcutil.Amount) error {
 	if output.Value < 0 {
 		return ErrAmountNegative
 	}
-	if output.Value > btcutil.MaxSatoshi {
+	if output.Value > btcutil.MaxGrain {
 		return ErrAmountExceedsMax
 	}
 	if IsDustOutput(output, relayFeePerKb) {
@@ -61,8 +61,8 @@ func FeeForSerializeSize(relayFeePerKb btcutil.Amount, txSerializeSize int) btcu
 		fee = relayFeePerKb
 	}
 
-	if fee < 0 || fee > btcutil.MaxSatoshi {
-		fee = btcutil.MaxSatoshi
+	if fee < 0 || fee > btcutil.MaxGrain {
+		fee = btcutil.MaxGrain
 	}
 
 	return fee

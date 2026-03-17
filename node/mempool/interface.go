@@ -3,10 +3,10 @@ package mempool
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TxMempool defines an interface that's used by other subsystems to interact
@@ -68,4 +68,12 @@ type TxMempool interface {
 	// a transaction in the mempool. If that's the case the spending
 	// transaction will be returned, if not nil will be returned.
 	CheckSpend(op wire.OutPoint) *btcutil.Tx
+
+	// PoolBytes returns the total serialized byte size of all
+	// transactions in the main pool.
+	PoolBytes() uint64
+
+	// MaxMempoolSize returns the configured maximum mempool size in
+	// bytes. A value of 0 means unlimited.
+	MaxMempoolSize() uint64
 }

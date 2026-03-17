@@ -4,6 +4,7 @@
 package neutrino
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -13,23 +14,23 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/addrmgr"
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/connmgr"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/blockntfns"
-	"github.com/lightninglabs/neutrino/cache/lru"
-	"github.com/lightninglabs/neutrino/chanutils"
-	"github.com/lightninglabs/neutrino/filterdb"
-	"github.com/lightninglabs/neutrino/headerfs"
-	"github.com/lightninglabs/neutrino/pushtx"
-	"github.com/lightninglabs/neutrino/query"
+	"github.com/pearl-research-labs/pearl/node/addrmgr"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/connmgr"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/blockntfns"
+	"github.com/pearl-research-labs/pearl/spv/cache/lru"
+	"github.com/pearl-research-labs/pearl/spv/chanutils"
+	"github.com/pearl-research-labs/pearl/spv/filterdb"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/spv/pushtx"
+	"github.com/pearl-research-labs/pearl/spv/query"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 // These are exported variables so they can be changed by users.
@@ -43,11 +44,11 @@ var (
 	ConnectionRetryInterval = time.Second * 5
 
 	// UserAgentName is the user agent name and is used to help identify
-	// ourselves to other bitcoin peers.
+	// ourselves to other peers on the network.
 	UserAgentName = "neutrino"
 
 	// UserAgentVersion is the user agent version and is used to help
-	// identify ourselves to other bitcoin peers.
+	// identify ourselves to other peers.
 	UserAgentVersion = "0.12.0-beta"
 
 	// Services describes the services that are supported by the server.
@@ -69,8 +70,7 @@ var (
 	// MaxPeers is the maximum number of connections the client maintains.
 	MaxPeers = 125
 
-	// DisableDNSSeed disables getting initial addresses for Bitcoin nodes
-	// from DNS.
+	// DisableDNSSeed disables getting initial addresses for nodes from DNS.
 	DisableDNSSeed = false
 
 	// DefaultFilterCacheSize is the size (in bytes) of filters neutrino
@@ -88,7 +88,7 @@ var (
 
 // isDevNetwork indicates if the chain is a private development network, namely
 // simnet or regtest/regnet.
-func isDevNetwork(net wire.BitcoinNet) bool {
+func isDevNetwork(net wire.PearlNet) bool {
 	return net == chaincfg.SimNetParams.Net ||
 		net == chaincfg.RegressionNetParams.Net
 }
@@ -180,6 +180,11 @@ type ServerPeer struct {
 	recvSubscribers  map[spMsgSubscription]struct{}
 	recvSubscribers2 map[msgSubscription]struct{}
 	mtxSubscribers   sync.RWMutex
+
+	// pipelinedLocator is the begin-locator tip of an outstanding
+	// speculative getheaders issued by blockManager during IBD. Zero
+	// means no speculative request is in flight for this peer.
+	pipelinedLocator chainhash.Hash
 }
 
 // NewServerPeer returns a new ServerPeer instance. The peer needs to be set by
@@ -219,13 +224,13 @@ func (sp *ServerPeer) addKnownAddresses(addresses []*wire.NetAddressV2) {
 	}
 }
 
-// OnVerAck is invoked when a peer receives a verack bitcoin message and is used
+// OnVerAck is invoked when a peer receives a verack message and is used
 // to kick start communication with them.
 func (sp *ServerPeer) OnVerAck(_ *peer.Peer, msg *wire.MsgVerAck) {
 	sp.server.AddPeer(sp)
 }
 
-// OnVersion is invoked when a peer receives a version bitcoin message
+// OnVersion is invoked when a peer receives a version message
 // and is used to negotiate the protocol version details as well as kick start
 // the communications.
 func (sp *ServerPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgReject {
@@ -266,7 +271,7 @@ func (sp *ServerPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	return nil
 }
 
-// OnInv is invoked when a peer receives an inv bitcoin message and is
+// OnInv is invoked when a peer receives an inv message and is
 // used to examine the inventory being advertised by the remote peer and react
 // accordingly.  We pass the message down to blockmanager which will call
 // QueueMessage with any appropriate responses.
@@ -275,15 +280,10 @@ func (sp *ServerPeer) OnInv(p *peer.Peer, msg *wire.MsgInv) {
 	newInv := wire.NewMsgInvSizeHint(uint(len(msg.InvList)))
 	for _, invVect := range msg.InvList {
 		if invVect.Type == wire.InvTypeTx {
-			log.Tracef("Ignoring tx %s in inv from %v -- "+
-				"SPV mode", invVect.Hash, sp)
-			if sp.ProtocolVersion() >= wire.BIP0037Version {
-				log.Infof("Peer %v is announcing "+
-					"transactions -- disconnecting", sp)
-				sp.Disconnect()
-				return
-			}
-			continue
+			log.Infof("Peer %v is announcing "+
+				"transactions in SPV mode -- disconnecting", sp)
+			sp.Disconnect()
+			return
 		}
 		err := newInv.AddInvVect(invVect)
 		if err != nil {
@@ -297,7 +297,7 @@ func (sp *ServerPeer) OnInv(p *peer.Peer, msg *wire.MsgInv) {
 	}
 }
 
-// OnHeaders is invoked when a peer receives a headers bitcoin
+// OnHeaders is invoked when a peer receives a headers
 // message.  The message is passed down to the block manager.
 func (sp *ServerPeer) OnHeaders(p *peer.Peer, msg *wire.MsgHeaders) {
 	log.Tracef("Got headers with %d items from %s", len(msg.Headers),
@@ -305,13 +305,13 @@ func (sp *ServerPeer) OnHeaders(p *peer.Peer, msg *wire.MsgHeaders) {
 	sp.server.blockManager.QueueHeaders(msg, sp)
 }
 
-// OnFeeFilter is invoked when a peer receives a feefilter bitcoin message and
+// OnFeeFilter is invoked when a peer receives a feefilter message and
 // is used by remote peers to request that no transactions which have a fee rate
 // lower than provided value are inventoried to them.  The peer will be
 // disconnected if an invalid fee filter value is provided.
 func (sp *ServerPeer) OnFeeFilter(_ *peer.Peer, msg *wire.MsgFeeFilter) {
 	// Check that the passed minimum fee is a valid amount.
-	if msg.MinFee < 0 || msg.MinFee > btcutil.MaxSatoshi {
+	if msg.MinFee < 0 || msg.MinFee > btcutil.MaxGrain {
 		log.Debugf("Peer %v sent an invalid feefilter '%v' -- "+
 			"disconnecting", sp, btcutil.Amount(msg.MinFee))
 		sp.Disconnect()
@@ -321,13 +321,13 @@ func (sp *ServerPeer) OnFeeFilter(_ *peer.Peer, msg *wire.MsgFeeFilter) {
 	atomic.StoreInt64(&sp.feeFilter, msg.MinFee)
 }
 
-// OnReject is invoked when a peer receives a reject bitcoin message and is
+// OnReject is invoked when a peer receives a reject message and is
 // used to notify the server about a rejected transaction.
 func (sp *ServerPeer) OnReject(_ *peer.Peer, msg *wire.MsgReject) {
 	// TODO(roaseef): log?
 }
 
-// OnAddr is invoked when a peer receives an addr bitcoin message and is
+// OnAddr is invoked when a peer receives an addr message and is
 // used to notify the server about advertised addresses.
 func (sp *ServerPeer) OnAddr(_ *peer.Peer, msg *wire.MsgAddr) {
 	// Ignore addresses when running on a private development network.  This
@@ -335,11 +335,6 @@ func (sp *ServerPeer) OnAddr(_ *peer.Peer, msg *wire.MsgAddr) {
 	// since it will not be able to learn about other peers that have not
 	// specifically been provided.
 	if isDevNetwork(sp.server.chainParams.Net) {
-		return
-	}
-
-	// Ignore old style addresses which don't include a timestamp.
-	if sp.ProtocolVersion() < wire.NetAddressTimeVersion {
 		return
 	}
 
@@ -508,7 +503,7 @@ func (sp *ServerPeer) unsubscribeRecvMsgs(subscription spMsgSubscription) {
 // interface.
 var _ query.Peer = (*ServerPeer)(nil)
 
-// SubscribeRecvMsg adds a OnRead subscription to the peer. All bitcoin
+// SubscribeRecvMsg adds a OnRead subscription to the peer. All wire
 // messages received from this peer will be sent on the returned channel. A
 // closure is also returned, that should be called to cancel the subscription.
 //
@@ -638,7 +633,7 @@ type ChainService struct { // nolint:maligned
 
 	FilterDB         filterdb.FilterDatabase
 	BlockHeaders     headerfs.BlockHeaderStore
-	RegFilterHeaders *headerfs.FilterHeaderStore
+	RegFilterHeaders headerfs.FilterHeaderStore
 	persistToDisk    bool
 
 	FilterCache *lru.Cache[FilterCacheKey, *CacheableFilter]
@@ -681,7 +676,7 @@ type ChainService struct { // nolint:maligned
 }
 
 // NewChainService returns a new chain service configured to connect to the
-// bitcoin network type specified by chainParams.  Use start to begin syncing
+// network type specified by chainParams.  Use start to begin syncing
 // with peers.
 func NewChainService(cfg Config) (*ChainService, error) {
 	// Use the default broadcast timeout if one isn't provided.
@@ -738,6 +733,9 @@ func NewChainService(cfg Config) (*ChainService, error) {
 		persistToDisk:     cfg.PersistToDisk,
 		broadcastTimeout:  cfg.BroadcastTimeout,
 	}
+
+	s.services |= wire.SFNodeP2PV2
+
 	s.workManager = query.NewWorkManager(&query.Config{
 		ConnectedPeers: s.ConnectedPeers,
 		NewWorker:      query.NewWorker,
@@ -1020,6 +1018,39 @@ func (s *ChainService) BestBlock() (*headerfs.BlockStamp, error) {
 		Hash:      bestHeader.BlockHash(),
 		Timestamp: bestHeader.Timestamp,
 	}, nil
+}
+
+// BlockHeaderTipHeight returns the height of the highest block header in the
+// header store. During initial sync this advances as headers are downloaded
+// from peers.
+func (s *ChainService) BlockHeaderTipHeight() (int32, error) {
+	_, height, err := s.BlockHeaders.ChainTip()
+	if err != nil {
+		return 0, err
+	}
+	return int32(height), nil
+}
+
+// FilterHeaderTipHeight returns the height of the highest compact filter
+// header in the filter header store.
+func (s *ChainService) FilterHeaderTipHeight() (int32, error) {
+	_, height, err := s.RegFilterHeaders.ChainTip()
+	if err != nil {
+		return 0, err
+	}
+	return int32(height), nil
+}
+
+// BestPeerHeight returns the highest block height reported by any connected
+// peer.
+func (s *ChainService) BestPeerHeight() int32 {
+	var best int32
+	for _, peer := range s.Peers() {
+		if h := peer.LastBlock(); h > best {
+			best = h
+		}
+	}
+	return best
 }
 
 // GetBlockHash returns the block hash at the given height.
@@ -1364,11 +1395,8 @@ func (s *ChainService) handleAddPeerMsg(state *peerState, sp *ServerPeer) bool {
 	// specified peers and actively avoids advertising and connecting to
 	// discovered peers.
 	if !isDevNetwork(s.chainParams.Net) {
-		// Request known addresses if the server address manager needs
-		// more and the peer has a protocol version new enough to
-		// include a timestamp with addresses.
-		hasTimestamp := sp.ProtocolVersion() >= wire.NetAddressTimeVersion
-		if s.addrManager.NeedMoreAddresses() && hasTimestamp {
+		// Request known addresses if the server address manager needs more.
+		if s.addrManager.NeedMoreAddresses() {
 			sp.QueueMessage(wire.NewMsgGetAddr(), nil)
 		}
 
@@ -1505,12 +1533,6 @@ func NewPeerConfig(sp *ServerPeer) *peer.Config {
 			OnAddrV2:    sp.OnAddrV2,
 			OnRead:      sp.OnRead,
 			OnWrite:     sp.OnWrite,
-
-			// Note: The reference client currently bans peers that send alerts
-			// not signed with its key.  We could verify against their key, but
-			// since the reference client is currently unwilling to support
-			// other implementations' alert messages, we will not relay theirs.
-			OnAlert: nil,
 		},
 		NewestBlock:      sp.newestBlock,
 		HostToNetAddress: sp.server.addrManager.HostToNetAddress,
@@ -1518,7 +1540,7 @@ func NewPeerConfig(sp *ServerPeer) *peer.Config {
 		UserAgentVersion: sp.server.userAgentVersion,
 		ChainParams:      &sp.server.chainParams,
 		Services:         sp.server.services,
-		ProtocolVersion:  wire.AddrV2Version,
+		ProtocolVersion:  wire.ProtocolVersion,
 		DisableRelayTx:   true,
 	}
 }
@@ -1561,7 +1583,9 @@ func (s *ChainService) outboundPeerConnected(c *connmgr.ConnReq, conn net.Conn) 
 	}
 
 	sp := NewServerPeer(s, c.Permanent)
-	p, err := peer.NewOutboundPeer(NewPeerConfig(sp), peerAddr)
+	peerCfg := NewPeerConfig(sp)
+
+	p, err := peer.NewOutboundPeer(peerCfg, peerAddr)
 	if err != nil {
 		log.Debugf("Cannot create outbound peer %s: %s", c.Addr, err)
 		disconnect()
@@ -1615,7 +1639,7 @@ func (s *ChainService) ChainParams() chaincfg.Params {
 }
 
 // Start begins connecting to peers and syncing the blockchain.
-func (s *ChainService) Start() error {
+func (s *ChainService) Start(ctx context.Context) error {
 	// Already started?
 	if atomic.AddInt32(&s.started, 1) != 1 {
 		return nil
@@ -1760,7 +1784,7 @@ func (c *cachedAddr) Size() (uint64, error) {
 }
 
 // onionAddr implements the net.Addr interface and represents a tor address.
-// This code is identical to btcd's unexported onionAddr. It is used so that
+// This code is identical to pearld's unexported onionAddr. It is used so that
 // neutrino can connect to v2 addresses without relying on the OnionCat
 // encoding. It also enables connecting to v3 addresses.
 type onionAddr struct {

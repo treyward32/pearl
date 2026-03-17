@@ -1,0 +1,101 @@
+name: Start EC2 GPU Runner
+description: >
+  Provisions an on-demand EC2 GPU instance, mounts the ephemeral NVMe SSD
+  for Docker storage and the runner workspace, and registers it as a
+  GitHub Actions self-hosted runner.
+
+inputs:
+  aws-access-key-id:
+    description: AWS access key ID for EC2 operations
+    required: true
+  aws-secret-access-key:
+    description: AWS secret access key for EC2 operations
+    required: true
+  aws-region:
+    description: AWS region to launch the EC2 instance in
+    required: true
+  github-token:
+    description: GitHub PAT with repo scope for runner registration
+    required: true
+  ec2-image-id:
+    description: AMI ID for the EC2 instance
+    required: true
+  ec2-instance-type:
+    description: EC2 instance type (e.g. p5.4xlarge)
+    required: true
+  subnet-id:
+    description: VPC subnet ID to launch the instance in
+    required: true
+  security-group-id:
+    description: Security group ID for the instance
+    required: true
+
+outputs:
+  label:
+    description: Unique label assigned to the runner (use as runs-on value)
+    value: ${{ steps.start.outputs.label }}
+  ec2-instance-id:
+    description: EC2 instance ID (needed for termination)
+    value: ${{ steps.start.outputs.ec2-instance-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws-region }}
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
+    - name: Start EC2 runner
+      id: start
+      continue-on-error: true
+      uses: machulav/ec2-github-runner@v2
+      with:
+        mode: start
+        github-token: ${{ inputs.github-token }}
+        ec2-image-id: ${{ inputs.ec2-image-id }}
+        ec2-instance-type: ${{ inputs.ec2-instance-type }}
+        subnet-id: ${{ inputs.subnet-id }}
+        security-group-id: ${{ inputs.security-group-id }}
+        aws-resource-tags: >
+          [
+            {"Key": "GitHubRunId", "Value": "${{ github.run_id }}"},
+            {"Key": "GitHubRepository", "Value": "${{ github.repository }}"}
+          ]
+        # IMPORTANT: The machulav action embeds this script inside an
+        # echo "..." > file shell command, so double quotes and $ signs
+        # are interpreted by bash at write time, not at execution time.
+        # Always use single quotes for strings and inline paths directly.
+        #
+        # /dev/nvme1n1 is the 3.5T ephemeral NVMe SSD on p5.4xlarge
+        # (nvme0n1 is the 40G root EBS volume). If the instance type
+        # changes, update this path or bake detection into the AMI.
+        pre-runner-script: |
+          echo '=== Dead man switch: self-stop in 3 hours if not terminated ==='
+          shutdown -h +180
+          echo '=== Setting up ephemeral NVMe storage ==='
+          mkfs.xfs -f /dev/nvme1n1
+          mkdir -p /mnt/ephemeral
+          mount /dev/nvme1n1 /mnt/ephemeral
+          echo 'Relocating Docker storage to ephemeral NVMe...'
+          mkdir -p /mnt/ephemeral/docker
+          systemctl stop docker
+          rm -rf /var/lib/docker
+          mkdir -p /var/lib/docker
+          mount --bind /mnt/ephemeral/docker /var/lib/docker
+          systemctl start docker
+          echo 'Binding runner workspace to ephemeral NVMe...'
+          mkdir -p /mnt/ephemeral/work
+          mkdir -p _work
+          mount --bind /mnt/ephemeral/work _work
+          df -h /mnt/ephemeral
+          echo '=== Ephemeral NVMe setup complete ==='
+
+    - name: Check provisioning result
+      shell: bash
+      run: |
+        if [ "${{ steps.start.outcome }}" != "success" ]; then
+          echo "::warning::EC2 GPU runner provisioning failed — will fall back to static runner"
+        fi

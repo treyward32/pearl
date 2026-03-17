@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -709,8 +709,8 @@ func TestBatchGetRawTxesOnBatchSize(t *testing.T) {
 		mockTxReceiver := make(rpcclient.FutureGetRawTransactionResult)
 
 		// Add this tx to our mocked responses.
-		btcTx := btcutil.NewTx(tx)
-		mockTxResponses[txHash] = btcTx
+		prlTx := btcutil.NewTx(tx)
+		mockTxResponses[txHash] = prlTx
 
 		// Mock `GetRawTransactionAsync` to return the mocked value.
 		mockRPC.On("GetRawTransactionAsync",
@@ -722,10 +722,10 @@ func TestBatchGetRawTxesOnBatchSize(t *testing.T) {
 	m.cfg.rawTxReceiver = func(txid chainhash.Hash,
 		reciever getRawTxReceiver) *btcutil.Tx {
 
-		btcTx, ok := mockTxResponses[txid]
+		prlTx, ok := mockTxResponses[txid]
 		require.Truef(ok, "unexpected receiver for %v", txid)
 
-		return btcTx
+		return prlTx
 	}
 
 	// We expect to send the batched requests three times - two for the
@@ -829,8 +829,8 @@ func TestBatchGetRawTxesOnWait(t *testing.T) {
 		mempool = append(mempool, &txHash)
 
 		// Add this tx to our mocked responses.
-		btcTx := btcutil.NewTx(tx)
-		mockTxResponses[txHash] = btcTx
+		prlTx := btcutil.NewTx(tx)
+		mockTxResponses[txHash] = prlTx
 	}
 
 	// Mock GetRawTransactionAsync. We expect it to be called 3 times.
@@ -848,10 +848,10 @@ func TestBatchGetRawTxesOnWait(t *testing.T) {
 	m.cfg.rawTxReceiver = func(txid chainhash.Hash,
 		reciever getRawTxReceiver) *btcutil.Tx {
 
-		btcTx, ok := mockTxResponses[txid]
+		prlTx, ok := mockTxResponses[txid]
 		require.Truef(ok, "unexpected receiver for %v", txid)
 
-		return btcTx
+		return prlTx
 	}
 
 	// We expect to send the batched requests exactly one time as the

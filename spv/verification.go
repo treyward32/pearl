@@ -3,10 +3,10 @@ package neutrino
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/txscript"
 )
 
 // VerifyBasicBlockFilter asserts that a given block filter was constructed
@@ -145,7 +145,7 @@ func VerifyBasicBlockFilter(filter *gcs.Filter, block *btcutil.Block) (int,
 					"invalid, input %d of tx %v spends "+
 					"pk script %x which wasn't matched by "+
 					"filter. The input likely spends a "+
-					"taproot output which is not yet"+
+					"taproot output which is not yet "+
 					"supported", block.Hash(), inIdx,
 					tx.Hash(), script.Script())
 			}

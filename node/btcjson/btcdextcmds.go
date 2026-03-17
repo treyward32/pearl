@@ -1,10 +1,10 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2016 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 // NOTE: This file is intended to house the RPC commands that are supported by
-// a chain server with btcd extensions.
+// a chain server with pearld extensions.
 
 package btcjson
 
@@ -45,14 +45,14 @@ func NewNodeCmd(subCmd NodeSubCmd, target string, connectSubCmd *string) *NodeCm
 }
 
 // DebugLevelCmd defines the debuglevel JSON-RPC command.  This command is not a
-// standard Bitcoin command.  It is an extension for btcd.
+// standard command.  It is an extension for pearld.
 type DebugLevelCmd struct {
 	LevelSpec string
 }
 
 // NewDebugLevelCmd returns a new DebugLevelCmd which can be used to issue a
-// debuglevel JSON-RPC command.  This command is not a standard Bitcoin command.
-// It is an extension for btcd.
+// debuglevel JSON-RPC command.  This command is not a standard command.
+// It is an extension for pearld.
 func NewDebugLevelCmd(levelSpec string) *DebugLevelCmd {
 	return &DebugLevelCmd{
 		LevelSpec: levelSpec,
@@ -109,7 +109,7 @@ func NewGetCurrentNetCmd() *GetCurrentNetCmd {
 
 // GetHeadersCmd defines the getheaders JSON-RPC command.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrd/dcrjson.
 type GetHeadersCmd struct {
 	BlockLocators []string `json:"blocklocators"`
@@ -119,7 +119,7 @@ type GetHeadersCmd struct {
 // NewGetHeadersCmd returns a new instance which can be used to issue a
 // getheaders JSON-RPC command.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrd/dcrjson.
 func NewGetHeadersCmd(blockLocators []string, hashStop string) *GetHeadersCmd {
 	return &GetHeadersCmd{
@@ -130,14 +130,14 @@ func NewGetHeadersCmd(blockLocators []string, hashStop string) *GetHeadersCmd {
 
 // VersionCmd defines the version JSON-RPC command.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrd/dcrjson.
 type VersionCmd struct{}
 
 // NewVersionCmd returns a new instance which can be used to issue a JSON-RPC
 // version command.
 //
-// NOTE: This is a btcsuite extension ported from
+// NOTE: This is a Pearl extension ported from
 // github.com/decred/dcrd/dcrjson.
 func NewVersionCmd() *VersionCmd { return new(VersionCmd) }
 

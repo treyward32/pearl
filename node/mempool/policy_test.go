@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,12 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TestCalcMinRequiredTxRelayFee tests the calcMinRequiredTxRelayFee API.
@@ -40,16 +39,16 @@ func TestCalcMinRequiredTxRelayFee(t *testing.T) {
 			100,
 		},
 		{
-			"max standard tx size with default minimum relay fee",
-			maxStandardTxWeight / 4,
+			"max standard tx vsize with default minimum relay fee",
+			maxStandardTxVsize,
 			DefaultMinRelayTxFee,
 			100000,
 		},
 		{
-			"max standard tx size with max satoshi relay fee",
-			maxStandardTxWeight / 4,
-			btcutil.MaxSatoshi,
-			btcutil.MaxSatoshi,
+			"max standard tx vsize with max grain relay fee",
+			maxStandardTxVsize,
+			btcutil.MaxGrain,
+			btcutil.MaxGrain,
 		},
 		{
 			"1500 bytes with 5000 relay fee",
@@ -90,115 +89,6 @@ func TestCalcMinRequiredTxRelayFee(t *testing.T) {
 				"failed: got %v want %v", test.name, got,
 				test.want)
 			continue
-		}
-	}
-}
-
-// TestCheckPkScriptStandard tests the checkPkScriptStandard API.
-func TestCheckPkScriptStandard(t *testing.T) {
-	var pubKeys [][]byte
-	for i := 0; i < 4; i++ {
-		pk, err := btcec.NewPrivateKey()
-		if err != nil {
-			t.Fatalf("TestCheckPkScriptStandard NewPrivateKey failed: %v",
-				err)
-			return
-		}
-		pubKeys = append(pubKeys, pk.PubKey().SerializeCompressed())
-	}
-
-	tests := []struct {
-		name       string // test description.
-		script     *txscript.ScriptBuilder
-		isStandard bool
-	}{
-		{
-			"key1 and key2",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_2).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_2).AddOp(txscript.OP_CHECKMULTISIG),
-			true,
-		},
-		{
-			"key1 or key2",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_1).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_2).AddOp(txscript.OP_CHECKMULTISIG),
-			true,
-		},
-		{
-			"escrow",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_2).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddData(pubKeys[2]).
-				AddOp(txscript.OP_3).AddOp(txscript.OP_CHECKMULTISIG),
-			true,
-		},
-		{
-			"one of four",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_1).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddData(pubKeys[2]).AddData(pubKeys[3]).
-				AddOp(txscript.OP_4).AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed1",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_3).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_2).AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed2",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_2).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_3).AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed3",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_0).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_2).AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed4",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_1).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_0).AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed5",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_1).
-				AddData(pubKeys[0]).AddData(pubKeys[1]).
-				AddOp(txscript.OP_CHECKMULTISIG),
-			false,
-		},
-		{
-			"malformed6",
-			txscript.NewScriptBuilder().AddOp(txscript.OP_1).
-				AddData(pubKeys[0]).AddData(pubKeys[1]),
-			false,
-		},
-	}
-
-	for _, test := range tests {
-		script, err := test.script.Script()
-		if err != nil {
-			t.Fatalf("TestCheckPkScriptStandard test '%s' "+
-				"failed: %v", test.name, err)
-		}
-		scriptClass := txscript.GetScriptClass(script)
-		got := checkPkScriptStandard(script, scriptClass)
-		if (test.isStandard && got != nil) ||
-			(!test.isStandard && got == nil) {
-
-			t.Fatalf("TestCheckPkScriptStandard test '%s' failed",
-				test.name)
-			return
 		}
 	}
 }
@@ -245,9 +135,9 @@ func TestDust(t *testing.T) {
 		},
 		{
 			// Maximum allowed value is never dust.
-			"max satoshi amount is never dust",
-			wire.TxOut{Value: btcutil.MaxSatoshi, PkScript: pkScript},
-			btcutil.MaxSatoshi,
+			"max grain amount is never dust",
+			wire.TxOut{Value: btcutil.MaxGrain, PkScript: pkScript},
+			btcutil.MaxGrain,
 			false,
 		},
 		{
@@ -289,9 +179,10 @@ func TestCheckTransactionStandard(t *testing.T) {
 		SignatureScript:  dummySigScript,
 		Sequence:         wire.MaxTxInSequenceNum,
 	}
-	addrHash := [20]byte{0x01}
-	addr, err := btcutil.NewAddressPubKeyHash(addrHash[:],
-		&chaincfg.TestNet3Params)
+	// Create a 32-byte witness program for Taproot
+	witnessProgram := [32]byte{0x01}
+	addr, err := btcutil.NewAddressTaproot(witnessProgram[:],
+		&chaincfg.TestNetParams)
 	if err != nil {
 		t.Fatalf("NewAddressPubKeyHash: unexpected error: %v", err)
 	}
@@ -300,7 +191,7 @@ func TestCheckTransactionStandard(t *testing.T) {
 		t.Fatalf("PayToAddrScript: unexpected error: %v", err)
 	}
 	dummyTxOut := wire.TxOut{
-		Value:    100000000, // 1 BTC
+		Value:    100000000, // 1 PRL
 		PkScript: dummyPkScript,
 	}
 
@@ -358,7 +249,7 @@ func TestCheckTransactionStandard(t *testing.T) {
 				TxOut: []*wire.TxOut{{
 					Value: 0,
 					PkScript: bytes.Repeat([]byte{0x00},
-						(maxStandardTxWeight/4)+1),
+						maxStandardTxVsize+1),
 				}},
 				LockTime: 0,
 			},

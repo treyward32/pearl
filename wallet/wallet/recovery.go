@@ -3,15 +3,15 @@ package wallet
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 // RecoveryManager maintains the state required to recover previously used
@@ -56,7 +56,7 @@ func NewRecoveryManager(recoveryWindow, batchSize uint32,
 // have been previously found. This method ensures that the recovery state's
 // horizons properly start from the last found address of a prior recovery
 // attempt.
-func (rm *RecoveryManager) Resurrect(ns walletdb.ReadBucket,
+func (rm *RecoveryManager) Resurrect(ns walletdb.ReadWriteBucket,
 	scopedMgrs map[waddrmgr.KeyScope]*waddrmgr.ScopedKeyManager,
 	credits []wtxmgr.Credit) error {
 
@@ -84,7 +84,7 @@ func (rm *RecoveryManager) Resurrect(ns walletdb.ReadBucket,
 		// recovery state's set of addresses to look for.
 		for i := uint32(0); i < externalCount; i++ {
 			keyPath := externalKeyPath(i)
-			addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath)
+			addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath, true)
 			if err != nil && err != hdkeychain.ErrInvalidChild {
 				return err
 			} else if err == hdkeychain.ErrInvalidChild {
@@ -104,7 +104,7 @@ func (rm *RecoveryManager) Resurrect(ns walletdb.ReadBucket,
 		// recovery state's set of addresses to look for.
 		for i := uint32(0); i < internalCount; i++ {
 			keyPath := internalKeyPath(i)
-			addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath)
+			addr, err := scopedMgr.DeriveFromKeyPath(ns, keyPath, true)
 			if err != nil && err != hdkeychain.ErrInvalidChild {
 				return err
 			} else if err == hdkeychain.ErrInvalidChild {
@@ -189,11 +189,11 @@ func (rm *RecoveryManager) State() *RecoveryState {
 //
 // These are defined as:
 //   - Inter-Block Gap: The maximum difference between the derived child indexes
-//       of the last addresses used in any block and the next address consumed
-//       by a later block.
+//     of the last addresses used in any block and the next address consumed
+//     by a later block.
 //   - Intra-Block Gap: The maximum difference between the derived child indexes
-//       of the first address used in any block and the last address used in the
-//       same block.
+//     of the first address used in any block and the last address used in the
+//     same block.
 type RecoveryState struct {
 	// recoveryWindow defines the key-derivation lookahead used when
 	// attempting to recover the set of used addresses. This value will be
@@ -282,12 +282,12 @@ func NewScopeRecoveryState(recoveryWindow uint32) *ScopeRecoveryState {
 // derivation branch.
 //
 // A branch recovery state supports operations for:
-//  - Expanding the look-ahead horizon based on which indexes have been found.
-//  - Registering derived addresses with indexes within the horizon.
-//  - Reporting an invalid child index that falls into the horizon.
-//  - Reporting that an address has been found.
-//  - Retrieving all currently derived addresses for the branch.
-//  - Looking up a particular address by its child index.
+//   - Expanding the look-ahead horizon based on which indexes have been found.
+//   - Registering derived addresses with indexes within the horizon.
+//   - Reporting an invalid child index that falls into the horizon.
+//   - Reporting that an address has been found.
+//   - Retrieving all currently derived addresses for the branch.
+//   - Looking up a particular address by its child index.
 type BranchRecoveryState struct {
 	// recoveryWindow defines the key-derivation lookahead used when
 	// attempting to recover the set of addresses on this branch.

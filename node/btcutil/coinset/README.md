@@ -1,11 +1,10 @@
 coinset
 =======
 
-[![Build Status](http://img.shields.io/travis/btcsuite/btcutil.svg)](https://travis-ci.org/btcsuite/btcutil)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/btcsuite/btcd/btcutil/coinset)
+[![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/pearl-research-labs/pearl/node/btcutil/coinset)
 
-Package coinset provides bitcoin-specific convenience functions for selecting
+Package coinset provides Pearl-specific convenience functions for selecting
 from and managing sets of unspent transaction outpoints (UTXOs).
 
 A comprehensive suite of tests is provided to ensure proper functionality.  See
@@ -13,10 +12,12 @@ A comprehensive suite of tests is provided to ensure proper functionality.  See
 running a POSIX OS, you can run the `cov_report.sh` script for a real-time
 report.
 
-## Installation and Updating
+## Installation
+
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
 
 ```bash
-$ go get -u github.com/btcsuite/btcd/btcutil/coinset
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## Usage
@@ -24,7 +25,7 @@ $ go get -u github.com/btcsuite/btcd/btcutil/coinset
 Each unspent transaction outpoint is represented by the Coin interface.  An
 example of a concrete type that implements Coin is coinset.SimpleCoin.
 
-The typical use case for this library is for creating raw bitcoin transactions
+The typical use case for this library is for creating raw Pearl transactions
 given a set of Coins that may be spent by the user, for example as below:
 
 ```Go

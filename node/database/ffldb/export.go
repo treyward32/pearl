@@ -1,11 +1,11 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package ffldb
 
 import (
-	"github.com/btcsuite/btcd/database"
+	"github.com/pearl-research-labs/pearl/node/database"
 )
 
 // TstRunWithMaxBlockFileSize runs the passed function with the maximum allowed

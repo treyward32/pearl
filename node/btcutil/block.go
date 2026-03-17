@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // OutOfRangeError describes an error due to accessing an element that is out
@@ -27,7 +27,7 @@ func (e OutOfRangeError) Error() string {
 	return string(e)
 }
 
-// Block defines a bitcoin block that provides easier and more efficient
+// Block defines a block that provides easier and more efficient
 // manipulation of raw blocks.  It also memoizes hashes for the block and its
 // transactions on their first access so subsequent accesses don't have to
 // repeat the relatively expensive hashing operations.
@@ -154,8 +154,8 @@ func (b *Block) Transactions() []*Tx {
 		b.transactions = make([]*Tx, len(b.msgBlock.Transactions))
 	}
 
-	// Offset of each tx.  80 accounts for the block header size.
-	offset := 80 + wire.VarIntSerializeSize(
+	// Offset of each tx (must account for certificate-first serialization)
+	offset := b.msgBlock.MsgHeader.SerializeSize() + wire.VarIntSerializeSize(
 		uint64(len(b.msgBlock.Transactions)),
 	)
 
@@ -236,7 +236,7 @@ func (b *Block) SetHeight(height int32) {
 	b.blockHeight = height
 }
 
-// NewBlock returns a new instance of a bitcoin block given an underlying
+// NewBlock returns a new instance of a block given an underlying
 // wire.MsgBlock.  See Block.
 func NewBlock(msgBlock *wire.MsgBlock) *Block {
 	return &Block{
@@ -245,7 +245,7 @@ func NewBlock(msgBlock *wire.MsgBlock) *Block {
 	}
 }
 
-// NewBlockFromBytes returns a new instance of a bitcoin block given the
+// NewBlockFromBytes returns a new instance of a block given the
 // serialized bytes.  See Block.
 func NewBlockFromBytes(serializedBlock []byte) (*Block, error) {
 	br := bytes.NewReader(serializedBlock)
@@ -263,7 +263,7 @@ func NewBlockFromBytes(serializedBlock []byte) (*Block, error) {
 	return b, nil
 }
 
-// NewBlockFromReader returns a new instance of a bitcoin block given a
+// NewBlockFromReader returns a new instance of a block given a
 // Reader to deserialize the block.  See Block.
 func NewBlockFromReader(r io.Reader) (*Block, error) {
 	// Deserialize the bytes into a MsgBlock.
@@ -280,7 +280,7 @@ func NewBlockFromReader(r io.Reader) (*Block, error) {
 	return &b, nil
 }
 
-// NewBlockFromBlockAndBytes returns a new instance of a bitcoin block given
+// NewBlockFromBlockAndBytes returns a new instance of a block given
 // an underlying wire.MsgBlock and the serialized bytes for it.  See Block.
 func NewBlockFromBlockAndBytes(msgBlock *wire.MsgBlock,
 	serializedBlock []byte) *Block {

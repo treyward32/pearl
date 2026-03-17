@@ -1,4 +1,4 @@
-// Copyright (c) 2018 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet/txauthor"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet/txauthor"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,18 +42,18 @@ func TestTxToOutputsDryRun(t *testing.T) {
 	defer cleanup()
 
 	// Create an address we can use to send some coins to.
-	keyScope := waddrmgr.KeyScopeBIP0049Plus
+	keyScope := waddrmgr.KeyScopeBIP0086
 	addr, err := w.CurrentAddress(0, keyScope)
 	if err != nil {
 		t.Fatalf("unable to get current address: %v", addr)
 	}
-	p2shAddr, err := txscript.PayToAddrScript(addr)
+	taprootAddr, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		t.Fatalf("unable to convert wallet address to p2sh: %v", err)
 	}
 
 	// Add an output paying to the wallet's address to the database.
-	txOut := wire.NewTxOut(100000, p2shAddr)
+	txOut := wire.NewTxOut(100000, taprootAddr)
 	incomingTx := &wire.MsgTx{
 		TxIn: []*wire.TxIn{
 			{},
@@ -68,11 +68,11 @@ func TestTxToOutputsDryRun(t *testing.T) {
 	// outputs.
 	txOuts := []*wire.TxOut{
 		{
-			PkScript: p2shAddr,
+			PkScript: taprootAddr,
 			Value:    10000,
 		},
 		{
-			PkScript: p2shAddr,
+			PkScript: taprootAddr,
 			Value:    20000,
 		},
 	}
@@ -213,11 +213,53 @@ func addUtxo(t *testing.T, w *Wallet, incomingTx *wire.MsgTx) {
 	}
 }
 
+// addTxAndCredit adds the given transaction to the wallet's database marked as
+// a confirmed UTXO specified by the creditIndex.
+func addTxAndCredit(t *testing.T, w *Wallet, tx *wire.MsgTx,
+	creditIndex uint32) {
+
+	var b bytes.Buffer
+	require.NoError(t, tx.Serialize(&b), "unable to serialize tx")
+
+	txBytes := b.Bytes()
+
+	rec, err := wtxmgr.NewTxRecord(txBytes, time.Now())
+	require.NoError(t, err)
+
+	// The block meta will be inserted to tell the wallet this is a
+	// confirmed transaction.
+	block := &wtxmgr.BlockMeta{
+		Block: wtxmgr.Block{
+			Hash:   *testBlockHash,
+			Height: testBlockHeight,
+		},
+		Time: time.Unix(1387737310, 0),
+	}
+
+	err = walletdb.Update(w.db, func(dbTx walletdb.ReadWriteTx) error {
+		ns := dbTx.ReadWriteBucket(wtxmgrNamespaceKey)
+		err = w.TxStore.InsertTx(ns, rec, block)
+		if err != nil {
+			return err
+		}
+
+		// Add the specified output as credit.
+		err = w.TxStore.AddCredit(ns, rec, block, creditIndex, false)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	require.NoError(t, err, "failed inserting tx")
+}
+
 // TestInputYield verifies the functioning of the inputYieldsPositively.
 func TestInputYield(t *testing.T) {
 	t.Parallel()
 
-	addr, _ := btcutil.DecodeAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", &chaincfg.MainNetParams)
+	// Use a Taproot address for Taproot-only wallet
+	addr, _ := btcutil.DecodeAddress("prl1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rus7mymn2", &chaincfg.MainNetParams)
 	pkScript, err := txscript.PayToAddrScript(addr)
 	require.NoError(t, err)
 
@@ -229,8 +271,9 @@ func TestInputYield(t *testing.T) {
 	// At 10 sat/b this input is yielding positively.
 	require.True(t, inputYieldsPositively(credit, 10000))
 
-	// At 20 sat/b this input is yielding negatively.
-	require.False(t, inputYieldsPositively(credit, 20000))
+	// At 50 sat/b this input should yield negatively for Taproot.
+	// (Higher threshold needed due to Taproot's efficiency - smaller input size)
+	require.False(t, inputYieldsPositively(credit, 50000))
 }
 
 // TestTxToOutputsRandom tests random coin selection.
@@ -241,12 +284,12 @@ func TestTxToOutputsRandom(t *testing.T) {
 	defer cleanup()
 
 	// Create an address we can use to send some coins to.
-	keyScope := waddrmgr.KeyScopeBIP0049Plus
+	keyScope := waddrmgr.KeyScopeBIP0086
 	addr, err := w.CurrentAddress(0, keyScope)
 	if err != nil {
 		t.Fatalf("unable to get current address: %v", addr)
 	}
-	p2shAddr, err := txscript.PayToAddrScript(addr)
+	taprootAddr, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		t.Fatalf("unable to convert wallet address to p2sh: %v", err)
 	}
@@ -259,7 +302,7 @@ func TestTxToOutputsRandom(t *testing.T) {
 		TxOut: []*wire.TxOut{},
 	}
 	for amt := int64(5000); amt <= 125000; amt += 10000 {
-		incomingTx.AddTxOut(wire.NewTxOut(amt, p2shAddr))
+		incomingTx.AddTxOut(wire.NewTxOut(amt, taprootAddr))
 	}
 
 	addUtxo(t, w, incomingTx)
@@ -268,11 +311,11 @@ func TestTxToOutputsRandom(t *testing.T) {
 	// outputs.
 	txOuts := []*wire.TxOut{
 		{
-			PkScript: p2shAddr,
+			PkScript: taprootAddr,
 			Value:    50000,
 		},
 		{
-			PkScript: p2shAddr,
+			PkScript: taprootAddr,
 			Value:    100000,
 		},
 	}
@@ -323,17 +366,17 @@ func TestCreateSimpleCustomChange(t *testing.T) {
 
 	// First, we'll make a P2TR and a P2WKH address to send some coins to
 	// (two different coin scopes).
-	p2wkhAddr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0084)
+	p2trAddr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
 	require.NoError(t, err)
 
-	p2trAddr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
+	p2trAddr2, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
 	require.NoError(t, err)
 
 	// We'll now make a transaction that'll send coins to both outputs,
 	// then "credit" the wallet for that send.
-	p2wkhScript, err := txscript.PayToAddrScript(p2wkhAddr)
-	require.NoError(t, err)
 	p2trScript, err := txscript.PayToAddrScript(p2trAddr)
+	require.NoError(t, err)
+	p2trScript2, err := txscript.PayToAddrScript(p2trAddr2)
 	require.NoError(t, err)
 
 	const testAmt = 1_000_000
@@ -343,8 +386,8 @@ func TestCreateSimpleCustomChange(t *testing.T) {
 			{},
 		},
 		TxOut: []*wire.TxOut{
-			wire.NewTxOut(testAmt, p2wkhScript),
 			wire.NewTxOut(testAmt, p2trScript),
+			wire.NewTxOut(testAmt, p2trScript2),
 		},
 	}
 	addUtxo(t, w, incomingTx)
@@ -382,12 +425,12 @@ func TestCreateSimpleCustomChange(t *testing.T) {
 	}
 	tx2, err := w.txToOutputs(
 		[]*wire.TxOut{targetTxOut}, &waddrmgr.KeyScopeBIP0086,
-		&waddrmgr.KeyScopeBIP0084, 0, 1, 1000, CoinSelectionLargest,
+		&waddrmgr.KeyScopeBIP0086, 0, 1, 1000, CoinSelectionLargest,
 		true, nil, alwaysAllowUtxo,
 	)
 	require.NoError(t, err)
 
-	// The resulting transaction should spend a single input, and use P2WKH
+	// The resulting transaction should spend a single input, and use P2TR
 	// as the output script.
 	require.Len(t, tx2.Tx.TxIn, 1)
 	require.Len(t, tx2.Tx.TxOut, 2)
@@ -401,7 +444,7 @@ func TestCreateSimpleCustomChange(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		require.Equal(t, scriptType, txscript.WitnessV0PubKeyHashTy)
+		require.Equal(t, scriptType, txscript.WitnessV1TaprootTy)
 	}
 }
 
@@ -413,19 +456,18 @@ func TestSelectUtxosTxoToOutpoint(t *testing.T) {
 	w, cleanup := testWallet(t)
 	defer cleanup()
 
-	// First, we'll make a P2TR and a P2WKH address to send some coins to.
-	p2wkhAddr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0084)
-	require.NoError(t, err)
-
+	// First, we'll make two P2TR addresses to send some coins to.
 	p2trAddr, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
+	require.NoError(t, err)
+	p2trAddr2, err := w.CurrentAddress(0, waddrmgr.KeyScopeBIP0086)
 	require.NoError(t, err)
 
 	// We'll now make a transaction that'll send coins to both outputs,
 	// then "credit" the wallet for that send.
-	p2wkhScript, err := txscript.PayToAddrScript(p2wkhAddr)
+	p2trScript, err := txscript.PayToAddrScript(p2trAddr)
 	require.NoError(t, err)
 
-	p2trScript, err := txscript.PayToAddrScript(p2trAddr)
+	p2trScript2, err := txscript.PayToAddrScript(p2trAddr2)
 	require.NoError(t, err)
 
 	incomingTx := &wire.MsgTx{
@@ -433,7 +475,7 @@ func TestSelectUtxosTxoToOutpoint(t *testing.T) {
 			{},
 		},
 		TxOut: []*wire.TxOut{
-			wire.NewTxOut(1_000_000, p2wkhScript),
+			wire.NewTxOut(1_000_000, p2trScript2),
 			wire.NewTxOut(2_000_000, p2trScript),
 			wire.NewTxOut(3_000_000, p2trScript),
 			wire.NewTxOut(7_000_000, p2trScript),
@@ -441,50 +483,115 @@ func TestSelectUtxosTxoToOutpoint(t *testing.T) {
 	}
 	addUtxo(t, w, incomingTx)
 
-	// We expect 4 unspent utxos.
+	// We expect 4 unspent UTXOs.
 	unspent, err := w.ListUnspent(0, 80, "")
-	require.NoError(t, err, "unexpected error while calling "+
-		"list unspent")
-
-	require.Len(t, unspent, 4, "expected 4 unspent "+
-		"utxos")
-
-	selectUtxos := []wire.OutPoint{
-		{
-			Hash:  incomingTx.TxHash(),
-			Index: 1,
-		},
-		{
-			Hash:  incomingTx.TxHash(),
-			Index: 2,
-		},
-	}
-
-	// Test by sending 200_000.
-	targetTxOut := &wire.TxOut{
-		Value:    200_000,
-		PkScript: p2trScript,
-	}
-	tx1, err := w.txToOutputs(
-		[]*wire.TxOut{targetTxOut}, nil, nil, 0, 1, 1000,
-		CoinSelectionLargest, true, selectUtxos, alwaysAllowUtxo,
-	)
 	require.NoError(t, err)
+	require.Len(t, unspent, 4, "expected 4 unspent UTXOs")
 
-	// We expect all and only our select utxos to be input in this
-	// transaction.
-	require.Len(t, tx1.Tx.TxIn, len(selectUtxos))
-
-	lookupSelectUtxos := make(map[wire.OutPoint]struct{})
-	for _, utxo := range selectUtxos {
-		lookupSelectUtxos[utxo] = struct{}{}
+	tCases := []struct {
+		name        string
+		selectUTXOs []wire.OutPoint
+		errString   string
+	}{
+		{
+			name: "Duplicate utxo values",
+			selectUTXOs: []wire.OutPoint{
+				{
+					Hash:  incomingTx.TxHash(),
+					Index: 1,
+				},
+				{
+					Hash:  incomingTx.TxHash(),
+					Index: 1,
+				},
+			},
+			errString: "selected UTXOs contain duplicate values",
+		},
+		{
+			name: "all selected UTXOs not eligible for spending",
+			selectUTXOs: []wire.OutPoint{
+				{
+					Hash:  chainhash.Hash([32]byte{1}),
+					Index: 1,
+				},
+				{
+					Hash:  chainhash.Hash([32]byte{3}),
+					Index: 1,
+				},
+			},
+			errString: "selected outpoint not eligible for " +
+				"spending",
+		},
+		{
+			name: "some select UTXOs not eligible for spending",
+			selectUTXOs: []wire.OutPoint{
+				{
+					Hash:  chainhash.Hash([32]byte{1}),
+					Index: 1,
+				},
+				{
+					Hash:  incomingTx.TxHash(),
+					Index: 1,
+				},
+			},
+			errString: "selected outpoint not eligible for " +
+				"spending",
+		},
+		{
+			name: "select utxo, no duplicates and all eligible " +
+				"for spending",
+			selectUTXOs: []wire.OutPoint{
+				{
+					Hash:  incomingTx.TxHash(),
+					Index: 1,
+				},
+				{
+					Hash:  incomingTx.TxHash(),
+					Index: 2,
+				},
+			},
+		},
 	}
 
-	for _, tx := range tx1.Tx.TxIn {
-		_, ok := lookupSelectUtxos[tx.PreviousOutPoint]
-		require.True(t, ok, "unexpected outpoint in txin")
-	}
+	for _, tc := range tCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test by sending 200_000.
+			targetTxOut := &wire.TxOut{
+				Value:    200_000,
+				PkScript: p2trScript,
+			}
+			tx1, err := w.txToOutputs(
+				[]*wire.TxOut{targetTxOut}, nil, nil, 0, 1,
+				1000, CoinSelectionLargest, true,
+				tc.selectUTXOs, alwaysAllowUtxo,
+			)
+			if tc.errString != "" {
+				require.ErrorContains(t, err, tc.errString)
+				require.Nil(t, tx1)
 
-	// Expect two outputs, change and the actual payment to the address.
-	require.Len(t, tx1.Tx.TxOut, 2)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, tx1)
+
+			// We expect all and only our select UTXOs to be input
+			// in this transaction.
+			require.Len(t, tx1.Tx.TxIn, len(tc.selectUTXOs))
+
+			lookupSelectUtxos := make(map[wire.OutPoint]struct{})
+			for _, utxo := range tc.selectUTXOs {
+				lookupSelectUtxos[utxo] = struct{}{}
+			}
+
+			for _, tx := range tx1.Tx.TxIn {
+				_, ok := lookupSelectUtxos[tx.PreviousOutPoint]
+				require.True(t, ok)
+			}
+
+			// Expect two outputs, change and the actual payment to
+			// the address.
+			require.Len(t, tx1.Tx.TxOut, 2)
+		})
+	}
 }

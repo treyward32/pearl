@@ -6,15 +6,16 @@ import (
 	"os"
 	"sort"
 	"testing"
+	"time"
 
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 func decodeHashNoError(str string) *chainhash.Hash {
@@ -514,7 +515,7 @@ var (
 )
 
 func heightToHeader(height uint32) *wire.BlockHeader {
-	header := &wire.BlockHeader{Nonce: height}
+	header := &wire.BlockHeader{Timestamp: time.Unix(int64(height), 0)}
 	return header
 }
 
@@ -526,7 +527,7 @@ func runCheckCFCheckptSanityTestCase(t *testing.T, testCase *cfCheckptTestCase) 
 	defer os.RemoveAll(tempDir)
 
 	db, err := walletdb.Create(
-		"bdb", tempDir+"/weks.db", true, dbOpenTimeout,
+		"bdb", tempDir+"/weks.db", true, dbOpenTimeout, false,
 	)
 	if err != nil {
 		t.Fatalf("Error opening DB: %s", err)

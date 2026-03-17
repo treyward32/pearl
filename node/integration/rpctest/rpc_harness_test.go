@@ -1,10 +1,8 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 // This file is ignored during the regular tests due to the following build tag.
-//go:build rpctest
-// +build rpctest
 
 package rpctest
 
@@ -14,11 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 func testSendOutputs(r *Harness, t *testing.T) {
@@ -29,14 +28,14 @@ func testSendOutputs(r *Harness, t *testing.T) {
 			t.Fatalf("unable to get new address: %v", err)
 		}
 
-		// Next, send amt BTC to this address, spending from one of our mature
+		// Next, send amt PRL to this address, spending from one of our mature
 		// coinbase outputs.
 		addrScript, err := txscript.PayToAddrScript(addr)
 		if err != nil {
 			t.Fatalf("unable to generate pkscript to addr: %v", err)
 		}
 		output := wire.NewTxOut(int64(amt), addrScript)
-		txid, err := r.SendOutputs([]*wire.TxOut{output}, 10)
+		txid, err := r.SendOutputs([]*wire.TxOut{output}, 100)
 		if err != nil {
 			t.Fatalf("coinbase spend failed: %v", err)
 		}
@@ -64,7 +63,7 @@ func testSendOutputs(r *Harness, t *testing.T) {
 
 	// First, generate a small spend which will require only a single
 	// input.
-	txid := genSpend(btcutil.Amount(5 * btcutil.SatoshiPerBitcoin))
+	txid := genSpend(btcutil.Amount(5 * btcutil.GrainPerPearl))
 
 	// Generate a single block, the transaction the wallet created should
 	// be found in this block.
@@ -76,7 +75,7 @@ func testSendOutputs(r *Harness, t *testing.T) {
 
 	// Next, generate a spend much greater than the block reward. This
 	// transaction should also have been mined properly.
-	txid = genSpend(btcutil.Amount(500 * btcutil.SatoshiPerBitcoin))
+	txid = genSpend(btcutil.Amount(500 * btcutil.GrainPerPearl))
 	blockHashes, err = r.Client.Generate(1)
 	if err != nil {
 		t.Fatalf("unable to generate single block: %v", err)
@@ -207,7 +206,7 @@ func testJoinMempools(r *Harness, t *testing.T) {
 		t.Fatalf("unable to generate pkscript to addr: %v", err)
 	}
 	output := wire.NewTxOut(5e8, addrScript)
-	testTx, err := r.CreateTransaction([]*wire.TxOut{output}, 10, true)
+	testTx, err := r.CreateTransaction([]*wire.TxOut{output}, 100, true)
 	if err != nil {
 		t.Fatalf("coinbase spend failed: %v", err)
 	}
@@ -336,12 +335,12 @@ func testGenerateAndSubmitBlock(r *Harness, t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to create script: %v", err)
 	}
-	output := wire.NewTxOut(btcutil.SatoshiPerBitcoin, pkScript)
+	output := wire.NewTxOut(btcutil.GrainPerPearl, pkScript)
 
 	const numTxns = 5
 	txns := make([]*btcutil.Tx, 0, numTxns)
 	for i := 0; i < numTxns; i++ {
-		tx, err := r.CreateTransaction([]*wire.TxOut{output}, 10, true)
+		tx, err := r.CreateTransaction([]*wire.TxOut{output}, 100, true)
 		if err != nil {
 			t.Fatalf("unable to create tx: %v", err)
 		}
@@ -363,15 +362,15 @@ func testGenerateAndSubmitBlock(r *Harness, t *testing.T) {
 		t.Fatalf("block did not include all transactions: "+
 			"expected %v, got %v", numTxns+1, numBlocksTxns)
 	}
-	blockVersion := block.MsgBlock().Header.Version
+	blockVersion := block.MsgBlock().BlockHeader().Version
 	if blockVersion != BlockVersion {
 		t.Fatalf("block version is not default: expected %v, got %v",
 			BlockVersion, blockVersion)
 	}
 
 	// Next generate a block with a "non-standard" block version along with
-	// time stamp a minute after the previous block's timestamp.
-	timestamp := block.MsgBlock().Header.Timestamp.Add(time.Minute)
+	// a timestamp 1 second after the previous block's timestamp.
+	timestamp := block.MsgBlock().BlockHeader().Timestamp.Add(time.Second)
 	targetBlockVersion := int32(1337)
 	block, err = r.GenerateAndSubmitBlock(nil, targetBlockVersion, timestamp)
 	if err != nil {
@@ -380,7 +379,7 @@ func testGenerateAndSubmitBlock(r *Harness, t *testing.T) {
 
 	// Finally ensure that the desired block version and timestamp were set
 	// properly.
-	header := block.MsgBlock().Header
+	header := block.MsgBlock().BlockHeader()
 	blockVersion = header.Version
 	if blockVersion != targetBlockVersion {
 		t.Fatalf("block version mismatch: expected %v, got %v",
@@ -403,12 +402,12 @@ func testGenerateAndSubmitBlockWithCustomCoinbaseOutputs(r *Harness,
 	if err != nil {
 		t.Fatalf("unable to create script: %v", err)
 	}
-	output := wire.NewTxOut(btcutil.SatoshiPerBitcoin, pkScript)
+	output := wire.NewTxOut(btcutil.GrainPerPearl, pkScript)
 
 	const numTxns = 5
 	txns := make([]*btcutil.Tx, 0, numTxns)
 	for i := 0; i < numTxns; i++ {
-		tx, err := r.CreateTransaction([]*wire.TxOut{output}, 10, true)
+		tx, err := r.CreateTransaction([]*wire.TxOut{output}, 100, true)
 		if err != nil {
 			t.Fatalf("unable to create tx: %v", err)
 		}
@@ -421,7 +420,7 @@ func testGenerateAndSubmitBlockWithCustomCoinbaseOutputs(r *Harness,
 	block, err := r.GenerateAndSubmitBlockWithCustomCoinbaseOutputs(txns,
 		-1, time.Time{}, []wire.TxOut{{
 			Value:    0,
-			PkScript: []byte{},
+			PkScript: []byte{txscript.OP_RETURN},
 		}})
 	if err != nil {
 		t.Fatalf("unable to generate block: %v", err)
@@ -434,20 +433,20 @@ func testGenerateAndSubmitBlockWithCustomCoinbaseOutputs(r *Harness,
 		t.Fatalf("block did not include all transactions: "+
 			"expected %v, got %v", numTxns+1, numBlocksTxns)
 	}
-	blockVersion := block.MsgBlock().Header.Version
+	blockVersion := block.MsgBlock().BlockHeader().Version
 	if blockVersion != BlockVersion {
 		t.Fatalf("block version is not default: expected %v, got %v",
 			BlockVersion, blockVersion)
 	}
 
 	// Next generate a block with a "non-standard" block version along with
-	// time stamp a minute after the previous block's timestamp.
-	timestamp := block.MsgBlock().Header.Timestamp.Add(time.Minute)
+	// a timestamp 1 second after the previous block's timestamp.
+	timestamp := block.MsgBlock().BlockHeader().Timestamp.Add(time.Second)
 	targetBlockVersion := int32(1337)
 	block, err = r.GenerateAndSubmitBlockWithCustomCoinbaseOutputs(nil,
 		targetBlockVersion, timestamp, []wire.TxOut{{
 			Value:    0,
-			PkScript: []byte{},
+			PkScript: []byte{txscript.OP_RETURN},
 		}})
 	if err != nil {
 		t.Fatalf("unable to generate block: %v", err)
@@ -455,7 +454,7 @@ func testGenerateAndSubmitBlockWithCustomCoinbaseOutputs(r *Harness,
 
 	// Finally ensure that the desired block version and timestamp were set
 	// properly.
-	header := block.MsgBlock().Header
+	header := block.MsgBlock().BlockHeader()
 	blockVersion = header.Version
 	if blockVersion != targetBlockVersion {
 		t.Fatalf("block version mismatch: expected %v, got %v",
@@ -479,12 +478,17 @@ func testMemWalletReorg(r *Harness, t *testing.T) {
 	}
 	defer harness.TearDown()
 
-	// The internal wallet of this harness should now have 250 BTC.
-	expectedBalance := btcutil.Amount(250 * btcutil.SatoshiPerBitcoin)
+	// Calculate the expected balance based on the actual emission curve.
+	// The harness was set up with 5 mature outputs.
+	var expectedBalance int64
+	for height := int32(1); height <= int32(5); height++ {
+		subsidy := blockchain.CalcBlockSubsidy(height, harness.ActiveNet)
+		expectedBalance += subsidy
+	}
 	walletBalance := harness.ConfirmedBalance()
-	if expectedBalance != walletBalance {
-		t.Fatalf("wallet balance incorrect: expected %v, got %v",
-			expectedBalance, walletBalance)
+	if int64(walletBalance) != expectedBalance {
+		t.Fatalf("wallet balance incorrect: expected %v Pearl, got %v Pearl",
+			btcutil.Amount(expectedBalance), walletBalance)
 	}
 
 	// Now connect this local harness to the main harness then wait for
@@ -497,14 +501,14 @@ func testMemWalletReorg(r *Harness, t *testing.T) {
 		t.Fatalf("unable to join node on blocks: %v", err)
 	}
 
-	// The original wallet should now have a balance of 0 BTC as its entire
+	// The original wallet should now have a balance of 0 Pearl as its entire
 	// chain should have been decimated in favor of the main harness'
 	// chain.
-	expectedBalance = btcutil.Amount(0)
+	expectedBalance = int64(0)
 	walletBalance = harness.ConfirmedBalance()
-	if expectedBalance != walletBalance {
-		t.Fatalf("wallet balance incorrect: expected %v, got %v",
-			expectedBalance, walletBalance)
+	if expectedBalance != int64(walletBalance) {
+		t.Fatalf("wallet balance incorrect: expected %v Pearl, got %v Pearl",
+			btcutil.Amount(expectedBalance), walletBalance)
 	}
 }
 
@@ -521,14 +525,14 @@ func testMemWalletLockedOutputs(r *Harness, t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to create script: %v", err)
 	}
-	outputAmt := btcutil.Amount(50 * btcutil.SatoshiPerBitcoin)
+	outputAmt := btcutil.Amount(50 * btcutil.GrainPerPearl)
 	output := wire.NewTxOut(int64(outputAmt), pkScript)
-	tx, err := r.CreateTransaction([]*wire.TxOut{output}, 10, true)
+	tx, err := r.CreateTransaction([]*wire.TxOut{output}, 100, true)
 	if err != nil {
 		t.Fatalf("unable to create transaction: %v", err)
 	}
 
-	// The current wallet balance should now be at least 50 BTC less
+	// The current wallet balance should now be at least 50 PRL less
 	// (accounting for fees) than the period balance
 	currentBalance := r.ConfirmedBalance()
 	if !(currentBalance <= startingBalance-outputAmt) {
@@ -602,13 +606,21 @@ func TestMain(m *testing.M) {
 }
 
 func TestHarness(t *testing.T) {
-	// We should have (numMatureOutputs * 50 BTC) of mature unspendable
-	// outputs.
-	expectedBalance := btcutil.Amount(numMatureOutputs * 50 * btcutil.SatoshiPerBitcoin)
+	// Calculate the actual expected balance based on the emission curve.
+	// The harness generates (coinbaseMaturity + numMatureOutputs) blocks,
+	// and the wallet can spend the first numMatureOutputs after maturity.
+
+	// Sum up the subsidies for the mature outputs (blocks 1 through numMatureOutputs)
+	var expectedBalance int64
+	for height := int32(1); height <= int32(numMatureOutputs); height++ {
+		subsidy := blockchain.CalcBlockSubsidy(height, mainHarness.ActiveNet)
+		expectedBalance += subsidy
+	}
+
 	harnessBalance := mainHarness.ConfirmedBalance()
-	if harnessBalance != expectedBalance {
-		t.Fatalf("expected wallet balance of %v instead have %v",
-			expectedBalance, harnessBalance)
+	if int64(harnessBalance) != expectedBalance {
+		t.Fatalf("expected wallet balance of %v Pearl instead have %v Pearl",
+			btcutil.Amount(expectedBalance), harnessBalance)
 	}
 
 	// Current tip should be at a height of numMatureOutputs plus the

@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,32 +12,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mining"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
-	// maxNonce is the maximum value a nonce can be in a block header.
-	maxNonce = ^uint32(0) // 2^32 - 1
-
 	// maxExtraNonce is the maximum value an extra nonce used in a coinbase
 	// transaction can be.
 	maxExtraNonce = ^uint64(0) // 2^64 - 1
-
-	// hpsUpdateSecs is the number of seconds to wait in between each
-	// update to the hashes per second monitor.
-	hpsUpdateSecs = 10
-
-	// hashUpdateSec is the number of seconds each worker waits in between
-	// notifying the speed monitor with how many hashes have been completed
-	// while they are actively searching for a solution.  This is done to
-	// reduce the amount of syncs between the workers that must be done to
-	// keep track of the hashes per second.
-	hashUpdateSecs = 15
 )
 
 var (
@@ -84,70 +70,22 @@ type Config struct {
 }
 
 // CPUMiner provides facilities for solving blocks (mining) using the CPU in
-// a concurrency-safe manner.  It consists of two main goroutines -- a speed
-// monitor and a controller for worker goroutines which generate and solve
-// blocks.  The number of goroutines can be set via the SetMaxGoRoutines
-// function, but the default is based on the number of processor cores in the
-// system which is typically sufficient.
+// a concurrency-safe manner.  It consists of a controller goroutine for worker
+// goroutines which generate and solve blocks.  The number of goroutines can be
+// set via the SetMaxGoRoutines function, but the default is based on the number
+// of processor cores in the system which is typically sufficient.
 type CPUMiner struct {
 	sync.Mutex
-	g                 *mining.BlkTmplGenerator
-	cfg               Config
-	numWorkers        uint32
-	started           bool
-	discreteMining    bool
-	submitBlockLock   sync.Mutex
-	wg                sync.WaitGroup
-	workerWg          sync.WaitGroup
-	updateNumWorkers  chan struct{}
-	queryHashesPerSec chan float64
-	updateHashes      chan uint64
-	speedMonitorQuit  chan struct{}
-	quit              chan struct{}
-}
-
-// speedMonitor handles tracking the number of hashes per second the mining
-// process is performing.  It must be run as a goroutine.
-func (m *CPUMiner) speedMonitor() {
-	log.Tracef("CPU miner speed monitor started")
-
-	var hashesPerSec float64
-	var totalHashes uint64
-	ticker := time.NewTicker(time.Second * hpsUpdateSecs)
-	defer ticker.Stop()
-
-out:
-	for {
-		select {
-		// Periodic updates from the workers with how many hashes they
-		// have performed.
-		case numHashes := <-m.updateHashes:
-			totalHashes += numHashes
-
-		// Time to update the hashes per second.
-		case <-ticker.C:
-			curHashesPerSec := float64(totalHashes) / hpsUpdateSecs
-			if hashesPerSec == 0 {
-				hashesPerSec = curHashesPerSec
-			}
-			hashesPerSec = (hashesPerSec + curHashesPerSec) / 2
-			totalHashes = 0
-			if hashesPerSec != 0 {
-				log.Debugf("Hash speed: %6.0f kilohashes/s",
-					hashesPerSec/1000)
-			}
-
-		// Request for the number of hashes per second.
-		case m.queryHashesPerSec <- hashesPerSec:
-			// Nothing to do.
-
-		case <-m.speedMonitorQuit:
-			break out
-		}
-	}
-
-	m.wg.Done()
-	log.Tracef("CPU miner speed monitor done")
+	g                *mining.BlkTmplGenerator
+	cfg              Config
+	numWorkers       uint32
+	started          bool
+	discreteMining   bool
+	submitBlockLock  sync.Mutex
+	wg               sync.WaitGroup
+	workerWg         sync.WaitGroup
+	updateNumWorkers chan struct{}
+	quit             chan struct{}
 }
 
 // submitBlock submits the passed block to network after ensuring it passes all
@@ -162,9 +100,9 @@ func (m *CPUMiner) submitBlock(block *btcutil.Block) bool {
 	// a new block, but the check only happens periodically, so it is
 	// possible a block was found and submitted in between.
 	msgBlock := block.MsgBlock()
-	if !msgBlock.Header.PrevBlock.IsEqual(&m.g.BestSnapshot().Hash) {
+	if !msgBlock.BlockHeader().PrevBlock.IsEqual(&m.g.BestSnapshot().Hash) {
 		log.Debugf("Block submitted via CPU miner with previous "+
-			"block %s is stale", msgBlock.Header.PrevBlock)
+			"block %s is stale", msgBlock.BlockHeader().PrevBlock)
 		return false
 	}
 
@@ -195,98 +133,25 @@ func (m *CPUMiner) submitBlock(block *btcutil.Block) bool {
 	return true
 }
 
-// solveBlock attempts to find some combination of a nonce, extra nonce, and
-// current timestamp which makes the passed block hash to a value less than the
-// target difficulty.  The timestamp is updated periodically and the passed
-// block is modified with all tweaks during this process.  This means that
-// when the function returns true, the block is ready for submission.
-//
-// This function will return early with false when conditions that trigger a
-// stale block such as a new block showing up or periodically when there are
-// new transactions and enough time has elapsed without finding a solution.
-func (m *CPUMiner) solveBlock(msgBlock *wire.MsgBlock, blockHeight int32,
-	ticker *time.Ticker, quit chan struct{}) bool {
+// solveBlock generates a ZK proof certificate for the passed block.
+// This function will return early with false when the current block is stale
+// (i.e. a new best block has appeared).
+func (m *CPUMiner) solveBlock(msgBlock *wire.MsgBlock, blockHeight int32) bool {
+	// The current block is stale if the best block has changed.
+	best := m.g.BestSnapshot()
+	if !msgBlock.BlockHeader().PrevBlock.IsEqual(&best.Hash) {
+		return false
+	}
 
-	// Choose a random extra nonce offset for this block template and
-	// worker.
-	enOffset, err := wire.RandomUint64()
+	// Generate certificate using solve method
+	cert, err := blockchain.SolveBlock(msgBlock.BlockHeader(), m.cfg.ChainParams.Net)
 	if err != nil {
-		log.Errorf("Unexpected error while generating random "+
-			"extra nonce offset: %v", err)
-		enOffset = 0
+		log.Errorf("Failed to solve block: %v", err)
+		return false
 	}
-
-	// Create some convenience variables.
-	header := &msgBlock.Header
-	targetDifficulty := blockchain.CompactToBig(header.Bits)
-
-	// Initial state.
-	lastGenerated := time.Now()
-	lastTxUpdate := m.g.TxSource().LastUpdated()
-	hashesCompleted := uint64(0)
-
-	// Note that the entire extra nonce range is iterated and the offset is
-	// added relying on the fact that overflow will wrap around 0 as
-	// provided by the Go spec.
-	for extraNonce := uint64(0); extraNonce < maxExtraNonce; extraNonce++ {
-		// Update the extra nonce in the block template with the
-		// new value by regenerating the coinbase script and
-		// setting the merkle root to the new value.
-		m.g.UpdateExtraNonce(msgBlock, blockHeight, extraNonce+enOffset)
-
-		// Search through the entire nonce range for a solution while
-		// periodically checking for early quit and stale block
-		// conditions along with updates to the speed monitor.
-		for i := uint32(0); i <= maxNonce; i++ {
-			select {
-			case <-quit:
-				return false
-
-			case <-ticker.C:
-				m.updateHashes <- hashesCompleted
-				hashesCompleted = 0
-
-				// The current block is stale if the best block
-				// has changed.
-				best := m.g.BestSnapshot()
-				if !header.PrevBlock.IsEqual(&best.Hash) {
-					return false
-				}
-
-				// The current block is stale if the memory pool
-				// has been updated since the block template was
-				// generated and it has been at least one
-				// minute.
-				if lastTxUpdate != m.g.TxSource().LastUpdated() &&
-					time.Now().After(lastGenerated.Add(time.Minute)) {
-
-					return false
-				}
-
-				m.g.UpdateBlockTime(msgBlock)
-
-			default:
-				// Non-blocking select to fall through
-			}
-
-			// Update the nonce and hash the block header.  Each
-			// hash is actually a double sha256 (two hashes), so
-			// increment the number of hashes completed for each
-			// attempt accordingly.
-			header.Nonce = i
-			hash := header.BlockHash()
-			hashesCompleted += 2
-
-			// The block is solved when the new block hash is less
-			// than the target difficulty.  Yay!
-			if blockchain.HashToBig(&hash).Cmp(targetDifficulty) <= 0 {
-				m.updateHashes <- hashesCompleted
-				return true
-			}
-		}
-	}
-
-	return false
+	// Attach the certificate to the block
+	msgBlock.MsgHeader.MsgCertificate = wire.MsgCertificate{Certificate: cert}
+	return true
 }
 
 // generateBlocks is a worker that is controlled by the miningWorkerController.
@@ -299,10 +164,6 @@ func (m *CPUMiner) solveBlock(msgBlock *wire.MsgBlock, blockHeight int32,
 func (m *CPUMiner) generateBlocks(quit chan struct{}) {
 	log.Tracef("Starting generate blocks worker")
 
-	// Start a ticker which is used to signal checks for stale work and
-	// updates to the speed monitor.
-	ticker := time.NewTicker(time.Second * hashUpdateSecs)
-	defer ticker.Stop()
 out:
 	for {
 		// Quit when the miner is stopped.
@@ -354,7 +215,7 @@ out:
 		// with false when conditions that trigger a stale block, so
 		// a new block template can be generated.  When the return is
 		// true a solution was found, so submit the solved block.
-		if m.solveBlock(template.Block, curHeight+1, ticker, quit) {
+		if m.solveBlock(template.Block, curHeight+1) {
 			block := btcutil.NewBlock(template.Block)
 			m.submitBlock(block)
 		}
@@ -419,16 +280,12 @@ out:
 		}
 	}
 
-	// Wait until all workers shut down to stop the speed monitor since
-	// they rely on being able to send updates to it.
 	m.workerWg.Wait()
-	close(m.speedMonitorQuit)
 	m.wg.Done()
 }
 
-// Start begins the CPU mining process as well as the speed monitor used to
-// track hashing metrics.  Calling this function when the CPU miner has
-// already been started will have no effect.
+// Start begins the CPU mining process.  Calling this function when the CPU
+// miner has already been started will have no effect.
 //
 // This function is safe for concurrent access.
 func (m *CPUMiner) Start() {
@@ -442,18 +299,16 @@ func (m *CPUMiner) Start() {
 	}
 
 	m.quit = make(chan struct{})
-	m.speedMonitorQuit = make(chan struct{})
-	m.wg.Add(2)
-	go m.speedMonitor()
+	m.wg.Add(1)
 	go m.miningWorkerController()
 
 	m.started = true
 	log.Infof("CPU miner started")
 }
 
-// Stop gracefully stops the mining process by signalling all workers, and the
-// speed monitor to quit.  Calling this function when the CPU miner has not
-// already been started will have no effect.
+// Stop gracefully stops the mining process by signalling all workers to quit.
+// Calling this function when the CPU miner has not already been started will
+// have no effect.
 //
 // This function is safe for concurrent access.
 func (m *CPUMiner) Stop() {
@@ -481,22 +336,6 @@ func (m *CPUMiner) IsMining() bool {
 	defer m.Unlock()
 
 	return m.started
-}
-
-// HashesPerSecond returns the number of hashes per second the mining process
-// is performing.  0 is returned if the miner is not currently running.
-//
-// This function is safe for concurrent access.
-func (m *CPUMiner) HashesPerSecond() float64 {
-	m.Lock()
-	defer m.Unlock()
-
-	// Nothing to do if the miner is not currently running.
-	if !m.started {
-		return 0
-	}
-
-	return <-m.queryHashesPerSec
 }
 
 // SetNumWorkers sets the number of workers to create which solve blocks.  Any
@@ -557,21 +396,12 @@ func (m *CPUMiner) GenerateNBlocks(n uint32) ([]*chainhash.Hash, error) {
 	m.started = true
 	m.discreteMining = true
 
-	m.speedMonitorQuit = make(chan struct{})
-	m.wg.Add(1)
-	go m.speedMonitor()
-
 	m.Unlock()
 
 	log.Tracef("Generating %d blocks", n)
 
 	i := uint32(0)
 	blockHashes := make([]*chainhash.Hash, n)
-
-	// Start a ticker which is used to signal checks for stale work and
-	// updates to the speed monitor.
-	ticker := time.NewTicker(time.Second * hashUpdateSecs)
-	defer ticker.Stop()
 
 	for {
 		// Read updateNumWorkers in case someone tries a `setgenerate` while
@@ -608,16 +438,17 @@ func (m *CPUMiner) GenerateNBlocks(n uint32) ([]*chainhash.Hash, error) {
 		// with false when conditions that trigger a stale block, so
 		// a new block template can be generated.  When the return is
 		// true a solution was found, so submit the solved block.
-		if m.solveBlock(template.Block, curHeight+1, ticker, nil) {
+		if m.solveBlock(template.Block, curHeight+1) {
 			block := btcutil.NewBlock(template.Block)
-			m.submitBlock(block)
+			if !m.submitBlock(block) {
+				log.Errorf("Failed to submit solved block %s", block.Hash())
+				continue
+			}
 			blockHashes[i] = block.Hash()
 			i++
 			if i == n {
 				log.Tracef("Generated %d blocks", i)
 				m.Lock()
-				close(m.speedMonitorQuit)
-				m.wg.Wait()
 				m.started = false
 				m.discreteMining = false
 				m.Unlock()
@@ -632,11 +463,9 @@ func (m *CPUMiner) GenerateNBlocks(n uint32) ([]*chainhash.Hash, error) {
 // type for more details.
 func New(cfg *Config) *CPUMiner {
 	return &CPUMiner{
-		g:                 cfg.BlockTemplateGenerator,
-		cfg:               *cfg,
-		numWorkers:        defaultNumWorkers,
-		updateNumWorkers:  make(chan struct{}),
-		queryHashesPerSec: make(chan float64),
-		updateHashes:      make(chan uint64),
+		g:                cfg.BlockTemplateGenerator,
+		cfg:              *cfg,
+		numWorkers:       defaultNumWorkers,
+		updateNumWorkers: make(chan struct{}),
 	}
 }

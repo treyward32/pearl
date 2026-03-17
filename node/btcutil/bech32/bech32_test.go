@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -35,7 +35,7 @@ func TestBech32(t *testing.T) {
 		{"1checkupstagehandshakeupstreamerranterredcaperred2y9e3w", ErrInvalidSeparatorIndex(0)},                                 // empty hrp
 		{"11qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqc8247j", ErrInvalidLength(91)},    // too long
 
-		// Additional test vectors used in bitcoin core
+		// Additional test vectors used in Bitcoin Core
 		{" 1nwldj5", ErrInvalidCharacter(' ')},
 		{"\x7f" + "1axkwrx", ErrInvalidCharacter(0x7f)},
 		{"\x801eym55h", ErrInvalidCharacter(0x80)},
@@ -104,7 +104,7 @@ func TestBech32M(t *testing.T) {
 		{"split1checkupstagehandshakeupstreamerranterredcaperredlc445v", nil},
 		{"?1v759aa", nil},
 
-		// Additional test vectors used in bitcoin core
+		// Additional test vectors used in Bitcoin Core
 		{"\x201xj0phk", ErrInvalidCharacter('\x20')},
 		{"\x7f1g6xzxy", ErrInvalidCharacter('\x7f')},
 		{"\x801vctc34", ErrInvalidCharacter('\x80')},
@@ -184,14 +184,14 @@ func TestBech32DecodeGeneric(t *testing.T) {
 		{"11qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqc8247j", Version0},
 		{"split1checkupstagehandshakeupstreamerranterredcaperred2y9e3w", Version0},
 
-		{"BC1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7KV8F3T4", Version0},
-		{"tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7", Version0},
-		{"bc1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kt5nd6y", VersionM},
-		{"BC1SW50QGDZ25J", VersionM},
-		{"bc1zw508d6qejxtdg4y5r3zarvaryvaxxpcs", VersionM},
-		{"tb1qqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesrxh6hy", Version0},
-		{"tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c", VersionM},
-		{"bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0", VersionM},
+		{"PRL1QW508D6QEJXTDG4Y5R3ZARVARY0C5XW7K34D768", Version0},
+		{"tprl1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qtyc59s", Version0},
+		{"prl1pw508d6qejxtdg4y5r3zarvary0c5xw7kw508d6qejxtdg4y5r3zarvary0c5xw7kag2tja", VersionM},
+		{"PRL1SW50QK8EMSL", VersionM},
+		{"prl1zw508d6qejxtdg4y5r3zarvaryvqlc7um", VersionM},
+		{"tprl1qqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvses8js6y2", Version0},
+		{"tprl1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesd9snuk", VersionM},
+		{"prl1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq69prym", VersionM},
 	}
 	for i, test := range tests {
 		_, _, version, err := DecodeGeneric(test.str)

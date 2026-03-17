@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,13 +12,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	// minTestFee is the minimum fee for test transactions to pass relay
+	// requirements with MinRelayTxFee of 1000 sat/KB.
+	minTestFee = btcutil.Amount(1000)
 )
 
 // fakeChain is used by the pool harness to provide generated test utxos and
@@ -210,6 +219,7 @@ func (p *poolHarness) CreateSignedTx(inputs []spendableOutput,
 		tx.AddTxIn(&wire.TxIn{
 			PreviousOutPoint: input.outPoint,
 			SignatureScript:  nil,
+			Witness:          nil,
 			Sequence:         sequence,
 		})
 	}
@@ -226,54 +236,74 @@ func (p *poolHarness) CreateSignedTx(inputs []spendableOutput,
 		})
 	}
 
-	// Sign the new transaction.
-	for i := range tx.TxIn {
-		sigScript, err := txscript.SignatureScript(tx, i, p.payScript,
-			txscript.SigHashAll, p.signKey, true)
+	// Create a multi-output fetcher that knows about all inputs.
+	// This is necessary for proper signature computation when there are multiple inputs.
+	prevOutputFetcher := txscript.NewMultiPrevOutFetcher(nil)
+	for i, input := range inputs {
+		prevOutputFetcher.AddPrevOut(tx.TxIn[i].PreviousOutPoint, &wire.TxOut{
+			PkScript: p.payScript,
+			Value:    int64(input.amount),
+		})
+	}
+
+	// Create signature hashes once for all inputs
+	sigHashes := txscript.NewTxSigHashes(tx, prevOutputFetcher)
+
+	// Create witness signatures for the new transaction.
+	for i, input := range inputs {
+		witness, err := txscript.TaprootWitnessSignature(
+			tx, sigHashes, i, int64(input.amount), p.payScript,
+			txscript.SigHashDefault, p.signKey)
 		if err != nil {
 			return nil, err
 		}
-		tx.TxIn[i].SignatureScript = sigScript
+		tx.TxIn[i].Witness = witness
 	}
 
 	return btcutil.NewTx(tx), nil
 }
 
-// CreateTxChain creates a chain of zero-fee transactions (each subsequent
-// transaction spends the entire amount from the previous one) with the first
-// one spending the provided outpoint.  Each transaction spends the entire
-// amount of the previous one and as such does not include any fees.
+// CreateTxChain creates a chain of transactions (each subsequent
+// transaction spends the entire amount from the previous one minus a fee) with the first
+// one spending the provided outpoint.  Each transaction pays minTestFee.
 func (p *poolHarness) CreateTxChain(firstOutput spendableOutput, numTxns uint32) ([]*btcutil.Tx, error) {
 	txChain := make([]*btcutil.Tx, 0, numTxns)
 	prevOutPoint := firstOutput.outPoint
 	spendableAmount := firstOutput.amount
 	for i := uint32(0); i < numTxns; i++ {
 		// Create the transaction using the previous transaction output
-		// and paying the full amount to the payment address associated
+		// and paying the amount minus fee to the payment address associated
 		// with the harness.
 		tx := wire.NewMsgTx(wire.TxVersion)
 		tx.AddTxIn(&wire.TxIn{
 			PreviousOutPoint: prevOutPoint,
 			SignatureScript:  nil,
+			Witness:          nil,
 			Sequence:         wire.MaxTxInSequenceNum,
 		})
+		outputAmount := spendableAmount - minTestFee
 		tx.AddTxOut(&wire.TxOut{
 			PkScript: p.payScript,
-			Value:    int64(spendableAmount),
+			Value:    int64(outputAmount),
 		})
 
-		// Sign the new transaction.
-		sigScript, err := txscript.SignatureScript(tx, 0, p.payScript,
-			txscript.SigHashAll, p.signKey, true)
+		// Create Taproot witness signature
+		outFetcher := txscript.NewCannedPrevOutputFetcher(p.payScript, int64(spendableAmount))
+		sigHashes := txscript.NewTxSigHashes(tx, outFetcher)
+
+		witness, err := txscript.TaprootWitnessSignature(
+			tx, sigHashes, 0, int64(spendableAmount), p.payScript,
+			txscript.SigHashDefault, p.signKey)
 		if err != nil {
 			return nil, err
 		}
-		tx.TxIn[0].SignatureScript = sigScript
+		tx.TxIn[0].Witness = witness
 
 		txChain = append(txChain, btcutil.NewTx(tx))
 
 		// Next transaction uses outputs from this one.
 		prevOutPoint = wire.OutPoint{Hash: tx.TxHash(), Index: 0}
+		spendableAmount = outputAmount
 	}
 
 	return txChain, nil
@@ -293,14 +323,12 @@ func newPoolHarness(chainParams *chaincfg.Params) (*poolHarness, []spendableOutp
 	}
 	signKey, signPub := btcec.PrivKeyFromBytes(keyBytes)
 
-	// Generate associated pay-to-script-hash address and resulting payment
-	// script.
-	pubKeyBytes := signPub.SerializeCompressed()
-	payPubKeyAddr, err := btcutil.NewAddressPubKey(pubKeyBytes, chainParams)
+	// Generate associated Taproot address and resulting payment script.
+	tapKey := txscript.ComputeTaprootKeyNoScript(signPub)
+	payAddr, err := btcutil.NewAddressTaproot(schnorr.SerializePubKey(tapKey), chainParams)
 	if err != nil {
 		return nil, nil, err
 	}
-	payAddr := payPubKeyAddr.AddressPubKeyHash()
 	pkScript, err := txscript.PayToAddrScript(payAddr)
 	if err != nil {
 		return nil, nil, err
@@ -321,8 +349,7 @@ func newPoolHarness(chainParams *chaincfg.Params) (*poolHarness, []spendableOutp
 				FreeTxRelayLimit:     15.0,
 				MaxOrphanTxs:         5,
 				MaxOrphanTxSize:      1000,
-				MaxSigOpCostPerTx:    blockchain.MaxBlockSigOpsCost / 4,
-				MinRelayTxFee:        1000, // 1 Satoshi per byte
+				MinRelayTxFee:        1000, // 1 Grain per byte
 				MaxTxVersion:         1,
 			},
 			ChainParams:      chainParams,
@@ -331,6 +358,7 @@ func newPoolHarness(chainParams *chaincfg.Params) (*poolHarness, []spendableOutp
 			MedianTimePast:   chain.MedianTimePast,
 			CalcSequenceLock: chain.CalcSequenceLock,
 			SigCache:         nil,
+			HashCache:        txscript.NewHashCache(1000),
 			AddrIndex:        nil,
 		}),
 	}
@@ -682,7 +710,7 @@ func TestBasicOrphanRemoval(t *testing.T) {
 	nonChainedOrphanTx, err := harness.CreateSignedTx([]spendableOutput{{
 		amount:   btcutil.Amount(5000000000),
 		outPoint: wire.OutPoint{Hash: chainhash.Hash{}, Index: 0},
-	}}, 1, 0, false)
+	}}, 1, minTestFee, false)
 	if err != nil {
 		t.Fatalf("unable to create signed tx: %v", err)
 	}
@@ -818,7 +846,7 @@ func TestMultiInputOrphanDoubleSpend(t *testing.T) {
 	doubleSpendTx, err := harness.CreateSignedTx([]spendableOutput{
 		txOutToSpendableOut(chainedTxns[1], 0),
 		txOutToSpendableOut(chainedTxns[maxOrphans], 0),
-	}, 1, 0, false)
+	}, 1, minTestFee, false)
 	if err != nil {
 		t.Fatalf("unable to create signed tx: %v", err)
 	}
@@ -950,11 +978,11 @@ func TestSignalsReplacement(t *testing.T) {
 
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, false, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				return ctx.addSignedTx(outs, 1, 0, false, false)
+				return ctx.addSignedTx(outs, 1, minTestFee, false, false)
 			},
 			signalsReplacement: false,
 		},
@@ -972,7 +1000,7 @@ func TestSignalsReplacement(t *testing.T) {
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				return ctx.addSignedTx(outs, 1, 0, false, false)
+				return ctx.addSignedTx(outs, 1, minTestFee, false, false)
 			},
 			signalsReplacement: false,
 		},
@@ -989,15 +1017,15 @@ func TestSignalsReplacement(t *testing.T) {
 				// signal replacement.
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				a := ctx.addSignedTx(outs, 1, 0, true, false)
+				a := ctx.addSignedTx(outs, 1, minTestFee, true, false)
 
 				aOut := txOutToSpendableOut(a, 0)
 				outs = []spendableOutput{aOut}
-				b := ctx.addSignedTx(outs, 1, 0, false, false)
+				b := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				bOut := txOutToSpendableOut(b, 0)
 				outs = []spendableOutput{bOut}
-				return ctx.addSignedTx(outs, 1, 0, false, false)
+				return ctx.addSignedTx(outs, 1, minTestFee, false, false)
 			},
 			signalsReplacement: true,
 		},
@@ -1007,7 +1035,7 @@ func TestSignalsReplacement(t *testing.T) {
 				coinbase := ctx.addCoinbaseTx(1)
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				return ctx.addSignedTx(outs, 1, 0, true, false)
+				return ctx.addSignedTx(outs, 1, minTestFee, true, false)
 			},
 			signalsReplacement: true,
 		},
@@ -1069,11 +1097,11 @@ func TestCheckPoolDoubleSpend(t *testing.T) {
 
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, false, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				return ctx.addSignedTx(outs, 2, 0, false, false)
+				return ctx.addSignedTx(outs, 2, minTestFee, false, false)
 			},
 			isReplacement: false,
 		},
@@ -1085,12 +1113,12 @@ func TestCheckPoolDoubleSpend(t *testing.T) {
 				coinbase1 := ctx.addCoinbaseTx(1)
 				coinbaseOut1 := txOutToSpendableOut(coinbase1, 0)
 				outs := []spendableOutput{coinbaseOut1}
-				ctx.addSignedTx(outs, 1, 0, true, false)
+				ctx.addSignedTx(outs, 1, minTestFee, true, false)
 
 				coinbase2 := ctx.addCoinbaseTx(1)
 				coinbaseOut2 := txOutToSpendableOut(coinbase2, 0)
 				outs = []spendableOutput{coinbaseOut2}
-				ctx.addSignedTx(outs, 1, 0, false, false)
+				ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				// Create a transaction that spends both
 				// coinbase outputs that were spent above. This
@@ -1128,11 +1156,11 @@ func TestCheckPoolDoubleSpend(t *testing.T) {
 				// coinbase output.
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, true, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, true, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				ctx.addSignedTx(outs, 1, 0, false, false)
+				ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				// Create another transaction that spends the
 				// same coinbase output. Since the original
@@ -1163,11 +1191,11 @@ func TestCheckPoolDoubleSpend(t *testing.T) {
 				// coinbase output.
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, true, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, true, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				ctx.addSignedTx(outs, 1, 0, false, false)
+				ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				// Create another transaction that spends the
 				// same coinbase output. Since the original
@@ -1249,12 +1277,12 @@ func TestConflicts(t *testing.T) {
 
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, false, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
 				tx, err := ctx.harness.CreateSignedTx(
-					outs, 2, 0, false,
+					outs, 2, minTestFee, false,
 				)
 				if err != nil {
 					ctx.t.Fatalf("unable to create "+
@@ -1275,21 +1303,21 @@ func TestConflicts(t *testing.T) {
 				coinbaseOut1 := txOutToSpendableOut(coinbase1, 0)
 				outs := []spendableOutput{coinbaseOut1}
 				conflict1 := ctx.addSignedTx(
-					outs, 1, 0, false, false,
+					outs, 1, minTestFee, false, false,
 				)
 
 				coinbase2 := ctx.addCoinbaseTx(1)
 				coinbaseOut2 := txOutToSpendableOut(coinbase2, 0)
 				outs = []spendableOutput{coinbaseOut2}
 				conflict2 := ctx.addSignedTx(
-					outs, 1, 0, false, false,
+					outs, 1, minTestFee, false, false,
 				)
 
 				// Create a transaction that spends both
 				// coinbase outputs that were spent above.
 				outs = []spendableOutput{coinbaseOut1, coinbaseOut2}
 				tx, err := ctx.harness.CreateSignedTx(
-					outs, 1, 0, false,
+					outs, 1, minTestFee, false,
 				)
 				if err != nil {
 					ctx.t.Fatalf("unable to create "+
@@ -1315,11 +1343,11 @@ func TestConflicts(t *testing.T) {
 				// coinbase output.
 				coinbaseOut := txOutToSpendableOut(coinbase, 0)
 				outs := []spendableOutput{coinbaseOut}
-				parent := ctx.addSignedTx(outs, 1, 0, false, false)
+				parent := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				parentOut := txOutToSpendableOut(parent, 0)
 				outs = []spendableOutput{parentOut}
-				child := ctx.addSignedTx(outs, 1, 0, false, false)
+				child := ctx.addSignedTx(outs, 1, minTestFee, false, false)
 
 				// Create another transaction that spends the
 				// same coinbase output. Since the original
@@ -1399,21 +1427,21 @@ func TestAncestorsDescendants(t *testing.T) {
 	// chain like so to properly detect ancestors and descendants past a
 	// single parent/child.
 	aInputs := outputs[:1]
-	a := ctx.addSignedTx(aInputs, 2, 0, false, false)
+	a := ctx.addSignedTx(aInputs, 2, minTestFee, false, false)
 
 	bInputs := []spendableOutput{txOutToSpendableOut(a, 0)}
-	b := ctx.addSignedTx(bInputs, 1, 0, false, false)
+	b := ctx.addSignedTx(bInputs, 1, minTestFee, false, false)
 
 	cInputs := []spendableOutput{txOutToSpendableOut(a, 1)}
-	c := ctx.addSignedTx(cInputs, 1, 0, false, false)
+	c := ctx.addSignedTx(cInputs, 1, minTestFee, false, false)
 
 	dInputs := []spendableOutput{txOutToSpendableOut(c, 0)}
-	d := ctx.addSignedTx(dInputs, 1, 0, false, false)
+	d := ctx.addSignedTx(dInputs, 1, minTestFee, false, false)
 
 	eInputs := []spendableOutput{
 		txOutToSpendableOut(b, 0), txOutToSpendableOut(d, 0),
 	}
-	e := ctx.addSignedTx(eInputs, 1, 0, false, false)
+	e := ctx.addSignedTx(eInputs, 1, minTestFee, false, false)
 
 	// We'll be querying for the ancestors of E. We should expect to see all
 	// of the transactions that it depends on.
@@ -1457,7 +1485,7 @@ func TestAncestorsDescendants(t *testing.T) {
 func TestRBF(t *testing.T) {
 	t.Parallel()
 
-	const defaultFee = btcutil.SatoshiPerBitcoin
+	const defaultFee = btcutil.GrainPerPearl
 
 	testCases := []struct {
 		name  string
@@ -1850,4 +1878,275 @@ func TestRBF(t *testing.T) {
 			break
 		}
 	}
+}
+
+// computePoolBytes manually sums SerializeSize of all pool transactions.
+func computePoolBytes(pool map[chainhash.Hash]*TxDesc) uint64 {
+	var total uint64
+	for _, txDesc := range pool {
+		total += uint64(txDesc.Tx.MsgTx().SerializeSize())
+	}
+	return total
+}
+
+// TestTrimToSize verifies that the pool is trimmed to stay within
+// MaxMempoolSize and that the lowest fee-rate transaction is evicted first.
+func TestTrimToSize(t *testing.T) {
+	t.Parallel()
+
+	const maxPoolBytes uint64 = 162 * 3
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	harness.txPool.cfg.Policy.MaxMempoolSize = maxPoolBytes
+	tc := &testContext{t, harness}
+
+	coinbase := tc.addCoinbaseTx(5)
+
+	// Add transactions with increasing fee rates. Once the pool exceeds
+	// the cap, the cheapest transactions are evicted or rejected.
+	fees := []btcutil.Amount{2000, 4000, 6000, 8000, 10000}
+	txs := make([]*btcutil.Tx, len(fees))
+	for i, fee := range fees {
+		out := txOutToSpendableOut(coinbase, uint32(i))
+		tx, err := harness.CreateSignedTx(
+			[]spendableOutput{out}, 1, fee, false,
+		)
+		require.NoError(t, err)
+		_, err = harness.txPool.ProcessTransaction(tx, true, false, 0)
+		if err != nil {
+			require.True(t,
+				strings.Contains(err.Error(), "evicted immediately") ||
+					strings.Contains(err.Error(), "mempool min fee not met"),
+				"unexpected error for tx %d: %v", i, err,
+			)
+		}
+		txs[i] = tx
+	}
+
+	assert.LessOrEqual(t, harness.txPool.PoolBytes(), maxPoolBytes)
+
+	// Lowest-fee tx should have been evicted; highest should remain.
+	testPoolMembership(tc, txs[0], false, false)
+	testPoolMembership(tc, txs[len(txs)-1], false, true)
+
+	harness.txPool.mtx.RLock()
+	want := computePoolBytes(harness.txPool.pool)
+	got := harness.txPool.poolBytes
+	harness.txPool.mtx.RUnlock()
+
+	assert.Equal(t, want, got, "poolBytes should match manual sum")
+}
+
+// TestEvictionRemovesRedeemers verifies that when a parent transaction is
+// evicted, its children (redeemers) are also removed.
+func TestEvictionRemovesRedeemers(t *testing.T) {
+	t.Parallel()
+
+	const maxPoolBytes uint64 = 162 * 3
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	harness.txPool.cfg.Policy.MaxMempoolSize = maxPoolBytes
+	tc := &testContext{t, harness}
+
+	coinbase := tc.addCoinbaseTx(4)
+
+	// Add a low-fee parent then a higher-fee child spending its output.
+	// The parent must have the lowest fee rate so it is the eviction
+	// target.
+	parentOut := txOutToSpendableOut(coinbase, 0)
+	parent := tc.addSignedTx(
+		[]spendableOutput{parentOut}, 1, 1500, false, false,
+	)
+	childIn := txOutToSpendableOut(parent, 0)
+	child := tc.addSignedTx(
+		[]spendableOutput{childIn}, 1, 5000, false, false,
+	)
+
+	testPoolMembership(tc, parent, false, true)
+	testPoolMembership(tc, child, false, true)
+
+	// Add 2 high-fee txs to push the pool past the limit.
+	for i := uint32(1); i <= 2; i++ {
+		out := txOutToSpendableOut(coinbase, i)
+		tc.addSignedTx([]spendableOutput{out}, 1, 50000, false, false)
+	}
+
+	testPoolMembership(tc, parent, false, false)
+	testPoolMembership(tc, child, false, false)
+}
+
+// TestStaticFeeFloor verifies that when the pool is at capacity, transactions
+// with fee rates at or below the last evicted fee rate are rejected at the
+// door, and that the floor stops gating once the pool drops below capacity.
+func TestStaticFeeFloor(t *testing.T) {
+	t.Parallel()
+
+	const maxPoolBytes uint64 = 162 * 2
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	harness.txPool.cfg.Policy.MaxMempoolSize = maxPoolBytes
+	tc := &testContext{t, harness}
+
+	coinbase := tc.addCoinbaseTx(6)
+
+	// Fill the pool with 2 medium-fee transactions.
+	for i := uint32(0); i < 2; i++ {
+		out := txOutToSpendableOut(coinbase, i)
+		tc.addSignedTx(
+			[]spendableOutput{out}, 1,
+			btcutil.Amount(5000+int(i)*1000), false, false,
+		)
+	}
+
+	// Add a high-fee tx that triggers eviction of the cheapest one.
+	highOut := txOutToSpendableOut(coinbase, 2)
+	tc.addSignedTx([]spendableOutput{highOut}, 1, 20000, false, false)
+
+	harness.txPool.mtx.RLock()
+	evictedRate := harness.txPool.lastEvictedFeeRate
+	poolAtCapacity := harness.txPool.poolBytes >= maxPoolBytes
+	harness.txPool.mtx.RUnlock()
+
+	require.Greater(t, evictedRate, int64(0),
+		"lastEvictedFeeRate should be set after eviction")
+
+	// If pool is at capacity, a low-fee tx should be rejected.
+	if poolAtCapacity {
+		lowOut := txOutToSpendableOut(coinbase, 3)
+		lowTx, err := harness.CreateSignedTx(
+			[]spendableOutput{lowOut}, 1, 1500, false,
+		)
+		require.NoError(t, err)
+		_, err = harness.txPool.ProcessTransaction(lowTx, true, false, 0)
+		require.Error(t, err)
+		assert.True(t,
+			strings.Contains(err.Error(), "mempool min fee not met") ||
+				strings.Contains(err.Error(), "evicted immediately"),
+			"unexpected error: %v", err,
+		)
+	}
+
+	// Remove all transactions to bring pool below capacity.
+	harness.txPool.mtx.Lock()
+	for _, txDesc := range harness.txPool.pool {
+		harness.txPool.removeTransaction(txDesc.Tx, false)
+	}
+	harness.txPool.mtx.Unlock()
+
+	// A low-fee tx should now be accepted since the pool is below
+	// capacity (the static floor only gates when poolBytes >= max).
+	acceptOut := txOutToSpendableOut(coinbase, 4)
+	lowTx, err := harness.CreateSignedTx(
+		[]spendableOutput{acceptOut}, 1, 1500, false,
+	)
+	require.NoError(t, err)
+	_, err = harness.txPool.ProcessTransaction(lowTx, true, false, 0)
+	assert.NoError(t, err,
+		"low-fee tx should be accepted when pool is below capacity")
+}
+
+// TestPoolBytesAccuracy verifies that poolBytes stays accurate through a mix
+// of add and remove operations.
+func TestPoolBytesAccuracy(t *testing.T) {
+	t.Parallel()
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	tc := &testContext{t, harness}
+
+	coinbase := tc.addCoinbaseTx(5)
+
+	txs := make([]*btcutil.Tx, 5)
+	for i := uint32(0); i < 5; i++ {
+		out := txOutToSpendableOut(coinbase, i)
+		txs[i] = tc.addSignedTx(
+			[]spendableOutput{out}, 1,
+			btcutil.Amount(2000+int(i)*1000), false, false,
+		)
+
+		harness.txPool.mtx.RLock()
+		want := computePoolBytes(harness.txPool.pool)
+		got := harness.txPool.poolBytes
+		harness.txPool.mtx.RUnlock()
+
+		require.Equal(t, want, got,
+			"poolBytes mismatch after add %d", i)
+	}
+
+	for i := 0; i < 3; i++ {
+		harness.txPool.RemoveTransaction(txs[i], false)
+
+		harness.txPool.mtx.RLock()
+		want := computePoolBytes(harness.txPool.pool)
+		got := harness.txPool.poolBytes
+		harness.txPool.mtx.RUnlock()
+
+		require.Equal(t, want, got,
+			"poolBytes mismatch after remove %d", i)
+	}
+
+	assert.Equal(t, 2, harness.txPool.Count())
+}
+
+// TestNewTxEvictedImmediately verifies that when a newly added transaction is
+// the lowest fee-rate in a full pool, it is evicted immediately and the caller
+// receives a "mempool full" error.
+func TestNewTxEvictedImmediately(t *testing.T) {
+	t.Parallel()
+
+	const maxPoolBytes uint64 = 162 * 2
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	harness.txPool.cfg.Policy.MaxMempoolSize = maxPoolBytes
+	tc := &testContext{t, harness}
+
+	coinbase := tc.addCoinbaseTx(4)
+
+	for i := uint32(0); i < 2; i++ {
+		out := txOutToSpendableOut(coinbase, i)
+		tc.addSignedTx([]spendableOutput{out}, 1, 50000, false, false)
+	}
+
+	lowOut := txOutToSpendableOut(coinbase, 2)
+	lowTx, err := harness.CreateSignedTx(
+		[]spendableOutput{lowOut}, 1, 1500, false,
+	)
+	require.NoError(t, err)
+
+	_, err = harness.txPool.ProcessTransaction(lowTx, true, false, 0)
+	require.Error(t, err)
+	assert.True(t,
+		strings.Contains(err.Error(), "evicted immediately") ||
+			strings.Contains(err.Error(), "mempool min fee not met"),
+		"unexpected error: %v", err,
+	)
+	testPoolMembership(tc, lowTx, false, false)
+}
+
+// TestMaxMempoolZeroUnlimited verifies that MaxMempoolSize=0 means no eviction
+// occurs regardless of how many transactions are added.
+func TestMaxMempoolZeroUnlimited(t *testing.T) {
+	t.Parallel()
+
+	harness, _, err := newPoolHarness(&chaincfg.MainNetParams)
+	require.NoError(t, err)
+	tc := &testContext{t, harness}
+
+	const numTxns = 10
+	coinbase := tc.addCoinbaseTx(numTxns)
+
+	for i := uint32(0); i < numTxns; i++ {
+		out := txOutToSpendableOut(coinbase, i)
+		tc.addSignedTx(
+			[]spendableOutput{out}, 1,
+			btcutil.Amount(1500+int(i)*100), false, false,
+		)
+	}
+
+	assert.Equal(t, numTxns, harness.txPool.Count())
+	assert.NotZero(t, harness.txPool.PoolBytes())
 }

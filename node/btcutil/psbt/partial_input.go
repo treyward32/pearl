@@ -6,16 +6,16 @@ import (
 	"io"
 	"sort"
 
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // PInput is a struct encapsulating all the data that can be attached to any
 // specific input of the PSBT.
 type PInput struct {
-	NonWitnessUtxo         *wire.MsgTx
+	NonWitnessUtxo         *wire.MsgTx // TODO Or: remove unused fields
 	WitnessUtxo            *wire.TxOut
-	PartialSigs            []*PartialSig
+	PartialSigs            []*PartialSig // TODO Or: remove
 	SighashType            txscript.SigHashType
 	RedeemScript           []byte
 	WitnessScript          []byte

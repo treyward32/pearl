@@ -1,4 +1,4 @@
-// Copyright (c) 2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,13 +7,13 @@ package main
 import (
 	"sync/atomic"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/netsync"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	"github.com/pearl-research-labs/pearl/node/netsync"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // rpcPeer provides a peer for use with the RPC server and implements the
@@ -277,12 +277,14 @@ func (b *rpcSyncMgr) SyncPeerID() int32 {
 	return b.syncMgr.SyncPeerID()
 }
 
-// LocateHeaders returns the hashes of the blocks after the first known block in
-// the provided locators until the provided stop hash or the current tip is
-// reached, up to a max of wire.MaxBlockHeadersPerMsg hashes.
+// LocateHeaders returns the headers of the blocks after the first known block
+// in the provided locators until the provided stop hash or the current tip is
+// reached, up to a max of wire.MaxBlockHeadersPerMsg headers. When
+// includeCerts is true, each returned MsgHeader includes both the BlockHeader
+// and its corresponding BlockCertificate. When false, certificates are omitted.
 //
 // This function is safe for concurrent access and is part of the
 // rpcserverSyncManager interface implementation.
-func (b *rpcSyncMgr) LocateHeaders(locators []*chainhash.Hash, hashStop *chainhash.Hash) []wire.BlockHeader {
-	return b.server.chain.LocateHeaders(locators, hashStop)
+func (b *rpcSyncMgr) LocateHeaders(locators []*chainhash.Hash, hashStop *chainhash.Hash, includeCerts bool) []wire.MsgHeader {
+	return b.server.chain.LocateHeaders(locators, hashStop, includeCerts)
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
 )
 
 // TestWalletSvrCmds tests all of the wallet server commands marshal and
@@ -1082,159 +1082,168 @@ func TestWalletSvrCmds(t *testing.T) {
 		{
 			name: "sendfrom",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5)
+				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 0.00001)
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendFromCmd("from", "1Address", 0.5, nil, nil, nil)
+				return btcjson.NewSendFromCmd("from", "1Address", 0.5, 0.00001, nil, nil, nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,0.00001],"id":1}`,
 			unmarshalled: &btcjson.SendFromCmd{
-				FromAccount: "from",
-				ToAddress:   "1Address",
-				Amount:      0.5,
-				MinConf:     btcjson.Int(1),
-				Comment:     nil,
-				CommentTo:   nil,
+				FromAccount:  "from",
+				ToAddress:    "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(1),
+				Comment:      nil,
+				CommentTo:    nil,
 			},
 		},
 		{
 			name: "sendfrom optional1",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 6)
+				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 0.00001, 6)
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendFromCmd("from", "1Address", 0.5, btcjson.Int(6), nil, nil)
+				return btcjson.NewSendFromCmd("from", "1Address", 0.5, 0.00001, btcjson.Int(6), nil, nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,6],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,0.00001,6],"id":1}`,
 			unmarshalled: &btcjson.SendFromCmd{
-				FromAccount: "from",
-				ToAddress:   "1Address",
-				Amount:      0.5,
-				MinConf:     btcjson.Int(6),
-				Comment:     nil,
-				CommentTo:   nil,
+				FromAccount:  "from",
+				ToAddress:    "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(6),
+				Comment:      nil,
+				CommentTo:    nil,
 			},
 		},
 		{
 			name: "sendfrom optional2",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 6, "comment")
+				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 0.00001, 6, "comment")
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendFromCmd("from", "1Address", 0.5, btcjson.Int(6),
+				return btcjson.NewSendFromCmd("from", "1Address", 0.5, 0.00001, btcjson.Int(6),
 					btcjson.String("comment"), nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,6,"comment"],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,0.00001,6,"comment"],"id":1}`,
 			unmarshalled: &btcjson.SendFromCmd{
-				FromAccount: "from",
-				ToAddress:   "1Address",
-				Amount:      0.5,
-				MinConf:     btcjson.Int(6),
-				Comment:     btcjson.String("comment"),
-				CommentTo:   nil,
+				FromAccount:  "from",
+				ToAddress:    "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(6),
+				Comment:      btcjson.String("comment"),
+				CommentTo:    nil,
 			},
 		},
 		{
 			name: "sendfrom optional3",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 6, "comment", "commentto")
+				return btcjson.NewCmd("sendfrom", "from", "1Address", 0.5, 0.00001, 6, "comment", "commentto")
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendFromCmd("from", "1Address", 0.5, btcjson.Int(6),
+				return btcjson.NewSendFromCmd("from", "1Address", 0.5, 0.00001, btcjson.Int(6),
 					btcjson.String("comment"), btcjson.String("commentto"))
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,6,"comment","commentto"],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendfrom","params":["from","1Address",0.5,0.00001,6,"comment","commentto"],"id":1}`,
 			unmarshalled: &btcjson.SendFromCmd{
-				FromAccount: "from",
-				ToAddress:   "1Address",
-				Amount:      0.5,
-				MinConf:     btcjson.Int(6),
-				Comment:     btcjson.String("comment"),
-				CommentTo:   btcjson.String("commentto"),
+				FromAccount:  "from",
+				ToAddress:    "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(6),
+				Comment:      btcjson.String("comment"),
+				CommentTo:    btcjson.String("commentto"),
 			},
 		},
 		{
 			name: "sendmany",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`)
+				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`, 0.00001)
 			},
 			staticCmd: func() interface{} {
 				amounts := map[string]float64{"1Address": 0.5}
-				return btcjson.NewSendManyCmd("from", amounts, nil, nil)
+				return btcjson.NewSendManyCmd("from", amounts, 0.00001, nil, nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5}],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5},0.00001],"id":1}`,
 			unmarshalled: &btcjson.SendManyCmd{
-				FromAccount: "from",
-				Amounts:     map[string]float64{"1Address": 0.5},
-				MinConf:     btcjson.Int(1),
-				Comment:     nil,
+				FromAccount:  "from",
+				Amounts:      map[string]float64{"1Address": 0.5},
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(1),
+				Comment:      nil,
 			},
 		},
 		{
 			name: "sendmany optional1",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`, 6)
+				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`, 0.00001, 6)
 			},
 			staticCmd: func() interface{} {
 				amounts := map[string]float64{"1Address": 0.5}
-				return btcjson.NewSendManyCmd("from", amounts, btcjson.Int(6), nil)
+				return btcjson.NewSendManyCmd("from", amounts, 0.00001, btcjson.Int(6), nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5},6],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5},0.00001,6],"id":1}`,
 			unmarshalled: &btcjson.SendManyCmd{
-				FromAccount: "from",
-				Amounts:     map[string]float64{"1Address": 0.5},
-				MinConf:     btcjson.Int(6),
-				Comment:     nil,
+				FromAccount:  "from",
+				Amounts:      map[string]float64{"1Address": 0.5},
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(6),
+				Comment:      nil,
 			},
 		},
 		{
 			name: "sendmany optional2",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`, 6, "comment")
+				return btcjson.NewCmd("sendmany", "from", `{"1Address":0.5}`, 0.00001, 6, "comment")
 			},
 			staticCmd: func() interface{} {
 				amounts := map[string]float64{"1Address": 0.5}
-				return btcjson.NewSendManyCmd("from", amounts, btcjson.Int(6), btcjson.String("comment"))
+				return btcjson.NewSendManyCmd("from", amounts, 0.00001, btcjson.Int(6), btcjson.String("comment"))
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5},6,"comment"],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendmany","params":["from",{"1Address":0.5},0.00001,6,"comment"],"id":1}`,
 			unmarshalled: &btcjson.SendManyCmd{
-				FromAccount: "from",
-				Amounts:     map[string]float64{"1Address": 0.5},
-				MinConf:     btcjson.Int(6),
-				Comment:     btcjson.String("comment"),
+				FromAccount:  "from",
+				Amounts:      map[string]float64{"1Address": 0.5},
+				FeeRatePerKb: 0.00001,
+				MinConf:      btcjson.Int(6),
+				Comment:      btcjson.String("comment"),
 			},
 		},
 		{
 			name: "sendtoaddress",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendtoaddress", "1Address", 0.5)
+				return btcjson.NewCmd("sendtoaddress", "1Address", 0.5, 0.00001)
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendToAddressCmd("1Address", 0.5, nil, nil)
+				return btcjson.NewSendToAddressCmd("1Address", 0.5, 0.00001, nil, nil)
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendtoaddress","params":["1Address",0.5],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendtoaddress","params":["1Address",0.5,0.00001],"id":1}`,
 			unmarshalled: &btcjson.SendToAddressCmd{
-				Address:   "1Address",
-				Amount:    0.5,
-				Comment:   nil,
-				CommentTo: nil,
+				Address:      "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				Comment:      nil,
+				CommentTo:    nil,
 			},
 		},
 		{
 			name: "sendtoaddress optional1",
 			newCmd: func() (interface{}, error) {
-				return btcjson.NewCmd("sendtoaddress", "1Address", 0.5, "comment", "commentto")
+				return btcjson.NewCmd("sendtoaddress", "1Address", 0.5, 0.00001, "comment", "commentto")
 			},
 			staticCmd: func() interface{} {
-				return btcjson.NewSendToAddressCmd("1Address", 0.5, btcjson.String("comment"),
+				return btcjson.NewSendToAddressCmd("1Address", 0.5, 0.00001, btcjson.String("comment"),
 					btcjson.String("commentto"))
 			},
-			marshalled: `{"jsonrpc":"1.0","method":"sendtoaddress","params":["1Address",0.5,"comment","commentto"],"id":1}`,
+			marshalled: `{"jsonrpc":"1.0","method":"sendtoaddress","params":["1Address",0.5,0.00001,"comment","commentto"],"id":1}`,
 			unmarshalled: &btcjson.SendToAddressCmd{
-				Address:   "1Address",
-				Amount:    0.5,
-				Comment:   btcjson.String("comment"),
-				CommentTo: btcjson.String("commentto"),
+				Address:      "1Address",
+				Amount:       0.5,
+				FeeRatePerKb: 0.00001,
+				Comment:      btcjson.String("comment"),
+				CommentTo:    btcjson.String("commentto"),
 			},
 		},
 		{

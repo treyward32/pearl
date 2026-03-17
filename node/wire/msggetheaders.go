@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
-// MsgGetHeaders implements the Message interface and represents a bitcoin
+// MsgGetHeaders implements the Message interface and represents a
 // getheaders message.  It is used to request a list of block headers for
 // blocks starting after the last known hash in the slice of block locator
 // hashes.  The list is returned via a headers message (MsgHeaders) and is
@@ -27,10 +27,16 @@ import (
 // most recent 10 block hashes, then double the step each loop iteration to
 // exponentially decrease the number of hashes the further away from head and
 // closer to the genesis block you get.
+//
+// IncludeCertificates controls whether block certificates are included in the
+// response. When true (default), certificates are included alongside headers.
+// When false, only headers are returned without certificates. Serialized as a
+// single byte on the wire (0x00 = false, non-zero = true).
 type MsgGetHeaders struct {
-	ProtocolVersion    uint32
-	BlockLocatorHashes []*chainhash.Hash
-	HashStop           chainhash.Hash
+	ProtocolVersion     uint32
+	BlockLocatorHashes  []*chainhash.Hash
+	HashStop            chainhash.Hash
+	IncludeCertificates bool
 }
 
 // AddBlockLocatorHash adds a new block locator hash to the message.
@@ -45,9 +51,9 @@ func (msg *MsgGetHeaders) AddBlockLocatorHash(hash *chainhash.Hash) error {
 	return nil
 }
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // This is part of the Message interface implementation.
-func (msg *MsgGetHeaders) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
+func (msg *MsgGetHeaders) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	buf := binarySerializer.Borrow()
 	defer binarySerializer.Return(buf)
 
@@ -65,7 +71,7 @@ func (msg *MsgGetHeaders) BtcDecode(r io.Reader, pver uint32, enc MessageEncodin
 	if count > MaxBlockLocatorsPerMsg {
 		str := fmt.Sprintf("too many block locator hashes for message "+
 			"[count %v, max %v]", count, MaxBlockLocatorsPerMsg)
-		return messageError("MsgGetHeaders.BtcDecode", str)
+		return messageError("MsgGetHeaders.PrlDecode", str)
 	}
 
 	// Create a contiguous slice of hashes to deserialize into in order to
@@ -81,19 +87,26 @@ func (msg *MsgGetHeaders) BtcDecode(r io.Reader, pver uint32, enc MessageEncodin
 		msg.AddBlockLocatorHash(hash)
 	}
 
-	_, err = io.ReadFull(r, msg.HashStop[:])
-	return err
+	if _, err = io.ReadFull(r, msg.HashStop[:]); err != nil {
+		return err
+	}
+
+	if _, err = io.ReadFull(r, buf[:1]); err != nil {
+		return err
+	}
+	msg.IncludeCertificates = buf[0] != 0
+	return nil
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
-func (msg *MsgGetHeaders) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
+func (msg *MsgGetHeaders) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	// Limit to max block locator hashes per message.
 	count := len(msg.BlockLocatorHashes)
 	if count > MaxBlockLocatorsPerMsg {
 		str := fmt.Sprintf("too many block locator hashes for message "+
 			"[count %v, max %v]", count, MaxBlockLocatorsPerMsg)
-		return messageError("MsgGetHeaders.BtcEncode", str)
+		return messageError("MsgGetHeaders.PrlEncode", str)
 	}
 
 	buf := binarySerializer.Borrow()
@@ -116,7 +129,15 @@ func (msg *MsgGetHeaders) BtcEncode(w io.Writer, pver uint32, enc MessageEncodin
 		}
 	}
 
-	_, err = w.Write(msg.HashStop[:])
+	if _, err = w.Write(msg.HashStop[:]); err != nil {
+		return err
+	}
+
+	buf[0] = 0
+	if msg.IncludeCertificates {
+		buf[0] = 1
+	}
+	_, err = w.Write(buf[:1])
 	return err
 }
 
@@ -130,16 +151,17 @@ func (msg *MsgGetHeaders) Command() string {
 // receiver.  This is part of the Message interface implementation.
 func (msg *MsgGetHeaders) MaxPayloadLength(pver uint32) uint32 {
 	// Version 4 bytes + num block locator hashes (varInt) + max allowed block
-	// locators + hash stop.
+	// locators + hash stop + include_certificates 1 byte.
 	return 4 + MaxVarIntPayload + (MaxBlockLocatorsPerMsg *
-		chainhash.HashSize) + chainhash.HashSize
+		chainhash.HashSize) + chainhash.HashSize + 1
 }
 
-// NewMsgGetHeaders returns a new bitcoin getheaders message that conforms to
+// NewMsgGetHeaders returns a new getheaders message that conforms to
 // the Message interface.  See MsgGetHeaders for details.
 func NewMsgGetHeaders() *MsgGetHeaders {
 	return &MsgGetHeaders{
 		BlockLocatorHashes: make([]*chainhash.Hash, 0,
 			MaxBlockLocatorsPerMsg),
+		IncludeCertificates: true,
 	}
 }

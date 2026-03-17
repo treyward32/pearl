@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +23,7 @@ func TestMerkle(t *testing.T) {
 
 	require.Equal(t, *merkleStoreRoot, calcMerkleRoot)
 
-	wantMerkle := &Block100000.Header.MerkleRoot
+	wantMerkle := &Block100000.BlockHeader().MerkleRoot
 	if !wantMerkle.IsEqual(&calcMerkleRoot) {
 		t.Errorf("BuildMerkleTreeStore: merkle root mismatch - "+
 			"got %v, want %v", calcMerkleRoot, wantMerkle)

@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // TestBlock tests the API for Block.
@@ -35,8 +35,8 @@ func TestBlock(t *testing.T) {
 			gotHeight, wantHeight)
 	}
 
-	// Hash for block 100,000.
-	wantHashStr := "3ba27aa200b1cecaad478d2b00432346c3f1f3986da1afd33e506"
+	// Hash for block 100,000 (includes ProofCommitment in header serialization).
+	wantHashStr := "f7ae0bfc78d295b22ecff1a10d2b6fffa3f1d7d8c2f23505d4696e60312501a5"
 	wantHash, err := chainhash.NewHashFromStr(wantHashStr)
 	if err != nil {
 		t.Errorf("NewHashFromStr: %v", err)
@@ -144,11 +144,18 @@ func TestBlock(t *testing.T) {
 	}
 
 	// Transaction offsets and length for the transaction in Block100000.
+	// Certificate(46) + Header(108) + varint(1) = 155 bytes before first tx
+	// Certificate format: Version(4) + BlockHash(32) + ProofLen(4) + ProofData(6) = 46 bytes
+	// Header format: Version(4) + PrevBlock(32) + MerkleRoot(32) + Timestamp(4) + Bits(4) + ProofCommitment(32) = 108 bytes
+	certLength := 212 // ZKCertificate: version(4) + hash(32) + PublicData(164) + proofLen(4) + proofData(8)
+	headerLength := 108
+	varintLength := 1                                      // tx count varint
+	baseOffset := certLength + headerLength + varintLength // 305
 	wantTxLocs := []wire.TxLoc{
-		{TxStart: 81, TxLen: 144},
-		{TxStart: 225, TxLen: 259},
-		{TxStart: 484, TxLen: 257},
-		{TxStart: 741, TxLen: 225},
+		{TxStart: baseOffset, TxLen: 144},                   // 305
+		{TxStart: baseOffset + 144, TxLen: 259},             // 449
+		{TxStart: baseOffset + 144 + 259, TxLen: 257},       // 708
+		{TxStart: baseOffset + 144 + 259 + 257, TxLen: 225}, // 965
 	}
 
 	// Ensure the transaction location information is accurate.
@@ -257,11 +264,12 @@ func TestBlockErrors(t *testing.T) {
 	}
 
 	// Truncate the block byte buffer to force errors.
-	shortBytes := block100000Bytes[:80]
+	// Truncating at byte 76  is in middle of header (after certificate), causes unexpected EOF
+	shortBytes := block100000Bytes[:76]
 	_, err = btcutil.NewBlockFromBytes(shortBytes)
-	if err != io.EOF {
+	if err != io.ErrUnexpectedEOF {
 		t.Errorf("NewBlockFromBytes: did not get expected error - "+
-			"got %v, want %v", err, io.EOF)
+			"got %v, want %v", err, io.ErrUnexpectedEOF)
 	}
 
 	// Ensure TxHash returns expected error on invalid indices.
@@ -293,32 +301,39 @@ func TestBlockErrors(t *testing.T) {
 	// inject a short byte buffer.
 	b.SetBlockBytes(shortBytes)
 	_, err = b.TxLoc()
-	if err != io.EOF {
+	if err != io.ErrUnexpectedEOF {
 		t.Errorf("TxLoc: did not get expected error - "+
-			"got %v, want %v", err, io.EOF)
+			"got %v, want %v", err, io.ErrUnexpectedEOF)
 	}
 }
 
 // Block100000 defines block 100,000 of the block chain.  It is used to
-// test Block operations.
+// test Block operations. Uses ZKCertificate with stub proof (not valid for PoW verification).
 var Block100000 = wire.MsgBlock{
-	Header: wire.BlockHeader{
-		Version: 1,
-		PrevBlock: chainhash.Hash([32]byte{ // Make go vet happy.
-			0x50, 0x12, 0x01, 0x19, 0x17, 0x2a, 0x61, 0x04,
-			0x21, 0xa6, 0xc3, 0x01, 0x1d, 0xd3, 0x30, 0xd9,
-			0xdf, 0x07, 0xb6, 0x36, 0x16, 0xc2, 0xcc, 0x1f,
-			0x1c, 0xd0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
-		}), // 000000000002d01c1fccc21636b607dfd930d31d01c3a62104612a1719011250
-		MerkleRoot: chainhash.Hash([32]byte{ // Make go vet happy.
-			0x66, 0x57, 0xa9, 0x25, 0x2a, 0xac, 0xd5, 0xc0,
-			0xb2, 0x94, 0x09, 0x96, 0xec, 0xff, 0x95, 0x22,
-			0x28, 0xc3, 0x06, 0x7c, 0xc3, 0x8d, 0x48, 0x85,
-			0xef, 0xb5, 0xa4, 0xac, 0x42, 0x47, 0xe9, 0xf3,
-		}), // f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766
-		Timestamp: time.Unix(1293623863, 0), // 2010-12-29 11:57:43 +0000 UTC
-		Bits:      0x1b04864c,               // 453281356
-		Nonce:     0x10572b0f,               // 274148111
+	MsgHeader: wire.MsgHeader{
+		MsgCertificate: wire.MsgCertificate{
+			Certificate: &wire.ZKCertificate{
+				Hash:      chainhash.Hash{},
+				ProofData: []byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe},
+			},
+		},
+		BlockHeader: wire.BlockHeader{
+			Version: 1,
+			PrevBlock: chainhash.Hash([32]byte{ // Make go vet happy.
+				0x50, 0x12, 0x01, 0x19, 0x17, 0x2a, 0x61, 0x04,
+				0x21, 0xa6, 0xc3, 0x01, 0x1d, 0xd3, 0x30, 0xd9,
+				0xdf, 0x07, 0xb6, 0x36, 0x16, 0xc2, 0xcc, 0x1f,
+				0x1c, 0xd0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+			}), // 000000000002d01c1fccc21636b607dfd930d31d01c3a62104612a1719011250
+			MerkleRoot: chainhash.Hash([32]byte{ // Make go vet happy.
+				0x66, 0x57, 0xa9, 0x25, 0x2a, 0xac, 0xd5, 0xc0,
+				0xb2, 0x94, 0x09, 0x96, 0xec, 0xff, 0x95, 0x22,
+				0x28, 0xc3, 0x06, 0x7c, 0xc3, 0x8d, 0x48, 0x85,
+				0xef, 0xb5, 0xa4, 0xac, 0x42, 0x47, 0xe9, 0xf3,
+			}), // f3e94742aca4b5ef85488dc37c06c3282295ffec960994b2c0d5ac2a25a95766
+			Timestamp: time.Unix(1293623863, 0), // 2010-12-29 11:57:43 +0000 UTC
+			Bits:      0x1b04864c,               // 453281356
+		},
 	},
 	Transactions: []*wire.MsgTx{
 		{

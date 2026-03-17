@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
@@ -29,8 +29,8 @@ const (
 	level0MaxEntries = 8
 
 	// addrKeySize is the number of bytes an address key consumes in the
-	// index.  It consists of 1 byte address type + 20 bytes hash160.
-	addrKeySize = 1 + 20
+	// index.  It consists of 1 byte address type + 32 bytes Taproot pubkey.
+	addrKeySize = 1 + 32
 
 	// levelKeySize is the number of bytes a level key in the address index
 	// consumes.  It consists of the address key + 1 byte for the level.
@@ -39,34 +39,10 @@ const (
 	// levelOffset is the offset in the level key which identifies the level.
 	levelOffset = levelKeySize - 1
 
-	// addrKeyTypePubKeyHash is the address type in an address key which
-	// represents both a pay-to-pubkey-hash and a pay-to-pubkey address.
-	// This is done because both are identical for the purposes of the
-	// address index.
-	addrKeyTypePubKeyHash = 0
-
-	// addrKeyTypeScriptHash is the address type in an address key which
-	// represents a pay-to-script-hash address.  This is necessary because
-	// the hash of a pubkey address might be the same as that of a script
-	// hash.
-	addrKeyTypeScriptHash = 1
-
-	// addrKeyTypePubKeyHash is the address type in an address key which
-	// represents a pay-to-witness-pubkey-hash address. This is required
-	// as the 20-byte data push of a p2wkh witness program may be the same
-	// data push used a p2pkh address.
-	addrKeyTypeWitnessPubKeyHash = 2
-
-	// addrKeyTypeScriptHash is the address type in an address key which
-	// represents a pay-to-witness-script-hash address. This is required,
-	// as p2wsh are distinct from p2sh addresses since they use a new
-	// script template, as well as a 32-byte data push.
-	addrKeyTypeWitnessScriptHash = 3
-
 	// addrKeyTypeTaprootPubKey is the address type in an address key that
 	// represents a pay-to-taproot address. We use this to denote addresses
 	// related to the segwit v1 that are encoded in the bech32m format.
-	addrKeyTypeTaprootPubKey = 4
+	addrKeyTypeTaprootPubKey = 0
 
 	// Size of a transaction entry.  It consists of 4 bytes block id + 4
 	// bytes offset + 4 bytes length.
@@ -542,51 +518,12 @@ func dbRemoveAddrIndexEntries(bucket internalBucket, addrKey [addrKeySize]byte,
 // addrToKey converts known address types to an addrindex key.  An error is
 // returned for unsupported types.
 func addrToKey(addr btcutil.Address) ([addrKeySize]byte, error) {
-	switch addr := addr.(type) {
-	case *btcutil.AddressPubKeyHash:
-		var result [addrKeySize]byte
-		result[0] = addrKeyTypePubKeyHash
-		copy(result[1:], addr.Hash160()[:])
-		return result, nil
-
-	case *btcutil.AddressScriptHash:
-		var result [addrKeySize]byte
-		result[0] = addrKeyTypeScriptHash
-		copy(result[1:], addr.Hash160()[:])
-		return result, nil
-
-	case *btcutil.AddressPubKey:
-		var result [addrKeySize]byte
-		result[0] = addrKeyTypePubKeyHash
-		copy(result[1:], addr.AddressPubKeyHash().Hash160()[:])
-		return result, nil
-
-	case *btcutil.AddressWitnessScriptHash:
-		var result [addrKeySize]byte
-		result[0] = addrKeyTypeWitnessScriptHash
-
-		// P2WSH outputs utilize a 32-byte data push created by hashing
-		// the script with sha256 instead of hash160. In order to keep
-		// all address entries within the database uniform and compact,
-		// we use a hash160 here to reduce the size of the salient data
-		// push to 20-bytes.
-		copy(result[1:], btcutil.Hash160(addr.ScriptAddress()))
-		return result, nil
-
-	case *btcutil.AddressWitnessPubKeyHash:
-		var result [addrKeySize]byte
-		result[0] = addrKeyTypeWitnessPubKeyHash
-		copy(result[1:], addr.Hash160()[:])
-		return result, nil
-
-	case *btcutil.AddressTaproot:
+	if taprootAddr, ok := addr.(*btcutil.AddressTaproot); ok {
 		var result [addrKeySize]byte
 		result[0] = addrKeyTypeTaprootPubKey
 
-		// Taproot outputs are actually just the 32-byte public key.
-		// Similar to the P2WSH outputs, we'll map these to 20-bytes
-		// via the hash160.
-		copy(result[1:], btcutil.Hash160(addr.ScriptAddress()))
+		// Use the full 32-byte Taproot x-only public key directly.
+		copy(result[1:], taprootAddr.ScriptAddress())
 		return result, nil
 	}
 

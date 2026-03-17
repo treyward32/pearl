@@ -1,9 +1,9 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 /*
-Package hdkeychain provides an API for bitcoin hierarchical deterministic
+Package hdkeychain provides an API for hierarchical deterministic
 extended keys (BIP0032).
 
 # Overview
@@ -77,7 +77,7 @@ looks like the following:
 
 # Network
 
-Extended keys are much like normal Bitcoin addresses in that they have version
+Extended keys are much like normal addresses in that they have version
 bytes which tie them to a specific network.  The SetNet and IsForNet functions
 are provided to set and determinine which network an extended key is associated
 with.

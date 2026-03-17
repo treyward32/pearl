@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain/internal/testhelper"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	_ "github.com/btcsuite/btcd/database/ffldb"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain/internal/testhelper"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	_ "github.com/pearl-research-labs/pearl/node/database/ffldb"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
@@ -58,7 +58,7 @@ func isSupportedDbType(dbType string) bool {
 	return false
 }
 
-// loadBlocks reads files containing bitcoin block data (gzipped but otherwise
+// loadBlocks reads files containing block data (gzipped but otherwise
 // in the format bitcoind writes) from disk and returns them as an array of
 // btcutil.Block.  This is largely borrowed from the test code in btcdb.
 func loadBlocks(filename string) (blocks []*btcutil.Block, err error) {
@@ -164,7 +164,8 @@ func chainSetup(dbName string, params *chaincfg.Params) (*BlockChain, func(), er
 		teardown = func() {
 			db.Close()
 			os.RemoveAll(dbPath)
-			os.RemoveAll(testDbRoot)
+			// Remove directory only if it's empty (no race condition with multiple instances)
+			os.Remove(testDbRoot)
 		}
 	}
 
@@ -256,146 +257,10 @@ func loadUtxoView(filename string) (*UtxoViewpoint, error) {
 	return view, nil
 }
 
-// convertUtxoStore reads a utxostore from the legacy format and writes it back
-// out using the latest format.  It is only useful for converting utxostore data
-// used in the tests, which has already been done.  However, the code is left
-// available for future reference.
-func convertUtxoStore(r io.Reader, w io.Writer) error {
-	// The old utxostore file format was:
-	// <tx hash><serialized utxo len><serialized utxo>
-	//
-	// The serialized utxo len was a little endian uint32 and the serialized
-	// utxo uses the format described in upgrade.go.
-
-	littleEndian := binary.LittleEndian
-	for {
-		// Hash of the utxo entry.
-		var hash chainhash.Hash
-		_, err := io.ReadAtLeast(r, hash[:], len(hash[:]))
-		if err != nil {
-			// Expected EOF at the right offset.
-			if err == io.EOF {
-				break
-			}
-			return err
-		}
-
-		// Num of serialized utxo entry bytes.
-		var numBytes uint32
-		err = binary.Read(r, littleEndian, &numBytes)
-		if err != nil {
-			return err
-		}
-
-		// Serialized utxo entry.
-		serialized := make([]byte, numBytes)
-		_, err = io.ReadAtLeast(r, serialized, int(numBytes))
-		if err != nil {
-			return err
-		}
-
-		// Deserialize the entry.
-		entries, err := deserializeUtxoEntryV0(serialized)
-		if err != nil {
-			return err
-		}
-
-		// Loop through all of the utxos and write them out in the new
-		// format.
-		for outputIdx, entry := range entries {
-			// Reserialize the entries using the new format.
-			serialized, err := serializeUtxoEntry(entry)
-			if err != nil {
-				return err
-			}
-
-			// Write the hash of the utxo entry.
-			_, err = w.Write(hash[:])
-			if err != nil {
-				return err
-			}
-
-			// Write the output index of the utxo entry.
-			err = binary.Write(w, littleEndian, outputIdx)
-			if err != nil {
-				return err
-			}
-
-			// Write num of serialized utxo entry bytes.
-			err = binary.Write(w, littleEndian, uint32(len(serialized)))
-			if err != nil {
-				return err
-			}
-
-			// Write the serialized utxo.
-			_, err = w.Write(serialized)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 // TstSetCoinbaseMaturity makes the ability to set the coinbase maturity
 // available when running tests.
 func (b *BlockChain) TstSetCoinbaseMaturity(maturity uint16) {
 	b.chainParams.CoinbaseMaturity = maturity
-}
-
-// newFakeChain returns a chain that is usable for synthetic tests.  It is
-// important to note that this chain has no database associated with it, so
-// it is not usable with all functions and the tests must take care when making
-// use of it.
-func newFakeChain(params *chaincfg.Params) *BlockChain {
-	// Create a genesis block node and block index index populated with it
-	// for use when creating the fake chain below.
-	node := newBlockNode(&params.GenesisBlock.Header, nil)
-	index := newBlockIndex(nil, params)
-	index.AddNode(node)
-
-	targetTimespan := int64(params.TargetTimespan / time.Second)
-	targetTimePerBlock := int64(params.TargetTimePerBlock / time.Second)
-	adjustmentFactor := params.RetargetAdjustmentFactor
-	b := &BlockChain{
-		chainParams:         params,
-		timeSource:          NewMedianTime(),
-		minRetargetTimespan: targetTimespan / adjustmentFactor,
-		maxRetargetTimespan: targetTimespan * adjustmentFactor,
-		blocksPerRetarget:   int32(targetTimespan / targetTimePerBlock),
-		index:               index,
-		bestChain:           newChainView(node),
-		warningCaches:       newThresholdCaches(vbNumBits),
-		deploymentCaches:    newThresholdCaches(chaincfg.DefinedDeployments),
-	}
-
-	for _, deployment := range params.Deployments {
-		deploymentStarter := deployment.DeploymentStarter
-		if clockStarter, ok := deploymentStarter.(chaincfg.ClockConsensusDeploymentStarter); ok {
-			clockStarter.SynchronizeClock(b)
-		}
-
-		deploymentEnder := deployment.DeploymentEnder
-		if clockEnder, ok := deploymentEnder.(chaincfg.ClockConsensusDeploymentEnder); ok {
-			clockEnder.SynchronizeClock(b)
-		}
-	}
-
-	return b
-}
-
-// newFakeNode creates a block node connected to the passed parent with the
-// provided fields populated and fake values for the other fields.
-func newFakeNode(parent *blockNode, blockVersion int32, bits uint32, timestamp time.Time) *blockNode {
-	// Make up a header and create a block node from it.
-	header := &wire.BlockHeader{
-		Version:   blockVersion,
-		PrevBlock: parent.hash,
-		Bits:      bits,
-		Timestamp: timestamp,
-	}
-	return newBlockNode(header, parent)
 }
 
 // addBlock adds a block to the blockchain that succeeds the previous block.
@@ -438,6 +303,7 @@ func newBlock(chain *BlockChain, prev *btcutil.Block,
 	spends []*testhelper.SpendableOut) (*btcutil.Block, []*testhelper.SpendableOut, error) {
 
 	blockHeight := prev.Height() + 1
+
 	txns := make([]*wire.MsgTx, 0, 1+len(spends))
 
 	// Create and add coinbase tx.
@@ -446,8 +312,6 @@ func newBlock(chain *BlockChain, prev *btcutil.Block,
 
 	// Spend all txs to be spent.
 	for _, spend := range spends {
-		cb.TxOut[0].Value += int64(testhelper.LowFee)
-
 		spendTx := testhelper.CreateSpendTx(spend, testhelper.LowFee)
 		txns = append(txns, spendTx)
 	}
@@ -458,28 +322,44 @@ func newBlock(chain *BlockChain, prev *btcutil.Block,
 	if blockHeight == 1 {
 		ts = time.Unix(time.Now().Unix(), 0)
 	} else {
-		ts = prev.MsgBlock().Header.Timestamp.Add(time.Second)
+		ts = prev.MsgBlock().BlockHeader().Timestamp.Add(time.Second)
 	}
 
-	// Create the block. The nonce will be solved in the below code in
-	// SolveBlock.
+	// Add witness commitment if any tx has witness data.
+	utilTxns := make([]*btcutil.Tx, 0, len(txns))
+	for _, tx := range txns {
+		utilTxns = append(utilTxns, btcutil.NewTx(tx))
+	}
+	hasWitness := false
+	for _, tx := range txns[1:] {
+		if tx.HasWitness() {
+			hasWitness = true
+			break
+		}
+	}
+	if hasWitness {
+		addTestWitnessCommitment(utilTxns)
+	}
+
+	header := wire.BlockHeader{
+		Version:    1,
+		PrevBlock:  *prev.Hash(),
+		MerkleRoot: calcMerkleRoot(txns),
+		Bits:       chain.chainParams.PowLimitBits,
+		Timestamp:  ts,
+	}
+	cert, err := SolveBlock(&header, chain.chainParams.Net)
+	if err != nil {
+		return nil, nil, err
+	}
 	block := btcutil.NewBlock(&wire.MsgBlock{
-		Header: wire.BlockHeader{
-			Version:    1,
-			PrevBlock:  *prev.Hash(),
-			MerkleRoot: calcMerkleRoot(txns),
-			Bits:       chain.chainParams.PowLimitBits,
-			Timestamp:  ts,
-			Nonce:      0, // To be solved.
+		MsgHeader: wire.MsgHeader{
+			BlockHeader:    header,
+			MsgCertificate: wire.MsgCertificate{Certificate: cert},
 		},
 		Transactions: txns,
 	})
 	block.SetHeight(blockHeight)
-
-	// Solve the block.
-	if !testhelper.SolveBlock(&block.MsgBlock().Header) {
-		return nil, nil, fmt.Errorf("Unable to solve block at height %d", blockHeight)
-	}
 
 	// Create spendable outs to return.
 	outs := make([]*testhelper.SpendableOut, len(txns))
@@ -489,4 +369,26 @@ func newBlock(chain *BlockChain, prev *btcutil.Block,
 	}
 
 	return block, outs, nil
+}
+
+// addTestWitnessCommitment adds a witness commitment to the coinbase of the
+// provided transactions. This is equivalent to mining.AddWitnessCommitment but
+// avoids the import cycle (mining -> blockchain).
+func addTestWitnessCommitment(txns []*btcutil.Tx) {
+	var witnessNonce [CoinbaseWitnessDataLen]byte
+	txns[0].MsgTx().TxIn[0].Witness = wire.TxWitness{witnessNonce[:]}
+
+	witnessMerkleRoot := CalcMerkleRoot(txns, true)
+
+	var witnessPreimage [64]byte
+	copy(witnessPreimage[:32], witnessMerkleRoot[:])
+	copy(witnessPreimage[32:], witnessNonce[:])
+
+	witnessCommitment := chainhash.DoubleHashB(witnessPreimage[:])
+	witnessScript := append(WitnessMagicBytes, witnessCommitment...)
+
+	txns[0].MsgTx().TxOut = append(txns[0].MsgTx().TxOut, &wire.TxOut{
+		Value:    0,
+		PkScript: witnessScript,
+	})
 }

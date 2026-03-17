@@ -1,7 +1,7 @@
-PKG := github.com/lightninglabs/neutrino
+PKG := github.com/pearl-research-labs/pearl/spv
 TOOLS_DIR := tools
 
-BTCD_PKG := github.com/btcsuite/btcd
+BTCD_PKG := github.com/pearl-research-labs/pearl/node
 LINT_PKG := github.com/golangci/golangci-lint/cmd/golangci-lint
 GOACC_PKG := github.com/ory/go-acc
 GOIMPORTS_PKG := github.com/rinchsan/gosimports/cmd/gosimports
@@ -44,8 +44,8 @@ all: build check
 # DEPENDENCIES
 # ============
 
-btcd:
-	@$(call print, "Installing btcd.")
+pearld:
+	@$(call print, "Installing pearld.")
 	cd $(TOOLS_DIR); go install -trimpath -tags=tools $(BTCD_PKG)
 
 $(GOACC_BIN):
@@ -70,15 +70,15 @@ build:
 
 check: unit
 
-unit: btcd
+unit: pearld
 	@$(call print, "Running unit tests.")
 	$(GOLIST) | $(XARGS) env $(GOTEST)
 
-unit-cover: btcd $(GOACC_BIN)
+unit-cover: pearld $(GOACC_BIN)
 	@$(call print, "Running unit coverage tests.")
 	$(GOACC_BIN) $(GOLIST_COVER)
 
-unit-race: btcd
+unit-race: pearld
 	@$(call print, "Running unit race tests.")
 	env CGO_ENABLED=1 GORACE="history_size=7 halt_on_errors=1" $(GOLIST) | $(XARGS) env $(GOTEST) -race
 
@@ -96,16 +96,15 @@ fmt: goimports
 	@$(call print, "Formatting source.")
 	gofmt -l -w -s $(GOFILES_NOVENDOR)
 
-lint: docker-tools
-	@$(call print, "Linting source.")
-	$(DOCKER_TOOLS) golangci-lint run -v $(LINT_WORKERS)
+lint:
+	golangci-lint run
 
 clean:
 	@$(call print, "Cleaning source.$(NC)")
 	$(RM) coverage.txt
 
 .PHONY: all \
-	btcd \
+	pearld \
 	default \
 	build \
 	check \

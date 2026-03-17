@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2017 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -10,17 +10,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/btcsuite/btcd/addrmgr"
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/blockchain/indexers"
-	"github.com/btcsuite/btcd/connmgr"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/mining"
-	"github.com/btcsuite/btcd/mining/cpuminer"
-	"github.com/btcsuite/btcd/netsync"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/pearl-research-labs/pearl/node/addrmgr"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/blockchain/indexers"
+	"github.com/pearl-research-labs/pearl/node/connmgr"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/mining/cpuminer"
+	"github.com/pearl-research-labs/pearl/node/netsync"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/v2transport"
 
 	"github.com/btcsuite/btclog"
 	"github.com/jrick/logrotate/rotator"
@@ -58,7 +59,7 @@ var (
 	amgrLog = backendLog.Logger("AMGR")
 	cmgrLog = backendLog.Logger("CMGR")
 	bcdbLog = backendLog.Logger("BCDB")
-	btcdLog = backendLog.Logger("BTCD")
+	prldLog = backendLog.Logger("PRLD")
 	chanLog = backendLog.Logger("CHAN")
 	discLog = backendLog.Logger("DISC")
 	indxLog = backendLog.Logger("INDX")
@@ -69,6 +70,7 @@ var (
 	srvrLog = backendLog.Logger("SRVR")
 	syncLog = backendLog.Logger("SYNC")
 	txmpLog = backendLog.Logger("TXMP")
+	v2trLog = backendLog.Logger(v2transport.Subsystem)
 )
 
 // Initialize package-global logger variables.
@@ -84,25 +86,27 @@ func init() {
 	txscript.UseLogger(scrpLog)
 	netsync.UseLogger(syncLog)
 	mempool.UseLogger(txmpLog)
+	v2transport.UseLogger(v2trLog)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
 var subsystemLoggers = map[string]btclog.Logger{
-	"ADXR": adxrLog,
-	"AMGR": amgrLog,
-	"CMGR": cmgrLog,
-	"BCDB": bcdbLog,
-	"BTCD": btcdLog,
-	"CHAN": chanLog,
-	"DISC": discLog,
-	"INDX": indxLog,
-	"MINR": minrLog,
-	"PEER": peerLog,
-	"RPCS": rpcsLog,
-	"SCRP": scrpLog,
-	"SRVR": srvrLog,
-	"SYNC": syncLog,
-	"TXMP": txmpLog,
+	"ADXR":                adxrLog,
+	"AMGR":                amgrLog,
+	"CMGR":                cmgrLog,
+	"BCDB":                bcdbLog,
+	"PRLD":                prldLog,
+	"CHAN":                chanLog,
+	"DISC":                discLog,
+	"INDX":                indxLog,
+	"MINR":                minrLog,
+	"PEER":                peerLog,
+	"RPCS":                rpcsLog,
+	"SCRP":                scrpLog,
+	"SRVR":                srvrLog,
+	"SYNC":                syncLog,
+	"TXMP":                txmpLog,
+	v2transport.Subsystem: v2trLog,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

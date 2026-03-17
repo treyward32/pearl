@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -14,24 +14,32 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"runtime"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/blockchain/internal/testhelper"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/blockchain/internal/testhelper"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
+
+func newHashFromStr(hexStr string) *chainhash.Hash {
+	hash, err := chainhash.NewHashFromStr(hexStr)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}
 
 const (
 	// Intentionally defined here rather than using constants from codebase
 	// to ensure consensus changes are detected.
 	maxBlockSigOps       = 20000
-	maxBlockSize         = 1000000
+	maxBlockVsize        = 1000000 // Consensus limit is vsize, not raw size
 	minCoinbaseScriptLen = 2
 	maxCoinbaseScriptLen = 100
 	medianTimeBlocks     = 11
@@ -270,6 +278,83 @@ func additionalSpendFee(fee btcutil.Amount) func(*wire.MsgBlock) {
 	}
 }
 
+// testTxBuilder is a builder for creating test transactions with proper fee handling.
+type testTxBuilder struct {
+	tx         *wire.MsgTx
+	inputValue int64
+	fee        btcutil.Amount
+}
+
+// newTxBuilder creates a new transaction builder from a spendable output.
+// The transaction will have one input and one primary output (index 0) initially.
+func newTxBuilder(spend *testhelper.SpendableOut) *testTxBuilder {
+	tx := wire.NewMsgTx(1)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: spend.PrevOut,
+		Sequence:         wire.MaxTxInSequenceNum,
+	})
+	// Add primary output with placeholder value
+	tx.AddTxOut(&wire.TxOut{Value: 0, PkScript: testhelper.TestP2TRScript})
+
+	return &testTxBuilder{
+		tx:         tx,
+		inputValue: int64(spend.Amount),
+		fee:        testhelper.LowFee,
+	}
+}
+
+// newTxBuilderFromTx creates a new transaction builder from a previous transaction output.
+func newTxBuilderFromTx(prevTx *wire.MsgTx, outIdx uint32) *testTxBuilder {
+	spend := testhelper.MakeSpendableOutForTx(prevTx, outIdx)
+	return newTxBuilder(&spend)
+}
+
+// WithFee sets a custom fee for the transaction.
+func (b *testTxBuilder) WithFee(fee btcutil.Amount) *testTxBuilder {
+	b.fee = fee
+	return b
+}
+
+// WithPkScript sets the public key script for the primary output.
+func (b *testTxBuilder) WithPkScript(script []byte) *testTxBuilder {
+	b.tx.TxOut[0].PkScript = script
+	return b
+}
+
+// WithSignatureScript sets the signature script for the primary input.
+func (b *testTxBuilder) WithSignatureScript(script []byte) *testTxBuilder {
+	b.tx.TxIn[0].SignatureScript = script
+	return b
+}
+
+// AddOutput adds an additional output to the transaction.
+func (b *testTxBuilder) AddOutput(value int64, script []byte) *testTxBuilder {
+	b.tx.AddTxOut(wire.NewTxOut(value, script))
+	return b
+}
+
+// AddOpReturnOutput adds a unique OP_RETURN output for transaction uniqueness.
+func (b *testTxBuilder) AddOpReturnOutput() *testTxBuilder {
+	opRet, _ := testhelper.UniqueOpReturnScript()
+	return b.AddOutput(0, opRet)
+}
+
+// Build finalizes the transaction by calculating fees and setting the primary output value.
+// This method should be called after all modifications are complete.
+func (b *testTxBuilder) Build() *wire.MsgTx {
+	var otherOutputs int64
+	for i := 1; i < len(b.tx.TxOut); i++ {
+		otherOutputs += b.tx.TxOut[i].Value
+	}
+
+	primaryValue := b.inputValue - int64(b.fee) - otherOutputs
+	if primaryValue < 0 {
+		primaryValue = 1
+	}
+	b.tx.TxOut[0].Value = primaryValue
+	return b.tx
+}
+
 // replaceSpendScript returns a function that itself takes a block and modifies
 // it by replacing the public key script of the spending transaction.
 func replaceSpendScript(pkScript []byte) func(*wire.MsgBlock) {
@@ -294,24 +379,112 @@ func additionalTx(tx *wire.MsgTx) func(*wire.MsgBlock) {
 	}
 }
 
+// createSpendTx creates a transaction that spends from the given spendable output
+// with a fee of 1 atom (default). The input is left unsigned; nextBlock's
+// signBlockTransactions pass signs it after mungers finalize the outputs.
+func createSpendTx(spend *testhelper.SpendableOut) *wire.MsgTx {
+	return newTxBuilder(spend).
+		AddOpReturnOutput().
+		Build()
+}
+
 // createSpendTxForTx creates a transaction that spends from the first output of
-// the provided transaction and includes an additional unique OP_RETURN output
-// to ensure the transaction ends up with a unique hash.  The public key script
-// is a simple OP_TRUE script which avoids the need to track addresses and
-// signature scripts in the tests.  The signature script is nil.
-func createSpendTxForTx(tx *wire.MsgTx, fee btcutil.Amount) *wire.MsgTx {
-	spend := testhelper.MakeSpendableOutForTx(tx, 0)
-	return testhelper.CreateSpendTx(&spend, fee)
+// the provided transaction with a fee of 1 atom (default). The input is left
+// unsigned; nextBlock's signBlockTransactions pass signs it.
+func createSpendTxForTx(tx *wire.MsgTx) *wire.MsgTx {
+	return newTxBuilderFromTx(tx, 0).
+		AddOpReturnOutput().
+		Build()
+}
+
+// signBlockTransactions signs all non-coinbase transaction inputs that spend
+// TestP2TRScript (P2TR) outputs. It resolves UTXO details by searching the
+// current block and previously generated blocks. Inputs that already have
+// witness data or that spend non-TestP2TRScript outputs are skipped.
+func (g *testGenerator) signBlockTransactions(block *wire.MsgBlock) {
+	for txIdx := 1; txIdx < len(block.Transactions); txIdx++ {
+		tx := block.Transactions[txIdx]
+		for i, txIn := range tx.TxIn {
+			if len(txIn.Witness) > 0 {
+				continue
+			}
+			pkScript, value := g.findOutput(block, txIn.PreviousOutPoint)
+			if pkScript == nil || !bytes.Equal(pkScript, testhelper.TestP2TRScript) {
+				continue
+			}
+			testhelper.SignTaprootInput(tx, i, btcutil.Amount(value), pkScript)
+		}
+	}
+}
+
+// updateWitnessCommitment strips any existing witness commitment from the
+// coinbase, then adds a fresh one if any non-coinbase transaction has witness
+// data. Returns true if a commitment was added.
+func updateWitnessCommitment(block *wire.MsgBlock) bool {
+	if len(block.Transactions) <= 1 {
+		return false
+	}
+	hasWitness := false
+	for _, tx := range block.Transactions[1:] {
+		if tx.HasWitness() {
+			hasWitness = true
+			break
+		}
+	}
+	if !hasWitness {
+		return false
+	}
+
+	// Strip existing commitment if present.
+	cb := block.Transactions[0]
+	for i := len(cb.TxOut) - 1; i >= 0; i-- {
+		if bytes.HasPrefix(cb.TxOut[i].PkScript, blockchain.WitnessMagicBytes) {
+			cb.TxOut = append(cb.TxOut[:i], cb.TxOut[i+1:]...)
+			break
+		}
+	}
+	cb.TxIn[0].Witness = nil
+
+	utilTxns := make([]*btcutil.Tx, len(block.Transactions))
+	for i, tx := range block.Transactions {
+		utilTxns[i] = btcutil.NewTx(tx)
+	}
+	mining.AddWitnessCommitment(utilTxns[0], utilTxns)
+	return true
+}
+
+// findOutput looks up a transaction output by outpoint, searching the current
+// block first, then previously generated blocks.
+func (g *testGenerator) findOutput(block *wire.MsgBlock, op wire.OutPoint) ([]byte, int64) {
+	for _, tx := range block.Transactions {
+		if tx.TxHash() == op.Hash {
+			if int(op.Index) < len(tx.TxOut) {
+				return tx.TxOut[op.Index].PkScript, tx.TxOut[op.Index].Value
+			}
+			return nil, 0
+		}
+	}
+	for _, b := range g.blocks {
+		for _, tx := range b.Transactions {
+			if tx.TxHash() == op.Hash {
+				if int(op.Index) < len(tx.TxOut) {
+					return tx.TxOut[op.Index].PkScript, tx.TxOut[op.Index].Value
+				}
+				return nil, 0
+			}
+		}
+	}
+	return nil, 0
 }
 
 // nextBlock builds a new block that extends the current tip associated with the
 // generator and updates the generator's tip to the newly generated block.
 //
 // The block will include the following:
-// - A coinbase that pays the required subsidy to an OP_TRUE script
+// - A coinbase that pays the required subsidy to a P2TR (TestP2TRScript) output
 // - When a spendable output is provided:
 //   - A transaction that spends from the provided output the following outputs:
-//   - One that pays the inputs amount minus 1 atom to an OP_TRUE script
+//   - One that pays the inputs amount minus 1 atom to a P2TR output
 //   - One that contains an OP_RETURN output with a random uint64 in order to
 //     ensure the transaction has a unique hash
 //
@@ -319,10 +492,11 @@ func createSpendTxForTx(tx *wire.MsgTx, fee btcutil.Amount) *wire.MsgTx {
 // invoked with the block prior to solving it.  This provides callers with the
 // opportunity to modify the block which is especially useful for testing.
 //
-// In order to simply the logic in the munge functions, the following rules are
-// applied after all munge functions have been invoked:
+// After all munge functions have been invoked:
 // - The merkle root will be recalculated unless it was manually changed
-// - The block will be solved unless the nonce was changed
+// - All inputs spending P2TR (TestP2TRScript) outputs are signed with Taproot
+// - A witness commitment is added to the coinbase if any tx has witness data
+// - The block certificate is generated unless a munger already set one
 func (g *testGenerator) nextBlock(blockName string, spend *testhelper.SpendableOut, mungers ...func(*wire.MsgBlock)) *wire.MsgBlock {
 	// Create coinbase transaction for the block using any additional
 	// subsidy if specified.
@@ -335,13 +509,7 @@ func (g *testGenerator) nextBlock(blockName string, spend *testhelper.SpendableO
 		fee := btcutil.Amount(1)
 		coinbaseTx.TxOut[0].Value += int64(fee)
 
-		// Create a transaction that spends from the provided spendable
-		// output and includes an additional unique OP_RETURN output to
-		// ensure the transaction ends up with a unique hash, then add
-		// add it to the list of transactions to include in the block.
-		// The script is a simple OP_TRUE script in order to avoid the
-		// need to track addresses and signature scripts in the tests.
-		txns = append(txns, testhelper.CreateSpendTx(spend, fee))
+		txns = append(txns, createSpendTx(spend))
 	}
 
 	// Use a timestamp that is one second after the previous block unless
@@ -350,37 +518,45 @@ func (g *testGenerator) nextBlock(blockName string, spend *testhelper.SpendableO
 	if nextHeight == 1 {
 		ts = time.Unix(time.Now().Unix(), 0)
 	} else {
-		ts = g.tip.Header.Timestamp.Add(time.Second)
+		ts = g.tip.BlockHeader().Timestamp.Add(time.Second)
 	}
 
 	block := wire.MsgBlock{
-		Header: wire.BlockHeader{
+		MsgHeader: wire.MsgHeader{BlockHeader: wire.BlockHeader{
 			Version:    1,
 			PrevBlock:  g.tip.BlockHash(),
 			MerkleRoot: calcMerkleRoot(txns),
 			Bits:       g.params.PowLimitBits,
 			Timestamp:  ts,
-			Nonce:      0, // To be solved.
-		},
+		}},
 		Transactions: txns,
 	}
 
-	// Perform any block munging just before solving.  Only recalculate the
-	// merkle root if it wasn't manually changed by a munge function.
-	curMerkleRoot := block.Header.MerkleRoot
-	curNonce := block.Header.Nonce
+	// Apply mungers, then recalculate the merkle root unless a munger
+	// intentionally set a specific value (e.g. to test invalid merkle root).
+	curMerkleRoot := block.BlockHeader().MerkleRoot
 	for _, f := range mungers {
 		f(&block)
 	}
-	if block.Header.MerkleRoot == curMerkleRoot {
-		block.Header.MerkleRoot = calcMerkleRoot(block.Transactions)
+	merkleManuallyChanged := block.BlockHeader().MerkleRoot != curMerkleRoot
+	if !merkleManuallyChanged {
+		block.BlockHeader().MerkleRoot = calcMerkleRoot(block.Transactions)
 	}
 
-	// Only solve the block if the nonce wasn't manually changed by a munge
-	// function.
-	if block.Header.Nonce == curNonce && !testhelper.SolveBlock(&block.Header) {
-		panic(fmt.Sprintf("Unable to solve block at height %d",
-			nextHeight))
+	// Sign all non-coinbase inputs that spend P2TR outputs, add witness
+	// commitment, and recalculate the merkle root if it was touched.
+	g.signBlockTransactions(&block)
+	if updateWitnessCommitment(&block) && !merkleManuallyChanged {
+		block.BlockHeader().MerkleRoot = calcMerkleRoot(block.Transactions)
+	}
+
+	// Attach a certificate unless the munger already set one.
+	if block.BlockCertificate() == nil {
+		cert, err := blockchain.SolveBlock(block.BlockHeader(), g.params.Net)
+		if err != nil {
+			panic(fmt.Sprintf("failed to solve block %q: %v", blockName, err))
+		}
+		block.MsgHeader.MsgCertificate = wire.MsgCertificate{Certificate: cert}
 	}
 
 	// Update generator state and return the block.
@@ -452,7 +628,7 @@ func (g *testGenerator) saveSpendableCoinbaseOuts() {
 	// reaching the block that has already had the coinbase outputs
 	// collected.
 	var collectBlocks []*wire.MsgBlock
-	for b := g.tip; b != nil; b = g.blocks[b.Header.PrevBlock] {
+	for b := g.tip; b != nil; b = g.blocks[b.BlockHeader().PrevBlock] {
 		if b.BlockHash() == g.prevCollectedHash {
 			break
 		}
@@ -480,10 +656,13 @@ func nonCanonicalVarInt(val uint32) []byte {
 // encoding.
 func encodeNonCanonicalBlock(b *wire.MsgBlock) []byte {
 	var buf bytes.Buffer
-	b.Header.BtcEncode(&buf, 0, wire.BaseEncoding)
+	// Encode certificate first (certificate-first architecture)
+	b.MsgHeader.MsgCertificate.PrlEncode(&buf, 0)
+	// Then encode header
+	b.BlockHeader().PrlEncode(&buf, 0, wire.BaseEncoding)
 	buf.Write(nonCanonicalVarInt(uint32(len(b.Transactions))))
 	for _, tx := range b.Transactions {
-		tx.BtcEncode(&buf, 0, wire.BaseEncoding)
+		tx.PrlEncode(&buf, 0, wire.BaseEncoding)
 	}
 	return buf.Bytes()
 }
@@ -491,7 +670,7 @@ func encodeNonCanonicalBlock(b *wire.MsgBlock) []byte {
 // cloneBlock returns a deep copy of the provided block.
 func cloneBlock(b *wire.MsgBlock) wire.MsgBlock {
 	var blockCopy wire.MsgBlock
-	blockCopy.Header = b.Header
+	blockCopy.MsgHeader = b.MsgHeader
 	for _, tx := range b.Transactions {
 		blockCopy.AddTransaction(tx.Copy())
 	}
@@ -504,55 +683,84 @@ func repeatOpcode(opcode uint8, numRepeats int) []byte {
 	return bytes.Repeat([]byte{opcode}, numRepeats)
 }
 
-// assertScriptSigOpsCount panics if the provided script does not have the
-// specified number of signature operations.
-func assertScriptSigOpsCount(script []byte, expected int) {
-	numSigOps := txscript.GetSigOpCount(script)
-	if numSigOps != expected {
-		_, file, line, _ := runtime.Caller(1)
-		panic(fmt.Sprintf("assertion failed at %s:%d: generated number "+
-			"of sigops for script is %d instead of expected %d",
-			file, line, numSigOps, expected))
-	}
+// opReturnScript prepends OP_RETURN to the provided data.
+func opReturnScript(data []byte) []byte {
+	return append([]byte{txscript.OP_RETURN}, data...)
 }
 
-// countBlockSigOps returns the number of legacy signature operations in the
-// scripts in the passed block.
-func countBlockSigOps(block *wire.MsgBlock) int {
-	totalSigOps := 0
-	for _, tx := range block.Transactions {
+// padBlockToVsize replaces tx[1]'s TxOut[0] PkScript with an OP_RETURN
+// padding script sized so the block hits exactly targetVsize, then
+// re-signs, recomputes the witness commitment, recalculates the merkle
+// root, and re-solves the block.
+func (g *testGenerator) padBlockToVsize(b *wire.MsgBlock, targetVsize int) {
+	currentVsize := int(blockchain.GetBlockVsize(btcutil.NewBlock(b)))
+	currentScript := b.Transactions[1].TxOut[0].PkScript
+	currentScriptLen := len(currentScript)
+	currentVarIntLen := wire.VarIntSerializeSize(uint64(currentScriptLen))
+
+	needed := targetVsize - currentVsize
+	newScriptLen := currentScriptLen + needed
+	if newScriptLen < 2 {
+		newScriptLen = 2
+	}
+	newVarIntLen := wire.VarIntSerializeSize(uint64(newScriptLen))
+	newScriptLen += (currentVarIntLen - newVarIntLen)
+
+	b.Transactions[1].TxOut[0].PkScript = opReturnScript(
+		repeatOpcode(0x00, newScriptLen-1),
+	)
+
+	// Clear existing witnesses so signBlockTransactions re-signs
+	// (Taproot sighash commits to outputs, which changed).
+	for _, tx := range b.Transactions[1:] {
 		for _, txIn := range tx.TxIn {
-			numSigOps := txscript.GetSigOpCount(txIn.SignatureScript)
-			totalSigOps += numSigOps
-		}
-		for _, txOut := range tx.TxOut {
-			numSigOps := txscript.GetSigOpCount(txOut.PkScript)
-			totalSigOps += numSigOps
+			txIn.Witness = nil
 		}
 	}
+	g.signBlockTransactions(b)
+	updateWitnessCommitment(b)
 
-	return totalSigOps
+	b.BlockHeader().MerkleRoot = calcMerkleRoot(b.Transactions)
+	cert, _ := blockchain.SolveBlock(b.BlockHeader(), g.params.Net)
+	b.MsgHeader.MsgCertificate = wire.MsgCertificate{Certificate: cert}
 }
 
-// assertTipBlockSigOpsCount panics if the current tip block associated with the
-// generator does not have the specified number of signature operations.
-func (g *testGenerator) assertTipBlockSigOpsCount(expected int) {
-	numSigOps := countBlockSigOps(g.tip)
-	if numSigOps != expected {
-		panic(fmt.Sprintf("generated number of sigops for block %q "+
-			"(height %d) is %d instead of expected %d", g.tipName,
-			g.tipHeight, numSigOps, expected))
+// createNonTaprootOutput creates a munger that replaces tx[1]'s output with
+// a bare <pubkey> OP_CHECKSIG script (non-P2TR). Blocks using this munger
+// are expected to be rejected with ErrScriptMalformed.
+func createNonTaprootOutput() func(*wire.MsgBlock) {
+	return func(b *wire.MsgBlock) {
+		pubKeyBytes := bytes.Repeat([]byte{0x02}, 33) // Valid-looking but fake pubkey
+		scriptBuilder := txscript.NewScriptBuilder()
+		scriptBuilder.AddData(pubKeyBytes)
+		scriptBuilder.AddOp(txscript.OP_CHECKSIG)
+		checkSigScript, _ := scriptBuilder.Script()
+
+		// Use replaceSpendScript to rebuild tx[1] with proper fees
+		replaceSpendScript(checkSigScript)(b)
+
+		// Now create a spending transaction with an invalid signature
+		tx1Out := testhelper.MakeSpendableOutForTx(b.Transactions[1], 0)
+		invalidSig := bytes.Repeat([]byte{0x30}, 71) // Invalid DER signature
+
+		spendTx := newTxBuilder(&tx1Out).
+			WithSignatureScript(pushDataScript(invalidSig)).
+			AddOpReturnOutput().
+			Build()
+
+		b.AddTransaction(spendTx)
 	}
 }
 
-// assertTipBlockSize panics if the if the current tip block associated with the
-// generator does not have the specified size when serialized.
-func (g *testGenerator) assertTipBlockSize(expected int) {
-	serializeSize := g.tip.SerializeSize()
-	if serializeSize != expected {
-		panic(fmt.Sprintf("block size of block %q (height %d) is %d "+
+// assertTipVsize panics if the current tip block's vsize does not match the expected size.
+// Vsize is the consensus-enforced limit (SerializeSizeStripped + ceil(WitnessSize/4)).
+func (g *testGenerator) assertTipVsize(expected int) {
+	block := btcutil.NewBlock(g.tip)
+	vsize := blockchain.GetBlockVsize(block)
+	if int(vsize) != expected {
+		panic(fmt.Sprintf("block vsize of block %q (height %d) is %d "+
 			"instead of expected %d", g.tipName, g.tipHeight,
-			serializeSize, expected))
+			vsize, expected))
 	}
 }
 
@@ -593,7 +801,7 @@ func (g *testGenerator) assertTipBlockHash(expected chainhash.Hash) {
 // assertTipBlockMerkleRoot panics if the merkle root in header of the current
 // tip block associated with the generator does not match the specified hash.
 func (g *testGenerator) assertTipBlockMerkleRoot(expected chainhash.Hash) {
-	hash := g.tip.Header.MerkleRoot
+	hash := g.tip.BlockHeader().MerkleRoot
 	if hash != expected {
 		panic(fmt.Sprintf("merkle root of block %q (height %d) is %v "+
 			"instead of expected %v", g.tipName, g.tipHeight, hash,
@@ -626,6 +834,7 @@ func (g *testGenerator) assertTipBlockTxOutOpReturn(txIndex, txOutIndex uint32) 
 	}
 }
 
+// TODO Or: update fixture to test more validation paths and edge cases
 // Generate returns a slice of tests that can be used to exercise the consensus
 // validation rules.  The tests are intended to be flexible enough to allow both
 // unit-style tests directly against the blockchain code as well as integration
@@ -656,7 +865,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 
 	// Create a test generator instance initialized with the genesis block
 	// as the tip.
-	g, err := makeTestGenerator(regressionNetParams)
+	g, err := makeTestGenerator(&chaincfg.SimNetParams)
 	if err != nil {
 		return nil, err
 	}
@@ -900,26 +1109,23 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	// Checksig signature operation count tests.
 	// ---------------------------------------------------------------------
 
-	// Add a block with max allowed signature operations using OP_CHECKSIG.
+	// Add a block with max allowed signature operations using OP_CHECKSIG
+	// wrapped in OP_RETURN (only P2TR/NullData outputs are valid).
 	//
 	//   ... -> b5(2) -> b12(3) -> b13(4) -> b15(5)
 	//   \-> b3(1) -> b4(2)
 	g.setTip("b13")
-	manySigOps := repeatOpcode(txscript.OP_CHECKSIG, maxBlockSigOps)
+	manySigOps := opReturnScript(repeatOpcode(txscript.OP_CHECKSIG, maxBlockSigOps))
 	g.nextBlock("b15", outs[5], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
 	accepted()
 
-	// Attempt to add block with more than max allowed signature operations
-	// using OP_CHECKSIG.
+	// Attempt to add block with a non-Taproot output script.
 	//
 	//   ... -> b5(2) -> b12(3) -> b13(4) -> b15(5)
 	//   \                                         \-> b16(7)
 	//    \-> b3(1) -> b4(2)
-	tooManySigOps := repeatOpcode(txscript.OP_CHECKSIG, maxBlockSigOps+1)
-	g.nextBlock("b16", outs[6], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b16", outs[6], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
 	// ---------------------------------------------------------------------
 	// Cross-fork spend tests.
@@ -977,12 +1183,9 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//
 	//   ... -> b15(5) -> b23(6)
 	g.setTip("b15")
-	g.nextBlock("b23", outs[6], func(b *wire.MsgBlock) {
-		bytesToMaxSize := maxBlockSize - b.SerializeSize() - 3
-		sizePadScript := repeatOpcode(0x00, bytesToMaxSize)
-		replaceSpendScript(sizePadScript)(b)
-	})
-	g.assertTipBlockSize(maxBlockSize)
+	b23 := g.nextBlock("b23", outs[6])
+	g.padBlockToVsize(b23, maxBlockVsize)
+	g.assertTipVsize(maxBlockVsize)
 	accepted()
 
 	// Create block that is the one byte larger than max allowed size.  This
@@ -991,12 +1194,9 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b15(5) -> b23(6)
 	//                \-> b24(6) -> b25(7)
 	g.setTip("b15")
-	g.nextBlock("b24", outs[6], func(b *wire.MsgBlock) {
-		bytesToMaxSize := maxBlockSize - b.SerializeSize() - 3
-		sizePadScript := repeatOpcode(0x00, bytesToMaxSize+1)
-		replaceSpendScript(sizePadScript)(b)
-	})
-	g.assertTipBlockSize(maxBlockSize + 1)
+	b24 := g.nextBlock("b24", outs[6])
+	g.padBlockToVsize(b24, maxBlockVsize+1)
+	g.assertTipVsize(maxBlockVsize + 1)
 	rejected(blockchain.ErrBlockTooBig)
 
 	// Parent was rejected, so this block must either be an orphan or
@@ -1031,7 +1231,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b15(5) -> b23(6)
 	//                \-> b28(6) -> b29(7)
 	g.setTip("b15")
-	tooLargeCbScript := repeatOpcode(0x00, maxCoinbaseScriptLen+1)
+	heightPrefix := []byte{1, byte(g.tipHeight + 1)} // Length = 1, Height = g.tipHeight + 1
+	tooLargeCbScript := append(heightPrefix, repeatOpcode(0x00, maxCoinbaseScriptLen-len(heightPrefix)+1)...)
 	g.nextBlock("b28", outs[6], replaceCoinbaseSigScript(tooLargeCbScript))
 	rejected(blockchain.ErrBadCoinbaseScriptLen)
 
@@ -1044,7 +1245,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//
 	//   ... -> b23(6) -> b30(7)
 	g.setTip("b23")
-	maxSizeCbScript := repeatOpcode(0x00, maxCoinbaseScriptLen)
+	heightPrefix = []byte{1, byte(g.tipHeight + 1)} // Length = 1, Height = g.tipHeight + 1
+	maxSizeCbScript := append(heightPrefix, repeatOpcode(0x00, maxCoinbaseScriptLen-len(heightPrefix))...)
 	g.nextBlock("b30", outs[7], replaceCoinbaseSigScript(maxSizeCbScript))
 	accepted()
 
@@ -1052,70 +1254,49 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	// Multisig[Verify]/ChecksigVerify signature operation count tests.
 	// ---------------------------------------------------------------------
 
-	// Create block with max signature operations as OP_CHECKMULTISIG.
+	// Create block with OP_CHECKMULTISIG opcodes wrapped in OP_RETURN.
 	//
 	//   ... -> b30(7) -> b31(8)
-	//
-	// OP_CHECKMULTISIG counts for 20 sigops.
-	manySigOps = repeatOpcode(txscript.OP_CHECKMULTISIG, maxBlockSigOps/20)
+	manySigOps = opReturnScript(repeatOpcode(txscript.OP_CHECKMULTISIG, maxBlockSigOps/20))
 	g.nextBlock("b31", outs[8], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
 	accepted()
 
-	// Create block with more than max allowed signature operations using
-	// OP_CHECKMULTISIG.
+	// Attempt to add block with a non-Taproot output script.
 	//
 	//   ... -> b31(8)
 	//                \-> b32(9)
-	//
-	// OP_CHECKMULTISIG counts for 20 sigops.
-	tooManySigOps = repeatOpcode(txscript.OP_CHECKMULTISIG, maxBlockSigOps/20)
-	tooManySigOps = append(manySigOps, txscript.OP_CHECKSIG)
-	g.nextBlock("b32", outs[9], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b32", outs[9], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
-	// Create block with max signature operations as OP_CHECKMULTISIGVERIFY.
+	// Create block with OP_CHECKMULTISIGVERIFY opcodes wrapped in OP_RETURN.
 	//
 	//   ... -> b31(8) -> b33(9)
 	g.setTip("b31")
-	manySigOps = repeatOpcode(txscript.OP_CHECKMULTISIGVERIFY, maxBlockSigOps/20)
+	manySigOps = opReturnScript(repeatOpcode(txscript.OP_CHECKMULTISIGVERIFY, maxBlockSigOps/20))
 	g.nextBlock("b33", outs[9], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
 	accepted()
 
-	// Create block with more than max allowed signature operations using
-	// OP_CHECKMULTISIGVERIFY.
+	// Attempt to add block with a non-Taproot output script.
 	//
 	//   ... -> b33(9)
 	//                \-> b34(10)
-	//
-	tooManySigOps = repeatOpcode(txscript.OP_CHECKMULTISIGVERIFY, maxBlockSigOps/20)
-	tooManySigOps = append(manySigOps, txscript.OP_CHECKSIG)
-	g.nextBlock("b34", outs[10], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b34", outs[10], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
-	// Create block with max signature operations as OP_CHECKSIGVERIFY.
+	// Create block with OP_CHECKSIGVERIFY opcodes wrapped in OP_RETURN.
 	//
 	//   ... -> b33(9) -> b35(10)
-	//
 	g.setTip("b33")
-	manySigOps = repeatOpcode(txscript.OP_CHECKSIGVERIFY, maxBlockSigOps)
+	manySigOps = opReturnScript(repeatOpcode(txscript.OP_CHECKSIGVERIFY, maxBlockSigOps))
 	g.nextBlock("b35", outs[10], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
 	accepted()
 
-	// Create block with more than max allowed signature operations using
-	// OP_CHECKSIGVERIFY.
+	// Attempt to add block with a non-Taproot output script.
 	//
 	//   ... -> b35(10)
 	//                 \-> b36(11)
-	//
-	tooManySigOps = repeatOpcode(txscript.OP_CHECKSIGVERIFY, maxBlockSigOps+1)
-	g.nextBlock("b36", outs[11], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b36", outs[11], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
 	// ---------------------------------------------------------------------
 	// Spending of tx outputs in block that failed to connect tests.
@@ -1129,8 +1310,10 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//                 \-> b38(b37.tx[1])
 	//
 	g.setTip("b35")
-	doubleSpendTx := testhelper.CreateSpendTx(outs[11], testhelper.LowFee)
-	g.nextBlock("b37", outs[11], additionalTx(doubleSpendTx))
+	g.nextBlock("b37", outs[11], func(b *wire.MsgBlock) {
+		doubleSpendTx := createSpendTx(outs[11])
+		b.AddTransaction(doubleSpendTx)
+	})
 	b37Tx1Out := testhelper.MakeSpendableOut(g.tip, 1, 0)
 	rejected(blockchain.ErrMissingTxOut)
 
@@ -1139,109 +1322,23 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	rejected(blockchain.ErrMissingTxOut)
 
 	// ---------------------------------------------------------------------
-	// Pay-to-script-hash signature operation count tests.
+	// Taproot script validation tests.
 	// ---------------------------------------------------------------------
-
-	// Create a pay-to-script-hash redeem script that consists of 9
-	// signature operations to be used in the next three blocks.
-	const redeemScriptSigOps = 9
-	redeemScript := pushDataScript(g.privKey.PubKey().SerializeCompressed())
-	redeemScript = append(redeemScript, bytes.Repeat([]byte{txscript.OP_2DUP,
-		txscript.OP_CHECKSIGVERIFY}, redeemScriptSigOps-1)...)
-	redeemScript = append(redeemScript, txscript.OP_CHECKSIG)
-	assertScriptSigOpsCount(redeemScript, redeemScriptSigOps)
-
-	// Create a block that has enough pay-to-script-hash outputs such that
-	// another block can be created that consumes them all and exceeds the
-	// max allowed signature operations per block.
 	//
 	//   ... -> b35(10) -> b39(11)
 	g.setTip("b35")
-	b39 := g.nextBlock("b39", outs[11], func(b *wire.MsgBlock) {
-		// Create a chain of transactions each spending from the
-		// previous one such that each contains an output that pays to
-		// the redeem script and the total number of signature
-		// operations in those redeem scripts will be more than the
-		// max allowed per block.
-		p2shScript := payToScriptHashScript(redeemScript)
-		txnsNeeded := (maxBlockSigOps / redeemScriptSigOps) + 1
-		prevTx := b.Transactions[1]
-		for i := 0; i < txnsNeeded; i++ {
-			prevTx = createSpendTxForTx(prevTx, testhelper.LowFee)
-			prevTx.TxOut[0].Value -= 2
-			prevTx.AddTxOut(wire.NewTxOut(2, p2shScript))
-			b.AddTransaction(prevTx)
-		}
-	})
-	g.assertTipBlockNumTxns((maxBlockSigOps / redeemScriptSigOps) + 3)
+	g.nextBlock("b39", outs[11])
 	accepted()
 
-	// Create a block with more than max allowed signature operations where
-	// the majority of them are in pay-to-script-hash scripts.
-	//
 	//   ... -> b35(10) -> b39(11)
 	//                            \-> b40(12)
 	g.setTip("b39")
-	g.nextBlock("b40", outs[12], func(b *wire.MsgBlock) {
-		txnsNeeded := (maxBlockSigOps / redeemScriptSigOps)
-		for i := 0; i < txnsNeeded; i++ {
-			// Create a signed transaction that spends from the
-			// associated p2sh output in b39.
-			spend := testhelper.MakeSpendableOutForTx(b39.Transactions[i+2], 2)
-			tx := testhelper.CreateSpendTx(&spend, testhelper.LowFee)
-			sig, err := txscript.RawTxInSignature(tx, 0,
-				redeemScript, txscript.SigHashAll, g.privKey)
-			if err != nil {
-				panic(err)
-			}
-			tx.TxIn[0].SignatureScript = pushDataScript(sig,
-				redeemScript)
-			b.AddTransaction(tx)
-		}
+	g.nextBlock("b40", outs[12], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
-		// Create a final tx that includes a non-pay-to-script-hash
-		// output with the number of signature operations needed to push
-		// the block one over the max allowed.
-		fill := maxBlockSigOps - (txnsNeeded * redeemScriptSigOps) + 1
-		finalTx := b.Transactions[len(b.Transactions)-1]
-		tx := createSpendTxForTx(finalTx, testhelper.LowFee)
-		tx.TxOut[0].PkScript = repeatOpcode(txscript.OP_CHECKSIG, fill)
-		b.AddTransaction(tx)
-	})
-	rejected(blockchain.ErrTooManySigOps)
-
-	// Create a block with the max allowed signature operations where the
-	// majority of them are in pay-to-script-hash scripts.
-	//
 	//   ... -> b35(10) -> b39(11) -> b41(12)
 	g.setTip("b39")
-	g.nextBlock("b41", outs[12], func(b *wire.MsgBlock) {
-		txnsNeeded := (maxBlockSigOps / redeemScriptSigOps)
-		for i := 0; i < txnsNeeded; i++ {
-			spend := testhelper.MakeSpendableOutForTx(b39.Transactions[i+2], 2)
-			tx := testhelper.CreateSpendTx(&spend, testhelper.LowFee)
-			sig, err := txscript.RawTxInSignature(tx, 0,
-				redeemScript, txscript.SigHashAll, g.privKey)
-			if err != nil {
-				panic(err)
-			}
-			tx.TxIn[0].SignatureScript = pushDataScript(sig,
-				redeemScript)
-			b.AddTransaction(tx)
-		}
-
-		// Create a final tx that includes a non-pay-to-script-hash
-		// output with the number of signature operations needed to push
-		// the block to exactly the max allowed.
-		fill := maxBlockSigOps - (txnsNeeded * redeemScriptSigOps)
-		if fill == 0 {
-			return
-		}
-		finalTx := b.Transactions[len(b.Transactions)-1]
-		tx := createSpendTxForTx(finalTx, testhelper.LowFee)
-		tx.TxOut[0].PkScript = repeatOpcode(txscript.OP_CHECKSIG, fill)
-		b.AddTransaction(tx)
-	})
+	g.nextBlock("b41", outs[12])
 	accepted()
 
 	// ---------------------------------------------------------------------
@@ -1268,7 +1365,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b43(13)
 	//                 \-> b44(14)
 	g.nextBlock("b44", nil, func(b *wire.MsgBlock) {
-		nonCoinbaseTx := testhelper.CreateSpendTx(outs[14], testhelper.LowFee)
+		nonCoinbaseTx := createSpendTx(outs[14])
 		b.Transactions[0] = nonCoinbaseTx
 	})
 	rejected(blockchain.ErrFirstTxNotCoinbase)
@@ -1294,19 +1391,32 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	// requires an unsolved block.
 	{
 		origHash := b46.BlockHash()
-		for {
-			// Keep incrementing the nonce until the hash treated as
-			// a uint256 is higher than the limit.
-			b46.Header.Nonce++
-			blockHash := b46.BlockHash()
-			hashNum := blockchain.HashToBig(&blockHash)
-			if hashNum.Cmp(g.params.PowLimit) >= 0 {
-				break
-			}
-		}
+		// Remove the certificate entirely - will fail validation
+		// because checkBlockSanity requires a non-nil certificate.
+		b46.MsgHeader.MsgCertificate = wire.MsgCertificate{}
 		g.updateBlockState("b46", origHash, "b46", b46)
 	}
-	rejected(blockchain.ErrHighHash)
+	rejected(blockchain.ErrCertificateMissing)
+
+	// Create block with certificate that exceeds maximum allowed size.
+	//
+	//   ... -> b43(13)
+	//                 \-> b46a(14)
+	g.setTip("b43")
+	b46a := g.nextBlock("b46a", outs[14])
+	{
+		origHash := b46a.BlockHash()
+		// Set a ZKCertificate with ProofData exceeding MaxSize
+		oversizedProof := make([]byte, wire.CertificateMaxSize+1)
+		b46a.MsgHeader.MsgCertificate = wire.MsgCertificate{
+			Certificate: &wire.ZKCertificate{
+				Hash:      b46a.BlockHash(),
+				ProofData: oversizedProof,
+			},
+		}
+		g.updateBlockState("b46a", origHash, "b46a", b46a)
+	}
+	rejected(blockchain.ErrCertificateTooLarge)
 
 	// Create block with a timestamp too far in the future.
 	//
@@ -1316,7 +1426,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.nextBlock("b47", outs[14], func(b *wire.MsgBlock) {
 		// 3 hours in the future clamped to 1 second precision.
 		nowPlus3Hours := time.Now().Add(time.Hour * 3)
-		b.Header.Timestamp = time.Unix(nowPlus3Hours.Unix(), 0)
+		b.BlockHeader().Timestamp = time.Unix(nowPlus3Hours.Unix(), 0)
 	})
 	rejected(blockchain.ErrTimeTooNew)
 
@@ -1326,7 +1436,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//                 \-> b48(14)
 	g.setTip("b43")
 	g.nextBlock("b48", outs[14], func(b *wire.MsgBlock) {
-		b.Header.MerkleRoot = chainhash.Hash{}
+		b.BlockHeader().MerkleRoot = chainhash.Hash{}
 	})
 	rejected(blockchain.ErrBadMerkleRoot)
 
@@ -1336,7 +1446,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//                 \-> b49(14)
 	g.setTip("b43")
 	g.nextBlock("b49", outs[14], func(b *wire.MsgBlock) {
-		b.Header.Bits--
+		b.BlockHeader().Bits--
 	})
 	rejected(blockchain.ErrUnexpectedDifficulty)
 
@@ -1351,7 +1461,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	// involves an unsolvable block.
 	{
 		origHash := b49a.BlockHash()
-		b49a.Header.Bits = 0x01810000 // -1 in compact form.
+		b49a.BlockHeader().Bits = 0x01810000 // -1 in compact form.
 		g.updateBlockState("b49a", origHash, "b49a", b49a)
 	}
 	rejected(blockchain.ErrUnexpectedDifficulty)
@@ -1403,32 +1513,31 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.nextBlock("b53", outs[14])
 	accepted()
 
-	// Create a block with a timestamp that is exactly the median time.  The
-	// block must be rejected.
+	// Create a block with a timestamp that is the same as the parent's
+	// timestamp. With strict monotonicity rule, this must be
+	// rejected because each block must be at least 1 second after its parent.
 	//
 	//   ... -> b33(9) -> b35(10) -> b39(11) -> b42(12) -> b43(13) -> b53(14)
 	//                                                                       \-> b54(15)
 	g.nextBlock("b54", outs[15], func(b *wire.MsgBlock) {
-		medianBlock := g.blocks[b.Header.PrevBlock]
-		for i := 0; i < medianTimeBlocks/2; i++ {
-			medianBlock = g.blocks[medianBlock.Header.PrevBlock]
-		}
-		b.Header.Timestamp = medianBlock.Header.Timestamp
+		// Set timestamp to be the same as the parent's timestamp.
+		// This violates strict monotonicity rule.
+		parent := g.blocks[b.BlockHeader().PrevBlock]
+		b.BlockHeader().Timestamp = parent.BlockHeader().Timestamp
 	})
 	rejected(blockchain.ErrTimeTooOld)
 
-	// Create a block with a timestamp that is one second after the median
-	// time.  The block must be accepted.
+	// Create a block with a timestamp that is one second after the parent's
+	// timestamp. With strict monotonicity rule, this is the minimum
+	// valid timestamp and must be accepted.
 	//
 	//   ... -> b33(9) -> b35(10) -> b39(11) -> b42(12) -> b43(13) -> b53(14) -> b55(15)
 	g.setTip("b53")
 	g.nextBlock("b55", outs[15], func(b *wire.MsgBlock) {
-		medianBlock := g.blocks[b.Header.PrevBlock]
-		for i := 0; i < medianTimeBlocks/2; i++ {
-			medianBlock = g.blocks[medianBlock.Header.PrevBlock]
-		}
-		medianBlockTime := medianBlock.Header.Timestamp
-		b.Header.Timestamp = medianBlockTime.Add(time.Second)
+		// Set timestamp to exactly 1 second after the parent's timestamp.
+		// This is the minimum valid timestamp with WTEMA's strict monotonicity.
+		parent := g.blocks[b.BlockHeader().PrevBlock]
+		b.BlockHeader().Timestamp = parent.BlockHeader().Timestamp.Add(time.Second)
 	})
 	accepted()
 
@@ -1473,7 +1582,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.setTip("b55")
 	b57 := g.nextBlock("b57", outs[16], func(b *wire.MsgBlock) {
 		tx2 := b.Transactions[1]
-		tx3 := createSpendTxForTx(tx2, testhelper.LowFee)
+		tx3 := createSpendTxForTx(tx2)
 		b.AddTransaction(tx3)
 	})
 	g.assertTipBlockNumTxns(3)
@@ -1485,7 +1594,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	})
 	g.assertTipBlockNumTxns(4)
 	g.assertTipBlockHash(b57.BlockHash())
-	g.assertTipBlockMerkleRoot(b57.Header.MerkleRoot)
+	g.assertTipBlockMerkleRoot(b57.BlockHeader().MerkleRoot)
 	rejected(blockchain.ErrDuplicateTx)
 
 	// Since the two blocks have the same hash and the generator state now
@@ -1518,7 +1627,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 		// in the block.
 		spendTx := b.Transactions[1]
 		for i := 0; i < 4; i++ {
-			spendTx = createSpendTxForTx(spendTx, testhelper.LowFee)
+			spendTx = createSpendTxForTx(spendTx)
 			b.AddTransaction(spendTx)
 		}
 
@@ -1571,10 +1680,9 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b60(17)
 	//                 \-> b61(18)
 	g.nextBlock("b61", outs[18], func(b *wire.MsgBlock) {
-		// Duplicate the coinbase of the parent block to force the
-		// condition.
-		parent := g.blocks[b.Header.PrevBlock]
-		b.Transactions[0] = parent.Transactions[0]
+		// Duplicate a transaction of the parent block to force the condition.
+		parent := g.blocks[b.BlockHeader().PrevBlock]
+		b.Transactions[1] = parent.Transactions[1]
 	})
 	rejected(blockchain.ErrOverwriteTx)
 
@@ -1625,12 +1733,12 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b60(17) -> b64(18)
 	//                 \-> b64a(18)
 	g.setTip("b60")
-	b64a := g.nextBlock("b64a", outs[18], func(b *wire.MsgBlock) {
-		bytesToMaxSize := maxBlockSize - b.SerializeSize() - 3
-		sizePadScript := repeatOpcode(0x00, bytesToMaxSize)
-		replaceSpendScript(sizePadScript)(b)
-	})
-	g.assertTipNonCanonicalBlockSize(maxBlockSize + 8)
+	b64a := g.nextBlock("b64a", outs[18])
+	g.padBlockToVsize(b64a, maxBlockVsize)
+	// Non-canonical encoding uses 9 bytes for the tx count varint instead
+	// of the canonical 1 byte, adding 8 bytes overhead. Verify the
+	// non-canonical size matches what encodeNonCanonicalBlock produces.
+	g.assertTipNonCanonicalBlockSize(len(encodeNonCanonicalBlock(b64a)))
 	rejectedNonCanonical()
 
 	g.setTip("b60")
@@ -1643,7 +1751,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.updateBlockState("b64a", b64a.BlockHash(), "b64", b64)
 	g.setTip("b64")
 	g.assertTipBlockHash(b64a.BlockHash())
-	g.assertTipBlockSize(maxBlockSize)
+	// Check consensus vsize limit
+	g.assertTipVsize(maxBlockVsize)
 	accepted()
 
 	// ---------------------------------------------------------------------
@@ -1655,7 +1764,7 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... b64(18) -> b65(19)
 	g.setTip("b64")
 	g.nextBlock("b65", outs[19], func(b *wire.MsgBlock) {
-		tx3 := createSpendTxForTx(b.Transactions[1], testhelper.LowFee)
+		tx3 := createSpendTxForTx(b.Transactions[1])
 		b.AddTransaction(tx3)
 	})
 	accepted()
@@ -1665,8 +1774,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//   ... -> b65(19)
 	//                 \-> b66(20)
 	g.nextBlock("b66", nil, func(b *wire.MsgBlock) {
-		tx2 := testhelper.CreateSpendTx(outs[20], testhelper.LowFee)
-		tx3 := createSpendTxForTx(tx2, testhelper.LowFee)
+		tx2 := createSpendTx(outs[20])
+		tx3 := createSpendTxForTx(tx2)
 		b.AddTransaction(tx3)
 		b.AddTransaction(tx2)
 	})
@@ -1680,8 +1789,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.setTip("b65")
 	g.nextBlock("b67", outs[20], func(b *wire.MsgBlock) {
 		tx2 := b.Transactions[1]
-		tx3 := createSpendTxForTx(tx2, testhelper.LowFee)
-		tx4 := createSpendTxForTx(tx2, testhelper.LowFee)
+		tx3 := createSpendTxForTx(tx2)
+		tx4 := createSpendTxForTx(tx2)
 		b.AddTransaction(tx3)
 		b.AddTransaction(tx4)
 	})
@@ -1709,105 +1818,56 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	accepted()
 
 	// ---------------------------------------------------------------------
-	// More signature operations counting tests.
-	//
-	// The next several tests ensure signature operations are counted before
-	// script elements that cause parse failure while those after are
-	// ignored and that signature operations after script elements that
-	// successfully parse even if that element will fail at run-time are
-	// counted.
+	// Non-Taproot output rejection and OP_RETURN sigops data tests.
 	// ---------------------------------------------------------------------
 
-	// Create block with more than max allowed signature operations such
-	// that the signature operation that pushes it over the limit is after
-	// a push data with a script element size that is larger than the max
-	// allowed size when executed.  The block must be rejected because the
-	// signature operation after the script element must be counted since
-	// the script parses validly.
-	//
-	// The script generated consists of the following form:
-	//
-	//  Comment assumptions:
-	//    maxBlockSigOps = 20000
-	//    maxScriptElementSize = 520
-	//
-	//  [0-19999]    : OP_CHECKSIG
-	//  [20000]      : OP_PUSHDATA4
-	//  [20001-20004]: 521 (little-endian encoded maxScriptElementSize+1)
-	//  [20005-20525]: too large script element
-	//  [20526]      : OP_CHECKSIG (goes over the limit)
+	// Attempt to add blocks with non-Taproot output scripts.
 	//
 	//   ... -> b69(20)
 	//                 \-> b70(21)
-	scriptSize := maxBlockSigOps + 5 + (maxScriptElementSize + 1) + 1
-	tooManySigOps = repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
-	tooManySigOps[maxBlockSigOps] = txscript.OP_PUSHDATA4
-	binary.LittleEndian.PutUint32(tooManySigOps[maxBlockSigOps+1:],
-		maxScriptElementSize+1)
-	g.nextBlock("b70", outs[21], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b70", outs[21], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
-	// Create block with more than max allowed signature operations such
-	// that the signature operation that pushes it over the limit is before
-	// an invalid push data that claims a large amount of data even though
-	// that much data is not provided.
-	//
 	//   ... -> b69(20)
 	//                 \-> b71(21)
 	g.setTip("b69")
-	scriptSize = maxBlockSigOps + 5 + maxScriptElementSize + 1
-	tooManySigOps = repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
-	tooManySigOps[maxBlockSigOps+1] = txscript.OP_PUSHDATA4
-	binary.LittleEndian.PutUint32(tooManySigOps[maxBlockSigOps+2:], 0xffffffff)
-	g.nextBlock("b71", outs[21], replaceSpendScript(tooManySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps + 1)
-	rejected(blockchain.ErrTooManySigOps)
+	g.nextBlock("b71", outs[21], createNonTaprootOutput())
+	rejected(blockchain.ErrScriptMalformed)
 
-	// Create block with the max allowed signature operations such that all
-	// counted signature operations are before an invalid push data that
-	// claims a large amount of data even though that much data is not
-	// provided.  The pushed data itself consists of OP_CHECKSIG so the
-	// block would be rejected if any of them were counted.
+	// Create block with sigops before an invalid push data, wrapped in
+	// OP_RETURN (only P2TR/NullData outputs are valid at consensus).
 	//
 	//   ... -> b69(20) -> b72(21)
 	g.setTip("b69")
-	scriptSize = maxBlockSigOps + 5 + maxScriptElementSize
-	manySigOps = repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
-	manySigOps[maxBlockSigOps] = txscript.OP_PUSHDATA4
-	binary.LittleEndian.PutUint32(manySigOps[maxBlockSigOps+1:], 0xffffffff)
-	g.nextBlock("b72", outs[21], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
+	scriptSize := maxBlockSigOps + 5 + maxScriptElementSize
+	sigOpsData := repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
+	sigOpsData[maxBlockSigOps] = txscript.OP_PUSHDATA4
+	binary.LittleEndian.PutUint32(sigOpsData[maxBlockSigOps+1:], 0xffffffff)
+	g.nextBlock("b72", outs[21], replaceSpendScript(opReturnScript(sigOpsData)))
 	accepted()
 
-	// Create block with the max allowed signature operations such that all
-	// counted signature operations are before an invalid push data that
-	// contains OP_CHECKSIG in the number of bytes to push.  The block would
-	// be rejected if any of them were counted.
+	// Create block with sigops before an invalid push data that contains
+	// OP_CHECKSIG in the number of bytes to push, wrapped in OP_RETURN.
 	//
 	//   ... -> b72(21) -> b73(22)
 	scriptSize = maxBlockSigOps + 5 + (maxScriptElementSize + 1)
-	manySigOps = repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
-	manySigOps[maxBlockSigOps] = txscript.OP_PUSHDATA4
-	g.nextBlock("b73", outs[22], replaceSpendScript(manySigOps))
-	g.assertTipBlockSigOpsCount(maxBlockSigOps)
+	sigOpsData = repeatOpcode(txscript.OP_CHECKSIG, scriptSize)
+	sigOpsData[maxBlockSigOps] = txscript.OP_PUSHDATA4
+	g.nextBlock("b73", outs[22], replaceSpendScript(opReturnScript(sigOpsData)))
 	accepted()
 
 	// ---------------------------------------------------------------------
 	// Dead execution path tests.
 	// ---------------------------------------------------------------------
 
-	// Create block with an invalid opcode in a dead execution path.
+	// Create block with an OP_RETURN output containing a dead execution
+	// path with an invalid opcode. Verifies blocks with such outputs
+	// are accepted (OP_RETURN data is never executed).
 	//
 	//   ... -> b73(22) -> b74(23)
-	script := []byte{txscript.OP_IF, txscript.OP_INVALIDOPCODE,
-		txscript.OP_ELSE, txscript.OP_TRUE, txscript.OP_ENDIF}
-	g.nextBlock("b74", outs[23], replaceSpendScript(script), func(b *wire.MsgBlock) {
-		tx2 := b.Transactions[1]
-		tx3 := createSpendTxForTx(tx2, testhelper.LowFee)
-		tx3.TxIn[0].SignatureScript = []byte{txscript.OP_FALSE}
-		b.AddTransaction(tx3)
-	})
+	deadPathScript := opReturnScript([]byte{txscript.OP_IF, txscript.OP_INVALIDOPCODE,
+		txscript.OP_ELSE, txscript.OP_TRUE, txscript.OP_ENDIF})
+	g.nextBlock("b74", outs[23], replaceSpendScript(deadPathScript))
 	accepted()
 
 	// ---------------------------------------------------------------------
@@ -1819,23 +1879,25 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//
 	//   ... -> b74(23) -> b75(24)
 	g.nextBlock("b75", outs[24], func(b *wire.MsgBlock) {
-		// Add 4 outputs to the spending transaction that are spent
-		// below.
+		// Rebuild the spending transaction with additional outputs
+		// These outputs will be spent by child transactions below
 		const numAdditionalOutputs = 4
-		const zeroCoin = int64(0)
-		spendTx := b.Transactions[1]
+		const coinValue = int64(100) // Enough for child transactions to pay base fee
+
+		// Rebuild transaction with multiple outputs using the builder
+		spendBuilder := newTxBuilder(outs[24])
+		spendBuilder.AddOpReturnOutput() // Add the standard OP_RETURN first
 		for i := 0; i < numAdditionalOutputs; i++ {
-			spendTx.AddTxOut(wire.NewTxOut(zeroCoin, testhelper.OpTrueScript))
+			spendBuilder.AddOutput(coinValue, testhelper.TestP2TRScript)
 		}
+		spendTx := spendBuilder.Build()
+		b.Transactions[1] = spendTx
 
 		// Add transactions spending from the outputs added above that
 		// each contain an OP_RETURN output.
-		//
-		// NOTE: The createSpendTx func adds the OP_RETURN output.
-		zeroFee := btcutil.Amount(0)
 		for i := uint32(0); i < numAdditionalOutputs; i++ {
 			spend := testhelper.MakeSpendableOut(b, 1, i+2)
-			tx := testhelper.CreateSpendTx(&spend, zeroFee)
+			tx := createSpendTx(&spend)
 			b.AddTransaction(tx)
 		}
 	})
@@ -1872,9 +1934,9 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	//                 \-> b76(24) -> b77(25)           \-> b80(b75.tx[5].out[1])
 	//
 	// An OP_RETURN output doesn't have any value and the default behavior
-	// of nextBlock is to assign a fee of one, so increment the amount here
-	// to effective negate that behavior.
-	b75OpReturnOut.Amount++
+	// creates transactions that pay base fees (~80 sats). Increment the amount
+	// to cover the base fee so we get ErrMissingTxOut (not ErrBadTxOutValue).
+	b75OpReturnOut.Amount += 80
 	g.nextBlock("b80", &b75OpReturnOut)
 	rejected(blockchain.ErrMissingTxOut)
 
@@ -1888,14 +1950,19 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	g.nextBlock("b81", outs[27], func(b *wire.MsgBlock) {
 		const numAdditionalOutputs = 4
 		const zeroCoin = int64(0)
-		spendTx := b.Transactions[1]
+
+		// Rebuild transaction with multiple OP_RETURN outputs using the builder
+		spendBuilder := newTxBuilder(outs[27])
+		spendBuilder.AddOpReturnOutput() // Add the standard OP_RETURN first
 		for i := 0; i < numAdditionalOutputs; i++ {
 			opRetScript, err := testhelper.UniqueOpReturnScript()
 			if err != nil {
 				panic(err)
 			}
-			spendTx.AddTxOut(wire.NewTxOut(zeroCoin, opRetScript))
+			spendBuilder.AddOutput(zeroCoin, opRetScript)
 		}
+		spendTx := spendBuilder.Build()
+		b.Transactions[1] = spendTx
 	})
 	for i := uint32(2); i < 6; i++ {
 		g.assertTipBlockTxOutOpReturn(1, i)
@@ -1952,6 +2019,57 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	accepted()
 
 	// ---------------------------------------------------------------------
+	// Non-Taproot script rejection tests.
+	// ---------------------------------------------------------------------
+
+	// Ensure blocks with non-Taproot output scripts are rejected as
+	// malformed. These tests verify consensus-level Taproot-only
+	// enforcement.
+
+	// Create block with a P2PKH output script.
+	//
+	//   ... -> b84()
+	//               \-> b85(29)
+	g.setTip("b84")
+	p2pkhScript := []byte{
+		txscript.OP_DUP, txscript.OP_HASH160,
+		txscript.OP_DATA_20,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		txscript.OP_EQUALVERIFY, txscript.OP_CHECKSIG,
+	}
+	g.nextBlock("b85", outs[29], replaceSpendScript(p2pkhScript))
+	rejected(blockchain.ErrScriptMalformed)
+
+	// Create block with a P2WPKH output script (segwit v0, 20-byte program).
+	//
+	//   ... -> b84()
+	//               \-> b86(29)
+	g.setTip("b84")
+	p2wpkhScript := []byte{
+		txscript.OP_0, txscript.OP_DATA_20,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	g.nextBlock("b86", outs[29], replaceSpendScript(p2wpkhScript))
+	rejected(blockchain.ErrScriptMalformed)
+
+	// Create block with a P2WSH output script (segwit v0, 32-byte program).
+	//
+	//   ... -> b84()
+	//               \-> b87(29)
+	g.setTip("b84")
+	p2wshScript := []byte{
+		txscript.OP_0, txscript.OP_DATA_32,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	g.nextBlock("b87", outs[29], replaceSpendScript(p2wshScript))
+	rejected(blockchain.ErrScriptMalformed)
+
+	// ---------------------------------------------------------------------
 	// Large block re-org test.
 	// ---------------------------------------------------------------------
 
@@ -1961,8 +2079,8 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 
 	// Ensure the tip the re-org test builds on is the best chain tip.
 	//
-	//   ... -> b84() -> ...
-	g.setTip("b84")
+	//   ... -> b92() -> ...
+	g.setTip("b92")
 
 	// Collect all of the spendable coinbase outputs from the previous
 	// collection point up to the current tip.
@@ -1978,12 +2096,9 @@ func Generate(includeLargeReorg bool) (tests [][]TestInstance, err error) {
 	chain1TipName := g.tipName
 	for i := int32(0); i < numLargeReorgBlocks; i++ {
 		chain1TipName = fmt.Sprintf("br%d", i)
-		g.nextBlock(chain1TipName, &reorgSpend, func(b *wire.MsgBlock) {
-			bytesToMaxSize := maxBlockSize - b.SerializeSize() - 3
-			sizePadScript := repeatOpcode(0x00, bytesToMaxSize)
-			replaceSpendScript(sizePadScript)(b)
-		})
-		g.assertTipBlockSize(maxBlockSize)
+		b := g.nextBlock(chain1TipName, &reorgSpend)
+		g.padBlockToVsize(b, maxBlockVsize)
+		g.assertTipVsize(maxBlockVsize)
 		g.saveTipCoinbaseOut()
 		testInstances = append(testInstances, acceptBlock(g.tipName,
 			g.tip, true, false))

@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -14,11 +14,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/database/internal/treap"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/database/internal/treap"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	ldberrors "github.com/syndtr/goleveldb/leveldb/errors"
@@ -31,11 +31,6 @@ import (
 const (
 	// metadataDbName is the name used for the metadata database.
 	metadataDbName = "metadata"
-
-	// blockHdrSize is the size of a block header.  This is simply the
-	// constant from wire and is only provided here for convenience since
-	// wire.MaxBlockHeaderPayload is quite long.
-	blockHdrSize = wire.MaxBlockHeaderPayload
 
 	// blockHdrOffset defines the offsets into a block index row for the
 	// block header.
@@ -1242,55 +1237,6 @@ func (tx *transaction) fetchBlockRow(hash *chainhash.Hash) ([]byte, error) {
 	return blockRow, nil
 }
 
-// FetchBlockHeader returns the raw serialized bytes for the block header
-// identified by the given hash.  The raw bytes are in the format returned by
-// Serialize on a wire.BlockHeader.
-//
-// Returns the following errors as required by the interface contract:
-//   - ErrBlockNotFound if the requested block hash does not exist
-//   - ErrTxClosed if the transaction has already been closed
-//   - ErrCorruption if the database has somehow become corrupted
-//
-// NOTE: The data returned by this function is only valid during a
-// database transaction.  Attempting to access it after a transaction
-// has ended results in undefined behavior.  This constraint prevents
-// additional data copies and allows support for memory-mapped database
-// implementations.
-//
-// This function is part of the database.Tx interface implementation.
-func (tx *transaction) FetchBlockHeader(hash *chainhash.Hash) ([]byte, error) {
-	return tx.FetchBlockRegion(&database.BlockRegion{
-		Hash:   hash,
-		Offset: 0,
-		Len:    blockHdrSize,
-	})
-}
-
-// FetchBlockHeaders returns the raw serialized bytes for the block headers
-// identified by the given hashes.  The raw bytes are in the format returned by
-// Serialize on a wire.BlockHeader.
-//
-// Returns the following errors as required by the interface contract:
-//   - ErrBlockNotFound if the any of the requested block hashes do not exist
-//   - ErrTxClosed if the transaction has already been closed
-//   - ErrCorruption if the database has somehow become corrupted
-//
-// NOTE: The data returned by this function is only valid during a database
-// transaction.  Attempting to access it after a transaction has ended results
-// in undefined behavior.  This constraint prevents additional data copies and
-// allows support for memory-mapped database implementations.
-//
-// This function is part of the database.Tx interface implementation.
-func (tx *transaction) FetchBlockHeaders(hashes []chainhash.Hash) ([][]byte, error) {
-	regions := make([]database.BlockRegion, len(hashes))
-	for i := range hashes {
-		regions[i].Hash = &hashes[i]
-		regions[i].Offset = 0
-		regions[i].Len = blockHdrSize
-	}
-	return tx.FetchBlockRegions(regions)
-}
-
 // FetchBlock returns the raw serialized bytes for the block identified by the
 // given hash.  The raw bytes are in the format returned by Serialize on a
 // wire.MsgBlock.
@@ -1409,7 +1355,7 @@ func (tx *transaction) fetchPendingRegion(region *database.BlockRegion) ([]byte,
 
 // FetchBlockRegion returns the raw serialized bytes for the given block region.
 //
-// For example, it is possible to directly extract Bitcoin transactions and/or
+// For example, it is possible to directly extract transactions and/or
 // scripts from a block with this function.  Depending on the backend
 // implementation, this can provide significant savings by avoiding the need to
 // load entire blocks.
@@ -1482,7 +1428,7 @@ func (tx *transaction) FetchBlockRegion(region *database.BlockRegion) ([]byte, e
 // FetchBlockRegions returns the raw serialized bytes for the given block
 // regions.
 //
-// For example, it is possible to directly extract Bitcoin transactions and/or
+// For example, it is possible to directly extract transactions and/or
 // scripts from various blocks with this function.  Depending on the backend
 // implementation, this can provide significant savings by avoiding the need to
 // load entire blocks.
@@ -2115,7 +2061,7 @@ func initDB(ldb *leveldb.DB) error {
 
 // openDB opens the database at the provided path.  database.ErrDbDoesNotExist
 // is returned if the database doesn't exist and the create flag is not set.
-func openDB(dbPath string, network wire.BitcoinNet, create bool) (database.DB, error) {
+func openDB(dbPath string, network wire.PearlNet, create bool) (database.DB, error) {
 	// Error if the database doesn't exist and the create flag is not set.
 	metadataDbPath := filepath.Join(dbPath, metadataDbName)
 	dbExists := fileExists(metadataDbPath)

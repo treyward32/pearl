@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,11 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 var (
@@ -78,7 +78,7 @@ func dbIndexConnectBlock(dbTx database.Tx, indexer Indexer, block *btcutil.Block
 	if err != nil {
 		return err
 	}
-	if !curTipHash.IsEqual(&block.MsgBlock().Header.PrevBlock) {
+	if !curTipHash.IsEqual(&block.MsgBlock().BlockHeader().PrevBlock) {
 		return AssertError(fmt.Sprintf("dbIndexConnectBlock must be "+
 			"called with a block that extends the current index "+
 			"tip (%s, tip %s, block %s)", indexer.Name(),
@@ -122,7 +122,7 @@ func dbIndexDisconnectBlock(dbTx database.Tx, indexer Indexer, block *btcutil.Bl
 	}
 
 	// Update the current index tip.
-	prevHash := &block.MsgBlock().Header.PrevBlock
+	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
 	return dbPutIndexerTip(dbTx, idxKey, prevHash, block.Height()-1)
 }
 
@@ -340,7 +340,7 @@ func (m *Manager) Init(chain *blockchain.BlockChain, interrupt <-chan struct{}) 
 				}
 
 				// Update the tip to the previous block.
-				hash = &block.MsgBlock().Header.PrevBlock
+				hash = &block.MsgBlock().BlockHeader().PrevBlock
 				height--
 
 				return nil

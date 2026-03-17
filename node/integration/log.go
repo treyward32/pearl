@@ -6,8 +6,8 @@ package integration
 import (
 	"os"
 
-	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btclog"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
 )
 
 type logWriter struct{}

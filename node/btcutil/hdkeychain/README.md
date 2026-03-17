@@ -1,11 +1,11 @@
 hdkeychain
 ==========
 
-[![Build Status](http://img.shields.io/travis/btcsuite/btcutil.svg)](https://travis-ci.org/btcsuite/btcutil)
+[![Build Status](https://github.com/pearl-research-labs/pearl/workflows/Build%20and%20Test/badge.svg)](https://github.com/pearl-research-labs/pearl/actions)
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/btcsuite/btcd/btcutil/hdkeychain)
+[![GoDoc](http://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain)
 
-Package hdkeychain provides an API for bitcoin hierarchical deterministic
+Package hdkeychain provides an API for Pearl hierarchical deterministic
 extended keys (BIP0032).
 
 A comprehensive suite of tests is provided to ensure proper functionality.  See
@@ -23,7 +23,7 @@ report.
 - Easy serialization and deserialization for both private and public extended
   keys
 - Support for custom networks by registering them with chaincfg
-- Obtaining the underlying EC pubkeys, EC privkeys, and associated bitcoin
+- Obtaining the underlying EC pubkeys, EC privkeys, and associated Pearl
   addresses ties in seamlessly with existing btcec and btcutil types which
   provide powerful tools for working with them to do things like sign
   transactions and generate payment scripts
@@ -36,21 +36,23 @@ report.
 - Comprehensive test coverage including the BIP0032 test vectors
 - Benchmarks
 
-## Installation and Updating
+## Installation
+
+This package is part of the `github.com/pearl-research-labs/pearl` module. Use it as a dependency in your Go project:
 
 ```bash
-$ go get -u github.com/btcsuite/btcd/btcutil/hdkeychain
+go get github.com/pearl-research-labs/pearl
 ```
 
 ## Examples
 
-* [NewMaster Example](http://godoc.org/github.com/btcsuite/btcd/btcutil/hdkeychain#example-NewMaster)  
+* [NewMaster Example](http://godoc.org/github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain#example-NewMaster)  
   Demonstrates how to generate a cryptographically random seed then use it to
   create a new master node (extended key).
-* [Default Wallet Layout Example](http://godoc.org/github.com/btcsuite/btcd/btcutil/hdkeychain#example-package--DefaultWalletLayout)  
+* [Default Wallet Layout Example](http://godoc.org/github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain#example-package--DefaultWalletLayout)  
   Demonstrates the default hierarchical deterministic wallet layout as described
   in BIP0032.
-* [Audits Use Case Example](http://godoc.org/github.com/btcsuite/btcd/btcutil/hdkeychain#example-package--Audits)  
+* [Audits Use Case Example](http://godoc.org/github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain#example-package--Audits)  
   Demonstrates the audits use case in BIP0032.
 
 ## License

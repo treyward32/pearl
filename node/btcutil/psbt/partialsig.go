@@ -2,11 +2,12 @@ package psbt
 
 import (
 	"bytes"
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
+
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/ecdsa"
 )
 
-// PartialSig encapsulate a (BTC public key, ECDSA signature)
+// PartialSig encapsulate a (public key, ECDSA signature)
 // pair, note that the fields are stored as byte slices, not
 // btcec.PublicKey or btcec.Signature (because manipulations will
 // be with the former not the latter, here); compliance with consensus
@@ -28,7 +29,7 @@ func (s PartialSigSorter) Less(i, j int) bool {
 }
 
 // validatePubkey checks if pubKey is *any* valid pubKey serialization in a
-// Bitcoin context (compressed/uncomp. OK).
+// context (compressed/uncomp. OK).
 func validatePubkey(pubKey []byte) bool {
 	_, err := btcec.ParsePubKey(pubKey)
 	return err == nil

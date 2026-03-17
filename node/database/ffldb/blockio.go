@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,6 +10,7 @@ package ffldb
 import (
 	"container/list"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -19,10 +20,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
@@ -30,7 +32,7 @@ const (
 	// files on the disk.
 	blockFileExtension = ".fdb"
 
-	// The Bitcoin protocol encodes block height as int32, so max number of
+	// The protocol encodes block height as int32, so max number of
 	// blocks is 2^31.  Max block size per the protocol is 32MiB per block.
 	// So the theoretical max at the time this comment was written is 64PiB
 	// (pebibytes).  With files @ 512MiB each, this would require a maximum
@@ -113,7 +115,7 @@ type writeCursor struct {
 type blockStore struct {
 	// network is the specific network to use in the flat files for each
 	// block.
-	network wire.BitcoinNet
+	network wire.PearlNet
 
 	// basePath is the base path used for the flat block files and metadata.
 	basePath string
@@ -402,6 +404,12 @@ func (s *blockStore) writeData(data []byte, fieldName string) error {
 	n, err := wc.curFile.file.WriteAt(data, int64(wc.curOffset))
 	wc.curOffset += uint32(n)
 	if err != nil {
+		if errors.Is(err, syscall.ENOSPC) {
+			log.Errorf("%v. Cannot save any more blocks "+
+				"due to the disk being full "+
+				"-- exiting", err)
+			os.Exit(1)
+		}
 		str := fmt.Sprintf("failed to write %s to file %d at "+
 			"offset %d: %v", fieldName, wc.curFileNum,
 			wc.curOffset-uint32(n), err)
@@ -478,7 +486,7 @@ func (s *blockStore) writeBlock(rawBlock []byte) (blockLocation, error) {
 		wc.curFile.file = file
 	}
 
-	// Bitcoin network.
+	// Pearl network.
 	origOffset := wc.curOffset
 	hasher := crc32.New(castagnoli)
 	var scratch [4]byte
@@ -631,6 +639,12 @@ func (s *blockStore) syncBlocks() error {
 
 	// Sync the file to disk.
 	if err := wc.curFile.file.Sync(); err != nil {
+		if errors.Is(err, syscall.ENOSPC) {
+			log.Errorf("%v. Cannot save any more blocks "+
+				"due to the disk being full "+
+				"-- exiting", err)
+			os.Exit(1)
+		}
 		str := fmt.Sprintf("failed to sync file %d: %v", wc.curFileNum,
 			err)
 		return makeDbErr(database.ErrDriverSpecific, str, err)
@@ -778,7 +792,7 @@ func scanBlockFiles(dbPath string) (int, int, uint32, error) {
 
 // newBlockStore returns a new block store with the current block file number
 // and offset set and all fields initialized.
-func newBlockStore(basePath string, network wire.BitcoinNet) (*blockStore, error) {
+func newBlockStore(basePath string, network wire.PearlNet) (*blockStore, error) {
 	// Look for the end of the latest block to file to determine what the
 	// write cursor position is from the viewpoint of the block files on
 	// disk.

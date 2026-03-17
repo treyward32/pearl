@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // ThresholdState define the various threshold states used when voting on
@@ -102,6 +102,11 @@ type thresholdConditionChecker interface {
 	// not the bit associated with the condition is set, but can be more
 	// complex as needed.
 	Condition(*blockNode) (bool, error)
+
+	// ForceActive returns if the deployment should be forced to transition
+	// to the active state. This is useful on certain testnet, where we
+	// we'd like for a deployment to always be active.
+	ForceActive(*blockNode) bool
 }
 
 // thresholdStateCache provides a type to cache the threshold states of each
@@ -140,20 +145,31 @@ func newThresholdCaches(numCaches uint32) []thresholdStateCache {
 // the passed block header.
 //
 // NOTE: This is part of the chainfg.BlockClock interface
-func (b *BlockChain) PastMedianTime(blockHeader *wire.BlockHeader) (time.Time, error) {
-	prevHash := blockHeader.PrevBlock
+func (b *BlockChain) PastMedianTime(blockHeader chaincfg.HeaderCtx) (time.Time, error) {
+	if blockHeader.Parent() == nil {
+		return time.Time{}, fmt.Errorf("blockHeader(%v) has no "+
+			"parent", blockHeader.Hash())
+	}
+
+	prevHash := blockHeader.Parent().Hash()
 	prevNode := b.index.LookupNode(&prevHash)
 
 	// If we can't find the previous node, then we can't compute the block
 	// time since it requires us to walk backwards from this node.
 	if prevNode == nil {
 		return time.Time{}, fmt.Errorf("blockHeader(%v) has no "+
-			"previous node", blockHeader.BlockHash())
+			"previous node", blockHeader.Hash())
 	}
 
-	blockNode := newBlockNode(blockHeader, prevNode)
+	node := blockNode{
+		hash:      blockHeader.Hash(),
+		height:    blockHeader.Height(),
+		bits:      blockHeader.Bits(),
+		timestamp: blockHeader.Timestamp(),
+		parent:    prevNode,
+	}
 
-	return CalcPastMedianTime(blockNode), nil
+	return CalcPastMedianTime(&node), nil
 }
 
 // thresholdStateTransition given a state, a previous node, and a toeholds
@@ -279,7 +295,17 @@ func thresholdStateTransition(state ThresholdState, prevNode *blockNode,
 // threshold states for previous windows are only calculated once.
 //
 // This function MUST be called with the chain state lock held (for writes).
-func (b *BlockChain) thresholdState(prevNode *blockNode, checker thresholdConditionChecker, cache *thresholdStateCache) (ThresholdState, error) {
+func (b *BlockChain) thresholdState(prevNode *blockNode,
+	checker thresholdConditionChecker,
+	cache *thresholdStateCache) (ThresholdState, error) {
+
+	// If the deployment has a nonzero AlwaysActiveHeight and the next
+	// block’s height is at or above that threshold, then force the state
+	// to Active.
+	if checker.ForceActive(prevNode) {
+		return ThresholdActive, nil
+	}
+
 	// The threshold state for the window that contains the genesis block is
 	// defined by definition.
 	confirmationWindow := int32(checker.MinerConfirmationWindow())

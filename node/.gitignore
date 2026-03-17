@@ -2,7 +2,7 @@
 *~
 
 # Databases
-btcd.db
+pearld.db
 *-shm
 *-wal
 
@@ -46,9 +46,15 @@ btcutil/psbt/coverage.txt
 *.swo
 /.vim
 
+#IDE
+.idea
+
 # Binaries produced by "make build"
 /addblock
-/btcctl
-/btcd
+/prlctl
+/pearld
 /findcheckpoint
 /gencerts
+
+.DS_Store
+.aider*

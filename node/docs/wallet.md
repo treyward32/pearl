@@ -1,5 +1,5 @@
 # Wallet
 
-btcd was intentionally developed without an integrated wallet for security
-reasons.  Please see [btcwallet](https://github.com/btcsuite/btcwallet) for more
+pearld was intentionally developed without an integrated wallet for security
+reasons.  Please see [Oyster](https://github.com/pearl-research-labs/pearl/wallet) for more
 information.

@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,8 +7,8 @@ package main
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
 )
 
 // headersCmd defines the configuration options for the loadheaders command.
@@ -54,7 +54,7 @@ func (cmd *headersCmd) Execute(args []string) error {
 			blockIdxBucket.ForEach(func(k, v []byte) error {
 				var hash chainhash.Hash
 				copy(hash[:], k)
-				_, err := tx.FetchBlockHeader(&hash)
+				_, err := tx.FetchBlock(&hash)
 				if err != nil {
 					return err
 				}
@@ -81,11 +81,11 @@ func (cmd *headersCmd) Execute(args []string) error {
 
 		log.Infof("Loading headers for %d blocks...", len(hashes))
 		startTime := time.Now()
-		hdrs, err := tx.FetchBlockHeaders(hashes)
+		blks, err := tx.FetchBlocks(hashes)
 		if err != nil {
 			return err
 		}
-		log.Infof("Loaded %d headers in %v", len(hdrs),
+		log.Infof("Loaded %d headers in %v", len(blks),
 			time.Since(startTime))
 		return nil
 	})

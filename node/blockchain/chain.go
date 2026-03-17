@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2018 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2018 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -8,21 +8,22 @@ package blockchain
 import (
 	"container/list"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
 	// maxOrphanBlocks is the maximum number of orphan blocks that can be
 	// queued.
-	maxOrphanBlocks = 100
+	maxOrphanBlocks = 25
 )
 
 // BlockLocator is used to help locate a specific block.  The algorithm for
@@ -60,33 +61,35 @@ type orphanBlock struct {
 // However, the returned snapshot must be treated as immutable since it is
 // shared by all callers.
 type BestState struct {
-	Hash        chainhash.Hash // The hash of the block.
-	Height      int32          // The height of the block.
-	Bits        uint32         // The difficulty bits of the block.
-	BlockSize   uint64         // The size of the block.
-	BlockWeight uint64         // The weight of the block.
-	NumTxns     uint64         // The number of txns in the block.
-	TotalTxns   uint64         // The total number of txns in the chain.
-	MedianTime  time.Time      // Median time as per CalcPastMedianTime.
+	Hash       chainhash.Hash // The hash of the block.
+	Height     int32          // The height of the block.
+	Bits       uint32         // The difficulty bits of the block.
+	BlockSize  uint64         // The size of the block.
+	BlockVsize uint64         // The virtual size of the block.
+	NumTxns    uint64         // The number of txns in the block.
+	TotalTxns  uint64         // The total number of txns in the chain.
+	MedianTime time.Time      // Median time as per CalcPastMedianTime.
+	BlockTime  time.Time      // Timestamp of the block (for WTEMA monotonicity).
 }
 
 // newBestState returns a new best stats instance for the given parameters.
-func newBestState(node *blockNode, blockSize, blockWeight, numTxns,
-	totalTxns uint64, medianTime time.Time) *BestState {
+func newBestState(node *blockNode, blockSize, blockVsize, numTxns,
+	totalTxns uint64, medianTime time.Time, blockTime time.Time) *BestState {
 
 	return &BestState{
-		Hash:        node.hash,
-		Height:      node.height,
-		Bits:        node.bits,
-		BlockSize:   blockSize,
-		BlockWeight: blockWeight,
-		NumTxns:     numTxns,
-		TotalTxns:   totalTxns,
-		MedianTime:  medianTime,
+		Hash:       node.hash,
+		Height:     node.height,
+		Bits:       node.bits,
+		BlockSize:  blockSize,
+		BlockVsize: blockVsize,
+		NumTxns:    numTxns,
+		TotalTxns:  totalTxns,
+		MedianTime: medianTime,
+		BlockTime:  blockTime,
 	}
 }
 
-// BlockChain provides functions for working with the bitcoin block chain.
+// BlockChain provides functions for working with the block chain.
 // It includes functionality such as rejecting duplicate blocks, ensuring blocks
 // follow all rules, orphan handling, checkpoint handling, and best chain
 // selection with reorganization.
@@ -102,14 +105,6 @@ type BlockChain struct {
 	sigCache            *txscript.SigCache
 	indexManager        IndexManager
 	hashCache           *txscript.HashCache
-
-	// The following fields are calculated based upon the provided chain
-	// parameters.  They are also set when the instance is created and
-	// can't be changed afterwards, so there is no need to protect them with
-	// a separate mutex.
-	minRetargetTimespan int64 // target timespan / adjustment factor
-	maxRetargetTimespan int64 // target timespan * adjustment factor
-	blocksPerRetarget   int32 // target timespan / target time per block
 
 	// chainLock protects concurrent access to the vast majority of the
 	// fields in this struct below this point.
@@ -204,6 +199,14 @@ func (b *BlockChain) HaveBlock(hash *chainhash.Hash) (bool, error) {
 	return exists || b.IsKnownOrphan(hash), nil
 }
 
+// BlockInIndex returns whether the block with the given hash exists in the
+// in-memory block index. Unlike BlockExists, this does not check the database.
+//
+// This function is safe for concurrent access.
+func (b *BlockChain) BlockInIndex(hash *chainhash.Hash) bool {
+	return b.index.HaveBlock(hash)
+}
+
 // IsKnownOrphan returns whether the passed hash is currently a known orphan.
 // Keep in mind that only a limited number of orphans are held onto for a
 // limited amount of time, so this function must not be used as an absolute
@@ -244,7 +247,7 @@ func (b *BlockChain) GetOrphanRoot(hash *chainhash.Hash) *chainhash.Hash {
 			break
 		}
 		orphanRoot = prevHash
-		prevHash = &orphan.block.MsgBlock().Header.PrevBlock
+		prevHash = &orphan.block.MsgBlock().BlockHeader().PrevBlock
 	}
 
 	return orphanRoot
@@ -265,7 +268,7 @@ func (b *BlockChain) removeOrphanBlock(orphan *orphanBlock) {
 	// for loop is intentionally used over a range here as range does not
 	// reevaluate the slice on each iteration nor does it adjust the index
 	// for the modified slice.
-	prevHash := &orphan.block.MsgBlock().Header.PrevBlock
+	prevHash := &orphan.block.MsgBlock().BlockHeader().PrevBlock
 	orphans := b.prevOrphans[*prevHash]
 	for i := 0; i < len(orphans); i++ {
 		hash := orphans[i].block.Hash()
@@ -329,7 +332,7 @@ func (b *BlockChain) addOrphanBlock(block *btcutil.Block) {
 	b.orphans[*block.Hash()] = oBlock
 
 	// Add to previous hash lookup index for faster dependency lookups.
-	prevHash := &block.MsgBlock().Header.PrevBlock
+	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
 	b.prevOrphans[*prevHash] = append(b.prevOrphans[*prevHash], oBlock)
 }
 
@@ -372,31 +375,10 @@ func (b *BlockChain) calcSequenceLock(node *blockNode, tx *btcutil.Tx, utxoView 
 	// activated.
 	sequenceLock := &SequenceLock{Seconds: -1, BlockHeight: -1}
 
-	// The sequence locks semantics are always active for transactions
-	// within the mempool.
-	csvSoftforkActive := mempool
-
-	// If we're performing block validation, then we need to query the BIP9
-	// state.
-	if !csvSoftforkActive {
-		// Obtain the latest BIP9 version bits state for the
-		// CSV-package soft-fork deployment. The adherence of sequence
-		// locks depends on the current soft-fork state.
-		csvState, err := b.deploymentState(node.parent, chaincfg.DeploymentCSV)
-		if err != nil {
-			return nil, err
-		}
-		csvSoftforkActive = csvState == ThresholdActive
-	}
-
-	// If the transaction's version is less than 2, and BIP 68 has not yet
-	// been activated then sequence locks are disabled. Additionally,
-	// sequence locks don't apply to coinbase transactions Therefore, we
-	// return sequence lock values of -1 indicating that this transaction
-	// can be included within a block at any given height or time.
+	// Sequence locks (BIP 68) only apply to transactions version 2+ and
+	// never to coinbase transactions.
 	mTx := tx.MsgTx()
-	sequenceLockActive := uint32(mTx.Version) >= 2 && csvSoftforkActive
-	if !sequenceLockActive || IsCoinBase(tx) {
+	if uint32(mTx.Version) < 2 || IsCoinBase(tx) {
 		return sequenceLock, nil
 	}
 
@@ -572,7 +554,7 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 	stxos []SpentTxOut) error {
 
 	// Make sure it's extending the end of the best chain.
-	prevHash := &block.MsgBlock().Header.PrevBlock
+	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
 	if !prevHash.IsEqual(&b.bestChain.Tip().hash) {
 		return AssertError("connectBlock must be called with a block " +
 			"that extends the main chain")
@@ -606,9 +588,10 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 	b.stateLock.RUnlock()
 	numTxns := uint64(len(block.MsgBlock().Transactions))
 	blockSize := uint64(block.MsgBlock().SerializeSize())
-	blockWeight := uint64(GetBlockWeight(block))
-	state := newBestState(node, blockSize, blockWeight, numTxns,
+	blockVsize := uint64(GetBlockVsize(block))
+	state := newBestState(node, blockSize, blockVsize, numTxns,
 		curTotalTxns+numTxns, CalcPastMedianTime(node),
+		time.Unix(node.timestamp, 0),
 	)
 
 	// Atomically insert info into the database.
@@ -699,6 +682,13 @@ func (b *BlockChain) connectBlock(node *blockNode, block *btcutil.Block,
 	b.stateSnapshot = state
 	b.stateLock.Unlock()
 
+	// Log the accepted block header information.
+	header := block.MsgBlock().BlockHeader()
+	log.Infof("Block accepted and connected to main chain - Hash: %s, Height: %d, "+
+		"Version: %d, PrevBlock: %s, Timestamp: %s, Bits: %08x, ProofCommitment: %s",
+		block.Hash(), node.height, header.Version, header.PrevBlock,
+		header.Timestamp, header.Bits, header.ProofCommitment)
+
 	// Notify the caller that the block was connected to the main chain.
 	// The caller would typically want to react with actions such as
 	// updating wallets.
@@ -751,10 +741,12 @@ func (b *BlockChain) disconnectBlock(node *blockNode, block *btcutil.Block, view
 	b.stateLock.RUnlock()
 	numTxns := uint64(len(prevBlock.MsgBlock().Transactions))
 	blockSize := uint64(prevBlock.MsgBlock().SerializeSize())
-	blockWeight := uint64(GetBlockWeight(prevBlock))
+	blockVsize := uint64(GetBlockVsize(prevBlock))
 	newTotalTxns := curTotalTxns - uint64(len(block.MsgBlock().Transactions))
-	state := newBestState(prevNode, blockSize, blockWeight, numTxns,
-		newTotalTxns, CalcPastMedianTime(prevNode))
+	state := newBestState(prevNode, blockSize, blockVsize, numTxns,
+		newTotalTxns, CalcPastMedianTime(prevNode),
+		time.Unix(prevNode.timestamp, 0),
+	)
 
 	err = b.db.Update(func(dbTx database.Tx) error {
 		// Update best block state.
@@ -1139,6 +1131,30 @@ func (b *BlockChain) verifyReorganizationValidity(detachNodes, attachNodes *list
 	return detachBlocks, attachBlocks, detachSpentTxOuts, nil
 }
 
+// ShouldChangeTip determines whether the chain tip should switch from the
+// current tip to a proposed alternative based on cumulative work and a
+// significance threshold.
+//
+// The proposed tip is adopted only when both conditions hold:
+//   - It has strictly more cumulative work than the current tip.
+//   - The work advantage is at least half the lesser of the two tips'
+//     individual block work values, preventing trivial-margin reorgs.
+func ShouldChangeTip(currentWork, proposedWork, currentTipBlockWork, proposedTipBlockWork *big.Int) bool {
+	if currentWork.Cmp(proposedWork) >= 0 {
+		return false
+	}
+
+	diff := new(big.Int).Sub(proposedWork, currentWork)
+
+	minBlockWork := currentTipBlockWork
+	if proposedTipBlockWork.Cmp(currentTipBlockWork) < 0 {
+		minBlockWork = proposedTipBlockWork
+	}
+	threshold := new(big.Int).Rsh(minBlockWork, 2)
+
+	return diff.Cmp(threshold) >= 0
+}
+
 // connectBestChain handles connecting the passed block to the chain while
 // respecting proper chain selection according to the chain with the most
 // proof of work.  In the typical case, the new block simply extends the main
@@ -1169,7 +1185,7 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 
 	// We are extending the main (best) chain with a new block.  This is the
 	// most common case.
-	parentHash := &block.MsgBlock().Header.PrevBlock
+	parentHash := &block.MsgBlock().BlockHeader().PrevBlock
 	if parentHash.IsEqual(&b.bestChain.Tip().hash) {
 		// Skip checks if node has already been fully validated.
 		fastAdd = fastAdd || b.index.NodeStatus(node).KnownValid()
@@ -1247,9 +1263,10 @@ func (b *BlockChain) connectBestChain(node *blockNode, block *btcutil.Block, fla
 			block.Hash())
 	}
 
-	// We're extending (or creating) a side chain, but the cumulative
-	// work for this new side chain is not enough to make it the new chain.
-	if node.workSum.Cmp(b.bestChain.Tip().workSum) <= 0 {
+	// We're extending (or creating) a side chain. Use the tip-selection
+	// policy to decide whether the new chain warrants a reorganization.
+	tip := b.bestChain.Tip()
+	if !ShouldChangeTip(tip.workSum, node.workSum, CalcWork(tip.bits), CalcWork(node.bits)) {
 		// Log information about how the block is forking the chain.
 		fork := b.bestChain.FindFork(node)
 		if fork.hash.IsEqual(parentHash) {
@@ -1462,7 +1479,17 @@ func (b *BlockChain) HeaderByHash(hash *chainhash.Hash) (wire.BlockHeader, error
 		return wire.BlockHeader{}, err
 	}
 
-	return node.Header(), nil
+	var blockHeader *wire.BlockHeader
+	err := b.db.View(func(dbTx database.Tx) error {
+		var err error
+		blockHeader, err = dbFetchBlockHeader(dbTx, *hash, uint32(node.height))
+		return err
+	})
+	if err != nil {
+		return wire.BlockHeader{}, err
+	}
+
+	return *blockHeader, nil
 }
 
 // MainChainHasBlock returns whether or not the block with the given hash is in
@@ -1774,7 +1801,7 @@ func (b *BlockChain) LocateBlocks(locator BlockLocator, hashStop *chainhash.Hash
 // See the comment on the exported function for more details on special cases.
 //
 // This function MUST be called with the chain state lock held (for reads).
-func (b *BlockChain) locateHeaders(locator BlockLocator, hashStop *chainhash.Hash, maxHeaders uint32) []wire.BlockHeader {
+func (b *BlockChain) locateHeaders(locator BlockLocator, hashStop *chainhash.Hash, maxHeaders uint32, includeCerts bool) []wire.MsgHeader {
 	// Find the node after the first known block in the locator and the
 	// total number of nodes after it needed while respecting the stop hash
 	// and max entries.
@@ -1783,11 +1810,34 @@ func (b *BlockChain) locateHeaders(locator BlockLocator, hashStop *chainhash.Has
 		return nil
 	}
 
-	// Populate and return the found headers.
-	headers := make([]wire.BlockHeader, 0, total)
-	for i := uint32(0); i < total; i++ {
-		headers = append(headers, node.Header())
-		node = b.bestChain.Next(node)
+	// Populate and return the found headers with their certificates.
+	headers := make([]wire.MsgHeader, 0, total)
+	err := b.db.View(func(dbTx database.Tx) error {
+		for i := uint32(0); i < total; i++ {
+			blockHeader, err := dbFetchBlockHeader(dbTx, node.hash, uint32(node.height))
+			if err != nil {
+				return err
+			}
+
+			var cert wire.BlockCertificate
+			if includeCerts {
+				cert, err = dbFetchCertificate(dbTx, node.hash)
+				if err != nil {
+					return err
+				}
+			}
+
+			headers = append(headers, wire.MsgHeader{
+				BlockHeader:    *blockHeader,
+				MsgCertificate: wire.MsgCertificate{Certificate: cert},
+			})
+			node = b.bestChain.Next(node)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Errorf("Error getting block headers: %v", err)
+		return nil
 	}
 	return headers
 }
@@ -1795,6 +1845,9 @@ func (b *BlockChain) locateHeaders(locator BlockLocator, hashStop *chainhash.Has
 // LocateHeaders returns the headers of the blocks after the first known block
 // in the locator until the provided stop hash is reached, or up to a max of
 // wire.MaxBlockHeadersPerMsg headers.
+//
+// When includeCerts is true, each returned header includes its corresponding
+// block certificate. When false, certificates are omitted.
 //
 // In addition, there are two special cases:
 //
@@ -1805,9 +1858,9 @@ func (b *BlockChain) locateHeaders(locator BlockLocator, hashStop *chainhash.Has
 //     after the genesis block will be returned
 //
 // This function is safe for concurrent access.
-func (b *BlockChain) LocateHeaders(locator BlockLocator, hashStop *chainhash.Hash) []wire.BlockHeader {
+func (b *BlockChain) LocateHeaders(locator BlockLocator, hashStop *chainhash.Hash, includeCerts bool) []wire.MsgHeader {
 	b.chainLock.RLock()
-	headers := b.locateHeaders(locator, hashStop, wire.MaxBlockHeadersPerMsg)
+	headers := b.locateHeaders(locator, hashStop, wire.MaxBlockHeadersPerMsg, includeCerts)
 	b.chainLock.RUnlock()
 	return headers
 }
@@ -2007,11 +2060,15 @@ func (b *BlockChain) ReconsiderBlock(hash *chainhash.Hash) error {
 		}
 	}
 
-	// Compare the cumulative work for the branch being reconsidered.
-	bestTipWork := b.bestChain.Tip().workSum
-	if reconsiderTip.workSum.Cmp(bestTipWork) <= 0 {
-		log.Debugf("Tip to reconsider has less cumulative work than current "+
-			"chain tip: %v vs %v", reconsiderTip.workSum, bestTipWork)
+	// Use the tip-selection policy to decide whether the reconsidered
+	// branch warrants a reorganization.
+	curTip := b.bestChain.Tip()
+	curTipWork := CalcWork(curTip.bits)
+	reconsiderTipWork := CalcWork(reconsiderTip.bits)
+	if !ShouldChangeTip(curTip.workSum, reconsiderTip.workSum, curTipWork, reconsiderTipWork) {
+		log.Debugf("Tip to reconsider does not meet tip-change threshold "+
+			"(current tip work: %v, reconsidered tip work: %v, current tip block work: %v, reconsidered tip block work: %v)",
+			curTip.workSum, reconsiderTip.workSum, curTipWork, reconsiderTipWork)
 		return nil
 	}
 
@@ -2170,9 +2227,6 @@ func New(config *Config) (*BlockChain, error) {
 	}
 
 	params := config.ChainParams
-	targetTimespan := int64(params.TargetTimespan / time.Second)
-	targetTimePerBlock := int64(params.TargetTimePerBlock / time.Second)
-	adjustmentFactor := params.RetargetAdjustmentFactor
 	b := BlockChain{
 		checkpoints:         config.Checkpoints,
 		checkpointsByHeight: checkpointsByHeight,
@@ -2181,9 +2235,6 @@ func New(config *Config) (*BlockChain, error) {
 		timeSource:          config.TimeSource,
 		sigCache:            config.SigCache,
 		indexManager:        config.IndexManager,
-		minRetargetTimespan: targetTimespan / adjustmentFactor,
-		maxRetargetTimespan: targetTimespan * adjustmentFactor,
-		blocksPerRetarget:   int32(targetTimespan / targetTimePerBlock),
 		index:               newBlockIndex(config.DB, params),
 		utxoCache:           newUtxoCache(config.DB, config.UtxoCacheMaxSize),
 		hashCache:           config.HashCache,
@@ -2213,11 +2264,6 @@ func New(config *Config) (*BlockChain, error) {
 	// does not yet contain any chain state, both it and the chain state
 	// will be initialized to contain only the genesis block.
 	if err := b.initChainState(); err != nil {
-		return nil, err
-	}
-
-	// Perform any upgrades to the various chain-specific buckets as needed.
-	if err := b.maybeUpgradeDbBuckets(config.Interrupt); err != nil {
 		return nil, err
 	}
 

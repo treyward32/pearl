@@ -1,4 +1,4 @@
-// Copyright (c) 2023 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -6,15 +6,16 @@ package blockchain
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // mapSlice is a slice of maps for utxo entries.  The slice of maps are needed to
@@ -234,7 +235,7 @@ func newUtxoCache(db database.DB, maxTotalMemoryUsage uint64) *utxoCache {
 	numMaxElements := calculateMinEntries(int(maxTotalMemoryUsage), bucketSize+avgEntrySize)
 	numMaxElements -= 1
 
-	log.Infof("Pre-alloacting for %d MiB", maxTotalMemoryUsage/(1024*1024)+1)
+	log.Infof("Pre-allocating for %d MiB", maxTotalMemoryUsage/(1024*1024)+1)
 
 	m := make(map[wire.OutPoint]*UtxoEntry, numMaxElements)
 
@@ -720,6 +721,23 @@ func (b *BlockChain) InitConsistentState(tip *blockNode, interrupt <-chan struct
 	s.lastFlushTime = time.Now()
 
 	return nil
+}
+
+// errInterruptRequested indicates that an operation was cancelled due
+// to a user-requested interrupt.
+var errInterruptRequested = errors.New("interrupt requested")
+
+// interruptRequested returns true when the provided channel has been closed.
+// This simplifies early shutdown slightly since the caller can just use an if
+// statement instead of a select.
+func interruptRequested(interrupted <-chan struct{}) bool {
+	select {
+	case <-interrupted:
+		return true
+	default:
+	}
+
+	return false
 }
 
 // flushNeededAfterPrune returns true if the utxo cache needs to be flushed after a prune

@@ -1,0 +1,382 @@
+name: Pearl Research Labs Desktop Wallet CI/CD
+
+on:
+  pull_request:
+    paths:
+      - 'wallet/**'
+      - 'spv/**'
+      - 'apps/apps/pearl-desktop-wallet/**'
+      - '.github/workflows/pearl-desktop-wallet.yml'
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Version override (leave empty to extract from source)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '8.15.6'
+  GO_VERSION: '1.26.1'
+  APP_DIR: 'apps/apps/pearl-desktop-wallet'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+    steps:
+      - name: Check if should create release
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "This is a PR - will build but NOT create release"
+          elif [[ "$REF_NAME" != "master" ]]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Not on master branch - will build but NOT create release"
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "On master branch - will build AND create release"
+          fi
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      go_version: ${{ steps.version.outputs.go_version }}
+      electron_version: ${{ steps.version.outputs.electron_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Extract versions
+        id: version
+        shell: bash
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+        run: |
+          # Extract Go/Pearl version
+          cd wallet
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            GO_VERSION="$VERSION_OVERRIDE"
+          else
+            echo 'package main; import "fmt"; func main() { fmt.Println(version()) }' > pv.go
+            GO_VERSION="v$(go run pv.go version.go)"
+            rm pv.go
+          fi
+          
+          # Extract Electron app version
+          ELECTRON_VERSION=$(node -p "require('../${{ env.APP_DIR }}/package.json').version")
+          
+          # Use Electron version as the release tag
+          RELEASE_TAG="pearl-wallet-v${ELECTRON_VERSION}"
+          
+          echo "go_version=${GO_VERSION}" >> $GITHUB_OUTPUT
+          echo "electron_version=${ELECTRON_VERSION}" >> $GITHUB_OUTPUT
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          
+          echo "Go/Pearl version: ${GO_VERSION}"
+          echo "Electron version: ${ELECTRON_VERSION}"
+          echo "Release tag: ${RELEASE_TAG}"
+
+  build:
+    needs: version
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            electron_arch: x64
+            bin_name: oyster-linux-x64
+            bin_ext: ""
+            electron_build_cmd: pnpm -F @pearl/pearl-desktop-wallet run build:linux
+          - name: macOS Intel
+            os: macos-15
+            goos: darwin
+            goarch: amd64
+            electron_arch: x64
+            bin_name: oyster-darwin-x64
+            bin_ext: ""
+            electron_build_cmd: pnpm -F @pearl/pearl-desktop-wallet run build:mac
+          - name: macOS ARM
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+            electron_arch: arm64
+            bin_name: oyster-darwin-arm64
+            bin_ext: ""
+            electron_build_cmd: pnpm -F @pearl/pearl-desktop-wallet run build:mac
+          - name: Windows
+            os: windows-latest
+            goos: windows
+            goarch: amd64
+            electron_arch: x64
+            bin_name: oyster-windows-x64
+            bin_ext: .exe
+            electron_build_cmd: pnpm -F @pearl/pearl-desktop-wallet run build:win
+
+    runs-on: ${{ matrix.os }}
+    env:
+      GO_VERSION: ${{ needs.version.outputs.go_version }}
+      ELECTRON_VERSION: ${{ needs.version.outputs.electron_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ========== Build Go Binaries ==========
+      - name: Setup Go and Rust
+        uses: ./.github/actions/setup
+
+      - name: Add Rust GNU target (Windows)
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: rustup target add x86_64-pc-windows-gnu
+
+      - name: Build Go binaries
+        shell: bash
+        working-directory: .
+        env:
+          GOOS: ${{ matrix.goos }}
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            export CARGO_BUILD_TARGET=x86_64-pc-windows-gnu
+          fi
+          task build:blockchain
+
+      # Rename binaries to add .exe extension on Windows
+      - name: Rename Windows binaries
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          mv bin/pearld bin/pearld.exe
+          mv bin/prlctl bin/prlctl.exe
+          mv bin/oyster bin/oyster.exe
+          echo "Renamed binaries:"
+          ls -lh bin/
+
+      # Package Go binaries as artifacts
+      - name: Package Go binaries (Unix)
+        if: matrix.goos != 'windows'
+        shell: bash
+        working-directory: .
+        run: |
+          mkdir -p go-dist
+          cp bin/pearld bin/prlctl bin/oyster go-dist/
+          tar -czvf go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}-${{ env.GO_VERSION }}.tar.gz -C go-dist .
+
+      - name: Package Go binaries (Windows)
+        if: matrix.goos == 'windows'
+        shell: bash
+        working-directory: .
+        run: |
+          mkdir -p go-dist
+          echo "📦 Contents of bin folder:"
+          ls -lh bin/
+          echo ""
+          echo "Copying binaries to go-dist..."
+          cp bin/pearld.exe bin/prlctl.exe bin/oyster.exe go-dist/
+          cd go-dist && 7z a ../go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}-${{ env.GO_VERSION }}.zip *
+
+      - name: Upload Go binaries artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ./go-binaries-*
+
+      # ========== Prepare & Build Electron App ==========
+      
+      # Copy the built oyster binary to the Electron app's bin folder
+      - name: Copy oyster binary to Electron app
+        shell: bash
+        run: |
+          mkdir -p ${{ env.APP_DIR }}/bin
+          cp ./bin/oyster${{ matrix.bin_ext }} ${{ env.APP_DIR }}/bin/${{ matrix.bin_name }}${{ matrix.bin_ext }}
+          ls -lh ${{ env.APP_DIR }}/bin/
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Setup Node (for Electron build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Electron app
+        working-directory: ${{ env.APP_DIR }}
+        run: ${{ matrix.electron_build_cmd }}
+
+      # ========== Verify & Upload Electron Outputs ==========
+
+      - name: Verify Windows outputs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $v    = "${{ env.ELECTRON_VERSION }}"
+          $dist = "${{ env.APP_DIR }}/dist"
+          $x64  = Join-Path $dist "Pearl-Wallet-Setup-$v.exe"
+          if (!(Test-Path $x64)) { throw "Missing file: $x64" }
+
+      - name: Upload Windows installers
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-windows
+          path: ${{ env.APP_DIR }}/dist/Pearl-Wallet-Setup-${{ env.ELECTRON_VERSION }}.exe
+          if-no-files-found: error
+
+      - name: Verify macOS outputs
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          v='${{ env.ELECTRON_VERSION }}'
+          dist="${{ env.APP_DIR }}/dist"
+          
+          # Check which architecture we're building
+          if [ "${{ matrix.goarch }}" = "amd64" ]; then
+            # Intel build produces the base .dmg
+            test -f "${dist}/Pearl Wallet-${v}.dmg" || { echo "Missing dmg (x64): ${dist}/Pearl Wallet-${v}.dmg"; exit 1; }
+          else
+            # ARM build produces -arm64.dmg
+            test -f "${dist}/Pearl Wallet-${v}-arm64.dmg" || { echo "Missing dmg (arm64): ${dist}/Pearl Wallet-${v}-arm64.dmg"; exit 1; }
+          fi
+
+      - name: Upload macOS Intel installer
+        if: runner.os == 'macOS' && matrix.goarch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-macos-x64
+          path: ${{ env.APP_DIR }}/dist/Pearl Wallet-${{ env.ELECTRON_VERSION }}.dmg
+          if-no-files-found: error
+
+      - name: Upload macOS ARM installer
+        if: runner.os == 'macOS' && matrix.goarch == 'arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-macos-arm64
+          path: ${{ env.APP_DIR }}/dist/Pearl Wallet-${{ env.ELECTRON_VERSION }}-arm64.dmg
+          if-no-files-found: error
+
+      - name: Verify Linux outputs
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          v='${{ env.ELECTRON_VERSION }}'
+          dist="${{ env.APP_DIR }}/dist"
+          test -f "${dist}/pearl-desktop-wallet_${v}_amd64.deb" || { echo "Missing deb (amd64): ${dist}/pearl-desktop-wallet_${v}_amd64.deb"; exit 1; }
+
+      - name: Upload Linux installers
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-linux
+          path: ${{ env.APP_DIR }}/dist/pearl-desktop-wallet_${{ env.ELECTRON_VERSION }}_amd64.deb
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: [check, version, build]
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+      ELECTRON_VERSION: ${{ needs.version.outputs.electron_version }}
+      GO_VERSION: ${{ needs.version.outputs.go_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+      - name: Ensure tag exists
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          if git rev-parse -q --verify "refs/tags/${{ env.RELEASE_TAG }}" >/dev/null; then
+            echo "Tag ${{ env.RELEASE_TAG }} already exists."
+          else
+            echo "Creating tag ${{ env.RELEASE_TAG }} at $GITHUB_SHA"
+            git tag -a "${{ env.RELEASE_TAG }}" -m "Release ${{ env.RELEASE_TAG }}" "$GITHUB_SHA"
+            git push origin "${{ env.RELEASE_TAG }}"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" -o -name "*.tar.gz" -o -name "*.zip" \) -exec sha256sum {} \; > checksums.txt
+          cat checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Pearl Wallet v${{ env.ELECTRON_VERSION }}
+          draft: true
+          generate_release_notes: true
+          body: |
+            ## Pearl Desktop Wallet v${{ env.ELECTRON_VERSION }}
+            
+            ### 🖥️ Desktop Application
+            - **Windows**: Download the `.exe` installer
+            - **macOS**: Download the `.dmg` for your architecture (Intel or Apple Silicon)
+            - **Linux**: Download the `.deb` package
+            
+            ### ⚙️ Command Line Binaries
+            Built with Go version ${{ env.GO_VERSION }}
+            - `oyster`: Wallet management
+            - `pearld`: Full node
+            - `prlctl`: Control utility
+            
+            ### 📦 Installation
+            See the [documentation](https://github.com/${{ github.repository }}) for installation instructions.
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

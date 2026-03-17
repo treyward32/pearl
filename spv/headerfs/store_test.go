@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 func createTestBlockHeaderStore() (func(), walletdb.DB, string,
@@ -28,7 +28,7 @@ func createTestBlockHeaderStore() (func(), walletdb.DB, string,
 
 	dbPath := filepath.Join(tempDir, "test.db")
 	db, err := walletdb.Create(
-		"bdb", dbPath, true, time.Second*10,
+		"bdb", dbPath, true, time.Second*10, false,
 	)
 	if err != nil {
 		return nil, nil, "", nil, err
@@ -49,21 +49,20 @@ func createTestBlockHeaderStore() (func(), walletdb.DB, string,
 
 func createTestBlockHeaderChain(numHeaders uint32) []BlockHeader {
 	blockHeaders := make([]BlockHeader, numHeaders)
-	prevHeader := &chaincfg.SimNetParams.GenesisBlock.Header
+	prevHeader := chaincfg.SimNetParams.GenesisBlock.BlockHeader()
 	for i := uint32(1); i <= numHeaders; i++ {
-		bitcoinHeader := &wire.BlockHeader{
+		blockHeader := &wire.BlockHeader{
 			Bits:      uint32(rand.Int31()),
-			Nonce:     uint32(rand.Int31()),
 			Timestamp: prevHeader.Timestamp.Add(time.Minute * 1),
 			PrevBlock: prevHeader.BlockHash(),
 		}
 
 		blockHeaders[i-1] = BlockHeader{
-			BlockHeader: bitcoinHeader,
+			BlockHeader: blockHeader,
 			Height:      i,
 		}
 
-		prevHeader = bitcoinHeader
+		prevHeader = blockHeader
 	}
 
 	return blockHeaders
@@ -194,8 +193,10 @@ func TestBlockHeaderStoreRecovery(t *testing.T) {
 	// Next, in order to simulate a partial write, we'll roll back the
 	// internal index by 5 blocks.
 	for i := 0; i < 5; i++ {
-		newTip := blockHeaders[len(blockHeaders)-i-1].PrevBlock
-		if err := bhs.truncateIndex(&newTip, true); err != nil {
+		tipIdx := len(blockHeaders) - i - 1
+		tipHash := blockHeaders[tipIdx].BlockHeader.BlockHash()
+		newTip := blockHeaders[tipIdx].PrevBlock
+		if err := bhs.truncateIndices(&newTip, []*chainhash.Hash{&tipHash}, true); err != nil {
 			t.Fatalf("unable to truncate index: %v", err)
 		}
 	}
@@ -225,14 +226,14 @@ func TestBlockHeaderStoreRecovery(t *testing.T) {
 	}
 }
 
-func createTestFilterHeaderStore() (func(), walletdb.DB, string, *FilterHeaderStore, error) {
+func createTestFilterHeaderStore() (func(), walletdb.DB, string, FilterHeaderStore, error) {
 	tempDir, err := ioutil.TempDir("", "store_test")
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
 
 	dbPath := filepath.Join(tempDir, "test.db")
-	db, err := walletdb.Create("bdb", dbPath, true, time.Second*10)
+	db, err := walletdb.Create("bdb", dbPath, true, time.Second*10, false)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}
@@ -266,7 +267,7 @@ func createTestFilterHeaderChain(numHeaders uint32) []FilterHeader {
 }
 
 func TestFilterHeaderStoreOperations(t *testing.T) {
-	cleanUp, _, _, fhs, err := createTestFilterHeaderStore()
+	cleanUp, db, _, fhs, err := createTestFilterHeaderStore()
 	if cleanUp != nil {
 		defer cleanUp()
 	}
@@ -283,7 +284,7 @@ func TestFilterHeaderStoreOperations(t *testing.T) {
 
 	// We simulate the expected behavior of the block headers being written
 	// to disk before the filter headers are.
-	if err := walletdb.Update(fhs.db, func(tx walletdb.ReadWriteTx) error {
+	if err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		rootBucket := tx.ReadWriteBucket(indexBucket)
 
 		for _, header := range blockHeaders {
@@ -396,7 +397,7 @@ func TestFilterHeaderStoreRecovery(t *testing.T) {
 
 	// We simulate the expected behavior of the block headers being written
 	// to disk before the filter headers are.
-	if err := walletdb.Update(fhs.db, func(tx walletdb.ReadWriteTx) error {
+	if err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		rootBucket := tx.ReadWriteBucket(indexBucket)
 
 		for _, header := range blockHeaders {
@@ -424,8 +425,8 @@ func TestFilterHeaderStoreRecovery(t *testing.T) {
 	// internal index by 5 blocks.
 	for i := 0; i < 5; i++ {
 		newTip := blockHeaders[len(blockHeaders)-i-2].HeaderHash
-		if err := fhs.truncateIndex(&newTip, true); err != nil {
-			t.Fatalf("unable to truncate index: %v", err)
+		if _, err := fhs.RollbackLastBlock(&newTip); err != nil {
+			t.Fatalf("unable to rollback block: %v", err)
 		}
 	}
 
@@ -535,7 +536,7 @@ func TestFilterHeaderStateAssertion(t *testing.T) {
 
 		// We simulate the expected behavior of the block headers being
 		// written to disk before the filter headers are.
-		if err := walletdb.Update(fhs.db, func(tx walletdb.ReadWriteTx) error {
+		if err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 			rootBucket := tx.ReadWriteBucket(indexBucket)
 
 			for _, header := range filterHeaderChain {

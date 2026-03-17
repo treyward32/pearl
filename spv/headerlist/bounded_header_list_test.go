@@ -1,6 +1,7 @@
 package headerlist
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -72,11 +73,11 @@ func TestBoundedMemoryChainResetHeaderState(t *testing.T) {
 
 	// Additionally, both the front and back of the chain should be
 	// identical to the node above.
-	if *memChain.Front() != newNode {
+	if !reflect.DeepEqual(*memChain.Front(), newNode) {
 		t.Fatalf("wrong node, expected %v, got %v", newNode,
 			memChain.Front())
 	}
-	if *memChain.Back() != newNode {
+	if !reflect.DeepEqual(*memChain.Back(), newNode) {
 		t.Fatalf("wrong node, expected %v, got %v", newNode,
 			memChain.Back())
 	}

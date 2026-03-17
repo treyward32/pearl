@@ -1,31 +1,32 @@
 package chain
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wtxmgr"
-	"github.com/lightninglabs/neutrino"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 // ErrUnimplemented is returned when a certain method is not implemented for a
 // given interface.
 var ErrUnimplemented = errors.New("unimplemented")
 
-// NeutrinoClient is an implementation of the btcwallet chain.Interface interface.
+// NeutrinoClient is an implementation of the wallet's chain.Interface interface.
 type NeutrinoClient struct {
 	CS NeutrinoChainService
 
@@ -101,8 +102,9 @@ func (s *NeutrinoClient) BackEnd() string {
 }
 
 // Start replicates the RPC client's Start method.
-func (s *NeutrinoClient) Start() error {
-	if err := s.CS.Start(); err != nil {
+func (s *NeutrinoClient) Start(ctx context.Context) error {
+	err := s.CS.Start(ctx)
+	if err != nil {
 		return fmt.Errorf("error starting chain service: %w", err)
 	}
 
@@ -158,7 +160,7 @@ func (s *NeutrinoClient) WaitForShutdown() {
 func (s *NeutrinoClient) GetBlock(hash *chainhash.Hash) (*wire.MsgBlock, error) {
 	// TODO(roasbeef): add a block cache?
 	//  * which evication strategy? depends on use case
-	//  Should the block cache be INSIDE neutrino instead of in btcwallet?
+	//  Should the block cache be INSIDE neutrino instead of in the wallet?
 	block, err := s.CS.GetBlock(*hash)
 	if err != nil {
 		return nil, err
@@ -182,6 +184,23 @@ func (s *NeutrinoClient) GetBestBlock() (*chainhash.Hash, int32, error) {
 	}
 
 	return &chainTip.Hash, chainTip.Height, nil
+}
+
+// SyncProgress returns the current SPV sync state.
+func (s *NeutrinoClient) SyncProgress() (*SyncProgress, error) {
+	headerHeight, err := s.CS.BlockHeaderTipHeight()
+	if err != nil {
+		return nil, err
+	}
+	filterHeight, err := s.CS.FilterHeaderTipHeight()
+	if err != nil {
+		return nil, err
+	}
+	return &SyncProgress{
+		HeaderHeight:       headerHeight,
+		FilterHeaderHeight: filterHeight,
+		BestPeerHeight:     s.CS.BestPeerHeight(),
+	}, nil
 }
 
 // BlockStamp returns the latest block notified by the client, or an error
@@ -640,8 +659,8 @@ func (s *NeutrinoClient) onBlockConnected(hash *chainhash.Hash, height int32,
 	// before the birthday. Otherwise, we can just update using
 	// RescanProgress notifications.
 	if time.Before(s.startTime) {
-		// Send a RescanProgress notification every 10K blocks.
-		if height%10000 == 0 {
+		// Send a RescanProgress notification every 100 blocks.
+		if height%100 == 0 {
 			s.clientMtx.Lock()
 			shouldSend := s.isRescan && !s.finished
 			s.clientMtx.Unlock()
@@ -818,25 +837,25 @@ out:
 
 // MapRPCErr takes an error returned from calling RPC methods from various
 // chain backends and maps it to an defined error here. It uses the
-// `BtcdErrMap`, whose keys are btcd error strings and values are errors made
-// from bitcoind error strings.
+// `PearldErrMap`, whose keys are pearld error strings and values are errors made
+// from compatible fork error strings.
 //
-// NOTE: we assume neutrino shares the same error strings as btcd.
+// NOTE: we assume neutrino shares the same error strings as pearld.
 func (s *NeutrinoClient) MapRPCErr(rpcErr error) error {
 	// Iterate the map and find the matching error.
-	for btcdErr, matchedErr := range BtcdErrMap {
-		// Match it against btcd's error.
-		if matchErrStr(rpcErr, btcdErr) {
+	for pearldErr, matchedErr := range PearldErrMap {
+		// Match it against pearld's error.
+		if matchErrStr(rpcErr, pearldErr) {
 			return matchedErr
 		}
 	}
 
 	// Neutrino doesn't support version check, we will try to match the
-	// errors from the older version of `btcd`, which are also used by
+	// errors from the older version of `pearld`, which are also used by
 	// neutrino.
-	for btcdErr, matchedErr := range BtcdErrMapPre2402 {
-		// Match it against btcd's error.
-		if matchErrStr(rpcErr, btcdErr) {
+	for pearldErr, matchedErr := range PearldErrMapPre2402 {
+		// Match it against pearld's error.
+		if matchErrStr(rpcErr, pearldErr) {
 			return matchedErr
 		}
 	}

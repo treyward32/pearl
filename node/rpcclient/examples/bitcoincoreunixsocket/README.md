@@ -1,16 +1,16 @@
-Bitcoin Core HTTP POST Over Unix Socket Example
-==============================
+Unix Socket Example
+===================
 
-This example shows how to use the rpcclient package to connect to a Bitcoin
-Core RPC server using HTTP POST mode over a Unix Socket with TLS disabled 
-and gets the current block count.
+This example shows how to use the rpcclient package to connect to an RPC server
+using HTTP POST mode over a Unix Socket with TLS disabled and gets the current
+block count.
 
 ## Running the Example
 
-The first step is to use `go get` to download and install the rpcclient package:
+The first step is to ensure the module is available. From the project root:
 
 ```bash
-$ go get github.com/btcsuite/btcd/rpcclient
+$ go mod download
 ```
 
 Next, modify the `main.go` source to specify the correct RPC username and
@@ -21,19 +21,19 @@ password for the RPC server:
 	Pass: "yourrpcpass",
 ```
 
-As Bitcoin Core supports only TCP/IP, we'll redirect RPC requests from the 
-Unix Socket to Bitcoin Core. For this example, we'll use the `socat` command:
+If the RPC server only supports TCP/IP, you can redirect requests from the
+Unix Socket using the `socat` command:
 
 ```bash
 $ socat -d UNIX-LISTEN:"my-unix-socket-path",fork TCP:"host-address"
-$ socat -d UNIX-LISTEN:/tmp/test.XXXX,fork TCP:localhost:8332
+$ socat -d UNIX-LISTEN:/tmp/test.XXXX,fork TCP:localhost:44207
 ```
 
 Finally, navigate to the example's directory and run it with:
 
 ```bash
-$ cd $GOPATH/src/github.com/btcsuite/btcd/rpcclient/examples/bitcoincorehttp
-$ go run *.go
+$ cd node/rpcclient/examples/bitcoincoreunixsocket
+$ go run .
 ```
 
 ## License

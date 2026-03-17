@@ -1,45 +1,62 @@
-# This Dockerfile builds btcd from source and creates a small (55 MB) docker container based on alpine linux.
-#
-# Clone this repository and run the following command to build and tag a fresh btcd amd64 container:
-#
-# docker build . -t yourregistry/btcd
-#
-# You can use the following command to build an arm64v8 container:
-#
-# docker build . -t yourregistry/btcd --build-arg ARCH=arm64v8
-#
-# For more information how to use this docker image visit:
-# https://github.com/btcsuite/btcd/tree/master/docs
-#
-# 8333  Mainnet Bitcoin peer-to-peer port
-# 8334  Mainet RPC port
+# syntax=docker/dockerfile:1
 
-ARG ARCH=amd64
-# using the SHA256 instead of tags
-# https://github.com/opencontainers/image-spec/blob/main/descriptor.md#digests
-# https://cloud.google.com/architecture/using-container-images
-# https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md
-# ➜  ~ crane digest golang:1.17.13-alpine3.16
-# sha256:c80567372be0d486766593cc722d3401038e2f150a0f6c5c719caa63afb4026a
-FROM golang@sha256:c80567372be0d486766593cc722d3401038e2f150a0f6c5c719caa63afb4026a AS build-container
+FROM rust:1.95.0-alpine AS rust-toolchain
 
-ARG ARCH
+# ===== Go + Rust + Task toolchain: rarely changes, fully cached =====
+FROM golang:1.26.1-alpine AS toolchain
 
-ADD . /app
+RUN apk add --no-cache \
+    curl \
+    build-base \
+    musl-dev \
+    openssl-dev \
+    pkgconfig
+
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:${PATH}" \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo
+
+RUN sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -b /usr/local/bin v3.46.4
+
 WORKDIR /app
-RUN set -ex \
-  && if [ "${ARCH}" = "amd64" ]; then export GOARCH=amd64; fi \
-  && if [ "${ARCH}" = "arm32v7" ]; then export GOARCH=arm; fi \
-  && if [ "${ARCH}" = "arm64v8" ]; then export GOARCH=arm64; fi \
-  && echo "Compiling for $GOARCH" \
-  && go install -v . ./cmd/...
 
-FROM $ARCH/alpine:3.16
+# ===== Rust & C libraries (cached until Rust/C source changes) =====
+FROM toolchain AS libs
 
-COPY --from=build-container /go/bin /bin
+COPY Taskfile.yml Taskfile.yml
+COPY plonky2/ plonky2/
+COPY pearl-blake3/ pearl-blake3/
+COPY zk-pow/ zk-pow/
+COPY xmss/ xmss/
 
-VOLUME ["/root/.btcd"]
+RUN task build:zk-gobind build:libxmss
 
-EXPOSE 8333 8334
+# ===== Go binaries =====
+FROM libs AS builder
 
-ENTRYPOINT ["btcd"]
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN task build:pearl
+
+# ===== Runtime =====
+FROM alpine:3.21 AS runtime
+
+RUN apk add --no-cache \
+    ca-certificates \
+    libgcc \
+    libstdc++
+
+COPY --from=builder /app/bin/pearld /usr/local/bin/pearld
+COPY --from=builder /app/bin/prlctl /usr/local/bin/prlctl
+
+VOLUME ["/root/.pearld"]
+
+# 44108  Mainnet Pearl peer-to-peer port
+# 44107  Mainnet RPC port
+EXPOSE 44108 44107
+
+ENTRYPOINT ["pearld"]

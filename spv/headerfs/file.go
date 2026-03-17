@@ -3,10 +3,10 @@ package headerfs
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"io"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // ErrHeaderNotFound is returned when a target header on disk (flat file) can't
@@ -17,8 +17,30 @@ type ErrHeaderNotFound struct {
 
 // appendRaw appends a new raw header to the end of the flat file.
 func (h *headerStore) appendRaw(header []byte) error {
-	if _, err := h.file.Write(header); err != nil {
+	// Get current file position before writing. We'll use this position to
+	// revert to if the write fails partially.
+	currentPos, err := h.file.Seek(0, io.SeekCurrent)
+	if err != nil {
 		return err
+	}
+
+	n, err := h.file.Write(header)
+	if err != nil {
+		// If we wrote some bytes but not all (partial write),
+		// truncate the file back to its original size to maintain
+		// consistency. This removes the partial/corrupt header.
+		if n > 0 {
+			truncErr := h.file.Truncate(currentPos)
+			if truncErr != nil {
+				return fmt.Errorf("failed to write header "+
+					"type %s: partial write (%d bytes), "+
+					"write error: %w, truncate error: %v",
+					h.indexType, n, err, truncErr)
+			}
+		}
+
+		return fmt.Errorf("failed to write header type %s: write "+
+			"error: %w", h.indexType, err)
 	}
 
 	return nil
@@ -28,19 +50,11 @@ func (h *headerStore) appendRaw(header []byte) error {
 // amount of bytes read past the seek distance is determined by the specified
 // header type.
 func (h *headerStore) readRaw(seekDist uint64) ([]byte, error) {
-	var headerSize uint32
-
-	// Based on the defined header type, we'll determine the number of
-	// bytes that we need to read past the sync point.
-	switch h.indexType {
-	case Block:
-		headerSize = 80
-
-	case RegularFilter:
-		headerSize = 32
-
-	default:
-		return nil, fmt.Errorf("unknown index type: %v", h.indexType)
+	// Based on the defined header type, we'll determine the number of bytes
+	// that we need to read past the sync point.
+	headerSize, err := h.indexType.Size()
+	if err != nil {
+		return nil, err
 	}
 
 	// TODO(roasbeef): add buffer pool
@@ -96,9 +110,9 @@ func (h *blockHeaderStore) readHeaderRange(startHeight uint32,
 func (h *blockHeaderStore) readHeader(height uint32) (wire.BlockHeader, error) {
 	var header wire.BlockHeader
 
-	// Each header is 80 bytes, so using this information, we'll seek a
-	// distance to cover that height based on the size of block headers.
-	seekDistance := uint64(height) * 80
+	// Using the block header size, we'll seek a distance to cover that
+	// height based on the size of block headers.
+	seekDistance := uint64(height) * BlockHeaderSize
 
 	// With the distance calculated, we'll raw a raw header start from that
 	// offset.
@@ -108,7 +122,7 @@ func (h *blockHeaderStore) readHeader(height uint32) (wire.BlockHeader, error) {
 	}
 	headerReader := bytes.NewReader(rawHeader)
 
-	// Finally, decode the raw bytes into a proper bitcoin header.
+	// Finally, decode the raw bytes into a proper block header.
 	if err := header.Deserialize(headerReader); err != nil {
 		return header, err
 	}
@@ -118,7 +132,7 @@ func (h *blockHeaderStore) readHeader(height uint32) (wire.BlockHeader, error) {
 
 // readHeader reads a single filter header at the specified height from the
 // flat files on disk.
-func (f *FilterHeaderStore) readHeader(height uint32) (*chainhash.Hash, error) {
+func (f *filterHeaderStore) readHeader(height uint32) (*chainhash.Hash, error) {
 	seekDistance := uint64(height) * 32
 
 	rawHeader, err := f.readRaw(seekDistance)
@@ -136,7 +150,7 @@ func (f *FilterHeaderStore) readHeader(height uint32) (*chainhash.Hash, error) {
 //
 // NOTE: The end height is _inclusive_ so we'll fetch all headers from the
 // startHeight up to the end height, including the final header.
-func (f *FilterHeaderStore) readHeaderRange(startHeight uint32,
+func (f *filterHeaderStore) readHeaderRange(startHeight uint32,
 	endHeight uint32) ([]chainhash.Hash, error) {
 
 	// Based on the defined header type, we'll determine the number of
@@ -166,7 +180,7 @@ func (f *FilterHeaderStore) readHeaderRange(startHeight uint32,
 
 // readHeadersFromFile reads a chunk of headers, each of size headerSize, from
 // the given file, from startHeight to endHeight.
-func readHeadersFromFile(f *os.File, headerSize, startHeight,
+func readHeadersFromFile(f File, headerSize, startHeight,
 	endHeight uint32) (*bytes.Reader, error) {
 
 	// Each header is headerSize bytes, so using this information, we'll

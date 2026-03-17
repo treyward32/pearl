@@ -1,12 +1,12 @@
-// Copyright (c) 2013-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package netparams
 
 import (
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // Params is used to group parameters for various networks such as the main
@@ -17,28 +17,28 @@ type Params struct {
 	RPCServerPort string
 }
 
-// MainNetParams contains parameters specific running btcwallet and
-// btcd on the main network (wire.MainNet).
+// MainNetParams contains parameters specific running Oyster and
+// pearld on the main network (wire.MainNet).
 var MainNetParams = Params{
 	Params:        &chaincfg.MainNetParams,
-	RPCClientPort: "8334",
-	RPCServerPort: "8332",
+	RPCClientPort: "44107",
+	RPCServerPort: "44207",
 }
 
-// TestNet3Params contains parameters specific running btcwallet and
-// btcd on the test network (version 3) (wire.TestNet3).
-var TestNet3Params = Params{
-	Params:        &chaincfg.TestNet3Params,
-	RPCClientPort: "18334",
-	RPCServerPort: "18332",
+// TestNetParams contains parameters specific running Oyster and
+// pearld on the test network (wire.TestNet).
+var TestNetParams = Params{
+	Params:        &chaincfg.TestNetParams,
+	RPCClientPort: "44109",
+	RPCServerPort: "44209",
 }
 
-// TestNet4Params contains parameters specific running btcwallet and btcd on the
-// test network (version 4) (wire.TestNet4).
-var TestNet4Params = Params{
-	Params:        &chaincfg.TestNet4Params,
-	RPCClientPort: "48334",
-	RPCServerPort: "48332",
+// TestNet2Params contains parameters specific running Oyster and
+// pearld on the test network v2 (wire.TestNet2).
+var TestNet2Params = Params{
+	Params:        &chaincfg.TestNet2Params,
+	RPCClientPort: "44111",
+	RPCServerPort: "44211",
 }
 
 // SimNetParams contains parameters specific to the simulation test network
@@ -61,7 +61,7 @@ var SigNetParams = Params{
 // parameter's net value if the parameter represents a signet network or 0 if
 // it's not. This is necessary because there can be custom signet networks that
 // have a different net value.
-func SigNetWire(params *chaincfg.Params) wire.BitcoinNet {
+func SigNetWire(params *chaincfg.Params) wire.PearlNet {
 	if params.Name == chaincfg.SigNetParams.Name {
 		return params.Net
 	}

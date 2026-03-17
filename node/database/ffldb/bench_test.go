@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/database"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/database"
 )
 
 // BenchmarkBlockHeader benchmarks how long it takes to load the mainnet genesis
@@ -40,7 +40,7 @@ func BenchmarkBlockHeader(b *testing.B) {
 	err = db.View(func(tx database.Tx) error {
 		blockHash := chaincfg.MainNetParams.GenesisHash
 		for i := 0; i < b.N; i++ {
-			_, err := tx.FetchBlockHeader(blockHash)
+			_, err := tx.FetchBlock(blockHash)
 			if err != nil {
 				return err
 			}

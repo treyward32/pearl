@@ -2,17 +2,18 @@ package chain
 
 import (
 	"container/list"
+	"context"
 	"errors"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino"
-	"github.com/lightninglabs/neutrino/banman"
-	"github.com/lightninglabs/neutrino/headerfs"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/spv/banman"
+	"github.com/pearl-research-labs/pearl/spv/headerfs"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -68,7 +69,7 @@ func (m *mockRescanner) WaitForShutdown() {
 type mockChainService struct {
 }
 
-func (m *mockChainService) Start() error {
+func (m *mockChainService) Start(_ context.Context) error {
 	return nil
 }
 
@@ -156,6 +157,18 @@ func (m *mockChainService) Stop() error {
 
 func (m *mockChainService) PeerByAddr(string) *neutrino.ServerPeer {
 	panic(errNotImplemented)
+}
+
+func (m *mockChainService) BestPeerHeight() int32 {
+	return 0
+}
+
+func (m *mockChainService) BlockHeaderTipHeight() (int32, error) {
+	return 0, errNotImplemented
+}
+
+func (m *mockChainService) FilterHeaderTipHeight() (int32, error) {
+	return 0, errNotImplemented
 }
 
 // mockRPCClient mocks the rpcClient interface.

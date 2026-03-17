@@ -1,15 +1,16 @@
 package chain
 
 import (
+	"context"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 // isCurrentDelta is the delta duration we'll use from the present time to
@@ -21,18 +22,23 @@ const isCurrentDelta = 2 * time.Hour
 // TODO: Refactor each into a driver and use dynamic registration.
 func BackEnds() []string {
 	return []string{
-		"bitcoind",
-		"btcd",
-		"neutrino",
-		"bitcoind-rpc-polling",
+		"pearld",
+		"neutrino", // TODO Or: rename in the future
 	}
 }
 
+// SyncProgress contains SPV chain backend sync state.
+type SyncProgress struct {
+	HeaderHeight       int32
+	FilterHeaderHeight int32
+	BestPeerHeight     int32
+}
+
 // Interface allows more than one backing blockchain source, such as a
-// btcd RPC chain server, or an SPV library, as long as we write a driver for
+// pearld RPC chain server, or an SPV library, as long as we write a driver for
 // it.
 type Interface interface {
-	Start() error
+	Start(ctx context.Context) error
 	Stop()
 	WaitForShutdown()
 	GetBestBlock() (*chainhash.Hash, int32, error)
@@ -48,6 +54,7 @@ type Interface interface {
 	NotifyBlocks() error
 	Notifications() <-chan interface{}
 	BackEnd() string
+	SyncProgress() (*SyncProgress, error)
 	TestMempoolAccept([]*wire.MsgTx, float64) ([]*btcjson.TestMempoolAcceptResult, error)
 	MapRPCErr(err error) error
 }

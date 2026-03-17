@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -6,11 +6,12 @@ package rpcclient
 
 import (
 	"fmt"
-	"github.com/btcsuite/btcd/btcjson"
+
+	"github.com/pearl-research-labs/pearl/node/btcjson"
 )
 
 var connCfg = &ConnConfig{
-	Host:         "localhost:8332",
+	Host:         "localhost:44207",
 	User:         "user",
 	Pass:         "pass",
 	HTTPPostMode: true,
@@ -96,7 +97,7 @@ func ExampleClient_GetAddressInfo() {
 	fmt.Println(info.Address)             // 2NF1FbxtUAsvdU4uW1UC2xkBVatp6cYQuJ3
 	fmt.Println(info.ScriptType.String()) // witness_v0_keyhash
 	fmt.Println(*info.HDKeyPath)          // m/49'/1'/0'/0/4
-	fmt.Println(info.Embedded.Address)    // tb1q3x2h2kh57wzg7jz00jhwn0ycvqtdk2ane37j27
+	fmt.Println(info.Embedded.Address)    // td1q3x2h2kh57wzg7jz00jhwn0ycvqtdk2an52smzj
 }
 
 func ExampleClient_GetWalletInfo() {
@@ -129,7 +130,7 @@ func ExampleClient_GetTxOutSetInfo() {
 		panic(err)
 	}
 
-	fmt.Println(r.TotalAmount.String()) // 20947654.56996054 BTC
+	fmt.Println(r.TotalAmount.String()) // 20947654.56996054 PRL
 	fmt.Println(r.BestBlock.String())   // 000000000000005f94116250e2407310463c0a7cf950f1af9ebe935b1c0687ab
 	fmt.Println(r.TxOuts)               // 24280607
 	fmt.Println(r.Transactions)         // 9285603

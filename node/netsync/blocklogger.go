@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btclog"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
 )
 
 // blockProgressLogger provides periodic logging for other services in order
@@ -72,7 +72,7 @@ func (b *blockProgressLogger) LogBlockHeight(block *btcutil.Block, chain *blockc
 	cacheSizeStr := fmt.Sprintf("~%d MiB", chain.CachedStateSize()/1024/1024)
 	b.subsystemLogger.Infof("%s %d %s in the last %s (%d %s, height %d, %s, %s cache)",
 		b.progressAction, b.receivedLogBlocks, blockStr, tDuration, b.receivedLogTx,
-		txStr, block.Height(), block.MsgBlock().Header.Timestamp, cacheSizeStr)
+		txStr, block.Height(), block.MsgBlock().BlockHeader().Timestamp, cacheSizeStr)
 
 	b.receivedLogBlocks = 0
 	b.receivedLogTx = 0

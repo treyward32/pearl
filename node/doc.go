@@ -1,25 +1,25 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 /*
-btcd is a full-node bitcoin implementation written in Go.
+pearld is a full-node Pearl network implementation written in Go.
 
-The default options are sane for most users.  This means btcd will work 'out of
+The default options are sane for most users.  This means pearld will work 'out of
 the box' for most users.  However, there are also a wide variety of flags that
 can be used to control it.
 
 The following section provides a usage overview which enumerates the flags.  An
 interesting point to note is that the long form of all of these options
 (except -C) can be specified in a configuration file that is automatically
-parsed when btcd starts up.  By default, the configuration file is located at
-~/.btcd/btcd.conf on POSIX-style operating systems and %LOCALAPPDATA%\btcd\btcd.conf
+parsed when pearld starts up.  By default, the configuration file is located at
+~/.pearld/pearld.conf on POSIX-style operating systems and %LOCALAPPDATA%\pearld\pearld.conf
 on Windows.  The -C (--configfile) flag, as shown below, can be used to override
 this location.
 
 Usage:
 
-	btcd [OPTIONS]
+	pearld [OPTIONS]
 
 Application Options:
 
@@ -34,17 +34,9 @@ Application Options:
 	                            24h0m0s)
 	    --banthreshold=         Maximum allowed ban score before disconnecting
 	                            and banning misbehaving peers. (default: 100)
-	    --blockmaxsize=         Maximum block size in bytes to be used when
-	                            creating a block (default: 750000)
-	    --blockminsize=         Minimum block size in bytes to be used when
-	                            creating a block
-	    --blockmaxweight=       Maximum block weight to be used when creating a
-	                            block (default: 3000000)
-	    --blockminweight=       Minimum block weight to be used when creating a
-	                            block
-	    --blockprioritysize=    Size in bytes for high-priority/low-fee
-	                            transactions when creating a block (default:
-	                            50000)
+	    --blockmaxvsize=        Maximum block vsize to be used when creating
+	                            a block (default: 999000)
+	    --blockminvsize=        Minimum block vsize to be used when creating
 	    --blocksonly            Do not accept transactions from remote peers.
 	-C, --configfile=           Path to configuration file
 	    --connect=              Connect only to the specified peers at startup
@@ -68,13 +60,13 @@ Application Options:
 	                            database on start up and then exits.
 	    --externalip=           Add an ip to the list of local addresses we claim
 	                            to listen on to peers
-	    --generate              Generate (mine) bitcoins using the CPU
+	    --generate              Generate (mine) blocks using the CPU
 	    --limitfreerelay=       Limit relay of transactions with no transaction
 	                            fee to the given amount in thousands of bytes per
 	                            minute (default: 15)
 	    --listen=               Add an interface/port to listen for connections
-	                            (default all interfaces port: 8333, testnet:
-	                            18333, signet: 38333)
+	                            (default all interfaces port: 44108, testnet:
+	                            44110, signet: 38333)
 	    --logdir=               Directory to log output
 	    --maxorphantx=          Max number of orphan transactions to keep in
 	                            memory (default: 100)
@@ -84,7 +76,7 @@ Application Options:
 	                            addresses to use for generated blocks -- At least
 	                            one address is required if the generate option is
 	                            set
-	    --minrelaytxfee=        The minimum transaction fee in BTC/kB to be
+	    --minrelaytxfee=        The minimum transaction fee in PRL/kB to be
 	                            considered a non-zero fee. (default: 1e-05)
 	    --nobanning             Disable banning of misbehaving peers
 	    --nocfilters            Disable committed filtering (CF) support
@@ -125,7 +117,7 @@ Application Options:
 	    --rpclimitpass=         Password for limited RPC connections
 	    --rpclimituser=         Username for limited RPC connections
 	    --rpclisten=            Add an interface/port to listen for RPC
-	                            connections (default port: 8334, testnet: 18334)
+	                            connections (default port: 44107, testnet: 44109)
 	    --rpcmaxclients=        Max number of RPC clients for standard
 	                            connections (default: 10)
 	    --rpcmaxconcurrentreqs= Max number of concurrent RPC requests that may be

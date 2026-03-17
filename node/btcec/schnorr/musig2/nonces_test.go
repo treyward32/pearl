@@ -1,4 +1,4 @@
-// Copyright 2013-2022 The btcsuite developers
+// Copyright 2013-2022 The Pearl Research Labs
 
 package musig2
 

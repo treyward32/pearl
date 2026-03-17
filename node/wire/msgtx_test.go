@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,8 +12,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,8 @@ func TestTx(t *testing.T) {
 	}
 
 	// Ensure max payload is expected value for latest protocol version.
-	wantPayload := uint32(1000 * 4000)
+	// Updated to 4M to match MaxBlockPayload (MaxBlockVsize × WitnessScaleFactor = 1M × 4)
+	wantPayload := uint32(4000000)
 	maxPayload := msg.MaxPayloadLength(pver)
 	if maxPayload != wantPayload {
 		t.Errorf("MaxPayloadLength: wrong max payload length for "+
@@ -298,75 +299,75 @@ func TestTxWire(t *testing.T) {
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version with no transactions.
+		// Protocol version ProtocolVersion with no transactions.
 		{
 			noTx,
 			noTx,
 			noTxEncoded,
-			BIP0035Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version with multiple transactions.
+		// Protocol version ProtocolVersion with multiple transactions.
 		{
 			multiTx,
 			multiTx,
 			multiTxEncoded,
-			BIP0035Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Version with no transactions.
+		// Protocol version ProtocolVersion with no transactions.
 		{
 			noTx,
 			noTx,
 			noTxEncoded,
-			BIP0031Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Version with multiple transactions.
+		// Protocol version ProtocolVersion with multiple transactions.
 		{
 			multiTx,
 			multiTx,
 			multiTxEncoded,
-			BIP0031Version,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion with no transactions.
+		// Protocol version ProtocolVersion with no transactions.
 		{
 			noTx,
 			noTx,
 			noTxEncoded,
-			NetAddressTimeVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion with multiple transactions.
+		// Protocol version ProtocolVersion with multiple transactions.
 		{
 			multiTx,
 			multiTx,
 			multiTxEncoded,
-			NetAddressTimeVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion with no transactions.
+		// Protocol version ProtocolVersion with no transactions.
 		{
 			noTx,
 			noTx,
 			noTxEncoded,
-			MultipleAddressVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion with multiple transactions.
+		// Protocol version ProtocolVersion with multiple transactions.
 		{
 			multiTx,
 			multiTx,
 			multiTxEncoded,
-			MultipleAddressVersion,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 	}
@@ -375,13 +376,13 @@ func TestTxWire(t *testing.T) {
 	for i, test := range tests {
 		// Encode the message to wire format.
 		var buf bytes.Buffer
-		err := test.in.BtcEncode(&buf, test.pver, test.enc)
+		err := test.in.PrlEncode(&buf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcEncode #%d error %v", i, err)
+			t.Errorf("PrlEncode #%d error %v", i, err)
 			continue
 		}
 		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("BtcEncode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlEncode #%d\n got: %s want: %s", i,
 				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
 			continue
 		}
@@ -389,13 +390,13 @@ func TestTxWire(t *testing.T) {
 		// Decode the message from wire format.
 		var msg MsgTx
 		rbuf := bytes.NewReader(test.buf)
-		err = msg.BtcDecode(rbuf, test.pver, test.enc)
+		err = msg.PrlDecode(rbuf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcDecode #%d error %v", i, err)
+			t.Errorf("PrlDecode #%d error %v", i, err)
 			continue
 		}
 		if !reflect.DeepEqual(&msg, test.out) {
-			t.Errorf("BtcDecode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlDecode #%d\n got: %s want: %s", i,
 				spew.Sdump(&msg), spew.Sdump(test.out))
 			continue
 		}
@@ -449,9 +450,9 @@ func TestTxWireErrors(t *testing.T) {
 	for i, test := range tests {
 		// Encode to wire format.
 		w := newFixedWriter(test.max)
-		err := test.in.BtcEncode(w, test.pver, test.enc)
+		err := test.in.PrlEncode(w, test.pver, test.enc)
 		if err != test.writeErr {
-			t.Errorf("BtcEncode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlEncode #%d wrong error got: %v, want: %v",
 				i, err, test.writeErr)
 			continue
 		}
@@ -459,9 +460,9 @@ func TestTxWireErrors(t *testing.T) {
 		// Decode from wire format.
 		var msg MsgTx
 		r := newFixedReader(test.max, test.buf)
-		err = msg.BtcDecode(r, test.pver, test.enc)
+		err = msg.PrlDecode(r, test.pver, test.enc)
 		if err != test.readErr {
-			t.Errorf("BtcDecode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlDecode #%d wrong error got: %v, want: %v",
 				i, err, test.readErr)
 			continue
 		}
@@ -705,9 +706,9 @@ func TestTxOverflowErrors(t *testing.T) {
 		// Decode from wire format.
 		var msg MsgTx
 		r := bytes.NewReader(test.buf)
-		err := msg.BtcDecode(r, test.pver, test.enc)
+		err := msg.PrlDecode(r, test.pver, test.enc)
 		if reflect.TypeOf(err) != reflect.TypeOf(test.err) {
-			t.Errorf("BtcDecode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlDecode #%d wrong error got: %v, want: %v",
 				i, err, reflect.TypeOf(test.err))
 			continue
 		}
@@ -892,7 +893,7 @@ func TestTxOutPointFromString(t *testing.T) {
 func TestTxSuperfluousWitnessRecord(t *testing.T) {
 	m := &MsgTx{}
 	rbuf := bytes.NewReader(multiWitnessFlagNoWitness)
-	err := m.BtcDecode(rbuf, ProtocolVersion, WitnessEncoding)
+	err := m.PrlDecode(rbuf, ProtocolVersion, WitnessEncoding)
 	if !errors.Is(err, errSuperfluousWitnessRecord) {
 		t.Fatalf("should have failed with %v", errSuperfluousWitnessRecord)
 	}

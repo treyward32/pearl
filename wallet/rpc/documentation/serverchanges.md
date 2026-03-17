@@ -1,6 +1,6 @@
 # Making API Changes
 
-This document describes the process of how btcwallet developers must make
+This document describes the process of how Oyster developers must make
 changes to the RPC API and server.  Due to the use of gRPC and Protocol Buffers
 for the RPC implementation, changes to this API require extra dependencies and
 steps before changes to the server can be implemented.
@@ -66,7 +66,7 @@ A `sh` shell script is included to compile the Protocol Buffers descriptor.  It
 must be run from the `rpc` directory.
 
 ```bash
-$ sh regen.sh
+$ sh gen_protos_docker.sh
 ```
 
 If a `sh` shell is unavailable, the command can be run manually instead (again

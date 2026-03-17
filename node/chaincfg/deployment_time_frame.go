@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 var (
@@ -12,6 +12,30 @@ var (
 	// synchornization with the current up to date block clock.
 	ErrNoBlockClock = fmt.Errorf("no block clock synchronized")
 )
+
+// HeaderCtx is an interface that describes information about a block. This is
+// used so that external libraries can provide their own context (the header's
+// parent, bits, etc.) when attempting to contextually validate a header.
+type HeaderCtx interface {
+	// Hash returns the header's hash.
+	Hash() chainhash.Hash
+
+	// Height returns the header's height.
+	Height() int32
+
+	// Bits returns the header's bits.
+	Bits() uint32
+
+	// Timestamp returns the header's timestamp.
+	Timestamp() int64
+
+	// Parent returns the header's parent.
+	Parent() HeaderCtx
+
+	// RelativeAncestorCtx returns the header's ancestor that is distance
+	// blocks before it in the chain.
+	RelativeAncestorCtx(distance int32) HeaderCtx
+}
 
 // BlockClock is an abstraction over the past median time computation. The past
 // median time computation is used in several consensus checks such as CSV, and
@@ -22,7 +46,7 @@ type BlockClock interface {
 	// PastMedianTime returns the past median time from the PoV of the
 	// passed block header. The past median time is the median time of the
 	// 11 blocks prior to the passed block header.
-	PastMedianTime(*wire.BlockHeader) (time.Time, error)
+	PastMedianTime(HeaderCtx) (time.Time, error)
 }
 
 // ConsensusDeploymentStarter determines if a given consensus deployment has
@@ -31,7 +55,7 @@ type BlockClock interface {
 // passed.
 type ConsensusDeploymentStarter interface {
 	// HasStarted returns true if the consensus deployment has started.
-	HasStarted(*wire.BlockHeader) (bool, error)
+	HasStarted(HeaderCtx) (bool, error)
 }
 
 // ClockConsensusDeploymentStarter is a more specialized version of the
@@ -53,7 +77,7 @@ type ClockConsensusDeploymentStarter interface {
 // deployment is no longer eligible for activation.
 type ConsensusDeploymentEnder interface {
 	// HasEnded returns true if the consensus deployment has ended.
-	HasEnded(*wire.BlockHeader) (bool, error)
+	HasEnded(HeaderCtx) (bool, error)
 }
 
 // ClockConsensusDeploymentEnder is a more specialized version of the
@@ -96,7 +120,7 @@ func (m *MedianTimeDeploymentStarter) SynchronizeClock(clock BlockClock) {
 }
 
 // HasStarted returns true if the consensus deployment has started.
-func (m *MedianTimeDeploymentStarter) HasStarted(blkHeader *wire.BlockHeader) (bool, error) {
+func (m *MedianTimeDeploymentStarter) HasStarted(blkHeader HeaderCtx) (bool, error) {
 	switch {
 	// If we haven't yet been synchronized with a block clock, then we
 	// can't tell the time, so we'll fail.
@@ -146,7 +170,7 @@ func NewMedianTimeDeploymentEnder(endTime time.Time) *MedianTimeDeploymentEnder 
 }
 
 // HasEnded returns true if the deployment has ended.
-func (m *MedianTimeDeploymentEnder) HasEnded(blkHeader *wire.BlockHeader) (bool, error) {
+func (m *MedianTimeDeploymentEnder) HasEnded(blkHeader HeaderCtx) (bool, error) {
 	switch {
 	// If we haven't yet been synchronized with a block clock, then we can't tell
 	// the time, so we'll we haven't yet been synchronized with a block

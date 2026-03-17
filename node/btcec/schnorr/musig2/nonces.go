@@ -1,4 +1,4 @@
-// Copyright 2013-2022 The btcsuite developers
+// Copyright 2013-2022 The Pearl Research Labs
 
 package musig2
 
@@ -9,9 +9,9 @@ import (
 	"errors"
 	"io"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 const (

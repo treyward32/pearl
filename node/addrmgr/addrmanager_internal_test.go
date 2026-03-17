@@ -3,11 +3,10 @@ package addrmgr
 import (
 	"math/rand"
 	"net"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // randAddr generates a *wire.NetAddressV2 backed by a random IPv4/IPv6
@@ -107,11 +106,7 @@ func TestAddrManagerSerialization(t *testing.T) {
 
 	// We'll start by creating our address manager backed by a temporary
 	// directory.
-	tempDir, err := os.MkdirTemp("", "addrmgr")
-	if err != nil {
-		t.Fatalf("unable to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	addrMgr := New(tempDir, nil)
 
@@ -147,11 +142,7 @@ func TestAddrManagerV1ToV2(t *testing.T) {
 
 	// We'll start by creating our address manager backed by a temporary
 	// directory.
-	tempDir, err := os.MkdirTemp("", "addrmgr")
-	if err != nil {
-		t.Fatalf("unable to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	addrMgr := New(tempDir, nil)
 

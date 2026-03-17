@@ -1,4 +1,4 @@
-// Copyright 2013-2022 The btcsuite developers
+// Copyright 2013-2022 The Pearl Research Labs
 
 package musig2
 
@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcec/v2"
 	secp "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/pearl-research-labs/pearl/node/btcec"
 	"github.com/stretchr/testify/require"
 )
 

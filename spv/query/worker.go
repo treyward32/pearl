@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 var (

@@ -1,43 +1,29 @@
-// Copyright (c) 2013-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package wire
 
 import (
-	"fmt"
 	"io"
 )
 
-// MsgMemPool implements the Message interface and represents a bitcoin mempool
+// MsgMemPool implements the Message interface and represents a mempool
 // message.  It is used to request a list of transactions still in the active
 // memory pool of a relay.
 //
-// This message has no payload and was not added until protocol versions
-// starting with BIP0035Version.
+// This message has no payload.
 type MsgMemPool struct{}
 
-// BtcDecode decodes r using the bitcoin protocol encoding into the receiver.
+// PrlDecode decodes r using the wire protocol encoding into the receiver.
 // This is part of the Message interface implementation.
-func (msg *MsgMemPool) BtcDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
-	if pver < BIP0035Version {
-		str := fmt.Sprintf("mempool message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgMemPool.BtcDecode", str)
-	}
-
+func (msg *MsgMemPool) PrlDecode(r io.Reader, pver uint32, enc MessageEncoding) error {
 	return nil
 }
 
-// BtcEncode encodes the receiver to w using the bitcoin protocol encoding.
+// PrlEncode encodes the receiver to w using the wire protocol encoding.
 // This is part of the Message interface implementation.
-func (msg *MsgMemPool) BtcEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
-	if pver < BIP0035Version {
-		str := fmt.Sprintf("mempool message invalid for protocol "+
-			"version %d", pver)
-		return messageError("MsgMemPool.BtcEncode", str)
-	}
-
+func (msg *MsgMemPool) PrlEncode(w io.Writer, pver uint32, enc MessageEncoding) error {
 	return nil
 }
 
@@ -53,7 +39,7 @@ func (msg *MsgMemPool) MaxPayloadLength(pver uint32) uint32 {
 	return 0
 }
 
-// NewMsgMemPool returns a new bitcoin pong message that conforms to the Message
+// NewMsgMemPool returns a new pong message that conforms to the Message
 // interface.  See MsgPong for details.
 func NewMsgMemPool() *MsgMemPool {
 	return &MsgMemPool{}

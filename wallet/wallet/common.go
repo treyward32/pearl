@@ -1,5 +1,5 @@
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2016 The Decred developers
-// Copyright (c) 2017 The btcsuite developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,9 +8,8 @@ package wallet
 import (
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // Note: The following common types should never reference the Wallet type.
@@ -62,27 +61,4 @@ type TransactionOutput struct {
 type OutputRedeemer struct {
 	TxHash     chainhash.Hash
 	InputIndex uint32
-}
-
-// P2SHMultiSigOutput describes a transaction output with a pay-to-script-hash
-// output script and an imported redemption script.  Along with common details
-// of the output, this structure also includes the P2SH address the script was
-// created from and the number of signatures required to redeem it.
-//
-// TODO: Could be useful to return how many of the required signatures can be
-// created by this wallet.
-type P2SHMultiSigOutput struct {
-	// TODO: Add a TransactionOutput member to this struct and remove these
-	// fields which are duplicated by it.  This improves consistency.  Only
-	// not done now because wtxmgr APIs don't support an efficient way of
-	// fetching other Transactionoutput data together with the rest of the
-	// multisig info.
-	OutPoint        wire.OutPoint
-	OutputAmount    btcutil.Amount
-	ContainingBlock BlockIdentity
-
-	P2SHAddress  *btcutil.AddressScriptHash
-	RedeemScript []byte
-	M, N         uint8           // M of N signatures required to redeem
-	Redeemer     *OutputRedeemer // nil unless spent
 }

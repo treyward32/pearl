@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,13 +7,13 @@ package main
 import (
 	"log"
 
-	"github.com/btcsuite/btcd/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
 )
 
 func main() {
 	// Connect to local bitcoin core RPC server using HTTP POST mode.
 	connCfg := &rpcclient.ConnConfig{
-		Host:         "localhost:8332",
+		Host:         "localhost:44207",
 		User:         "yourrpcuser",
 		Pass:         "yourrpcpass",
 		HTTPPostMode: true, // Bitcoin core only supports HTTP POST mode

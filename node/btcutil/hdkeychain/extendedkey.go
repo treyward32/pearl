@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -17,18 +17,19 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/base58"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/base58"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 const (
 	// RecommendedSeedLen is the recommended length in bytes for a seed
 	// to a master node.
-	RecommendedSeedLen = 32 // 256 bits
+	RecommendedSeedLen = 16 // 128 bits
 
 	// HardenedKeyStart is the index at which a hardened key starts.  Each
 	// extended key has 2^31 normal child keys and 2^31 hardened child keys.
@@ -106,14 +107,15 @@ var masterKey = []byte("Bitcoin seed")
 // deterministic extended key.  See the package overview documentation for
 // more details on how to use extended keys.
 type ExtendedKey struct {
-	key       []byte // This will be the pubkey for extended pub keys
-	pubKey    []byte // This will only be set for extended priv keys
-	chainCode []byte
-	depth     uint8
-	parentFP  []byte
-	childNum  uint32
-	version   []byte
-	isPrivate bool
+	key        []byte // This will be the pubkey for extended pub keys
+	pubKey     []byte // This will only be set for extended priv keys
+	pubKeyOnce sync.Once
+	chainCode  []byte
+	depth      uint8
+	parentFP   []byte
+	childNum   uint32
+	version    []byte
+	isPrivate  bool
 }
 
 // NewExtendedKey returns a new instance of an extended key with the given
@@ -152,11 +154,11 @@ func (k *ExtendedKey) pubKeyBytes() []byte {
 	}
 
 	// This is a private extended key, so calculate and memoize the public
-	// key if needed.
-	if len(k.pubKey) == 0 {
+	// key if needed. Use sync.Once for thread-safety.
+	k.pubKeyOnce.Do(func() {
 		_, pubKey := btcec.PrivKeyFromBytes(k.key)
 		k.pubKey = pubKey.SerializeCompressed()
-	}
+	})
 
 	return k.pubKey
 }
@@ -524,7 +526,7 @@ func (k *ExtendedKey) CloneWithVersion(version []byte) (*ExtendedKey, error) {
 	if len(version) != 4 {
 		// TODO: The semantically correct error to return here is
 		//  ErrInvalidHDKeyID (introduced in btcsuite/btcd#1617). Update the
-		//  error type once available in a stable btcd / chaincfg release.
+		//  error type once available in a stable pearld / chaincfg release.
 		return nil, chaincfg.ErrUnknownHDKeyID
 	}
 
@@ -550,13 +552,6 @@ func (k *ExtendedKey) ECPrivKey() (*btcec.PrivateKey, error) {
 
 	privKey, _ := btcec.PrivKeyFromBytes(k.key)
 	return privKey, nil
-}
-
-// Address converts the extended key to a standard bitcoin pay-to-pubkey-hash
-// address for the passed network.
-func (k *ExtendedKey) Address(net *chaincfg.Params) (*btcutil.AddressPubKeyHash, error) {
-	pkHash := btcutil.Hash160(k.pubKeyBytes())
-	return btcutil.NewAddressPubKeyHash(pkHash, net)
 }
 
 // paddedAppend appends the src byte slice to dst, returning the new slice.
@@ -600,7 +595,7 @@ func (k *ExtendedKey) String() string {
 }
 
 // IsForNet returns whether or not the extended key is associated with the
-// passed bitcoin network.
+// passed network.
 func (k *ExtendedKey) IsForNet(net *chaincfg.Params) bool {
 	return bytes.Equal(k.version, net.HDPrivateKeyID[:]) ||
 		bytes.Equal(k.version, net.HDPublicKeyID[:])

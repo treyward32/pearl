@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,7 +7,7 @@ package blockchain
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // TestThresholdStateStringer tests the stringized output for the
@@ -173,6 +173,10 @@ func (c customDeploymentChecker) IsSpeedy() bool {
 
 func (c customDeploymentChecker) Condition(_ *blockNode) (bool, error) {
 	return c.conditionTrue, nil
+}
+
+func (c customDeploymentChecker) ForceActive(_ *blockNode) bool {
+	return false
 }
 
 // TestThresholdStateTransition tests that the thresholdStateTransition

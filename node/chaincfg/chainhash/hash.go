@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -62,7 +62,7 @@ var (
 // string that has too many characters.
 var ErrHashStrSize = fmt.Errorf("max hash string length is %v bytes", MaxHashStringSize)
 
-// Hash is used in several of the bitcoin messages and common structures.  It
+// Hash is used in several of the wire messages and common structures.  It
 // typically represents the double sha256 of data.
 type Hash [HashSize]byte
 

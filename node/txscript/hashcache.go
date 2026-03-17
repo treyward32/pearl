@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,11 +7,12 @@ package txscript
 import (
 	"bytes"
 	"encoding/binary"
+	"maps"
 	"math"
 	"sync"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // calcHashPrevOuts calculates a single hash of all the previous outputs
@@ -142,9 +143,7 @@ func (m *MultiPrevOutFetcher) AddPrevOut(op wire.OutPoint, txOut *wire.TxOut) {
 
 // Merge merges two instances of a MultiPrevOutFetcher into a single source.
 func (m *MultiPrevOutFetcher) Merge(other *MultiPrevOutFetcher) {
-	for k, v := range other.prevOuts {
-		m.prevOuts[k] = v
-	}
+	maps.Copy(m.prevOuts, other.prevOuts)
 }
 
 // A compile-time assertion to ensure that MultiPrevOutFetcher matches the

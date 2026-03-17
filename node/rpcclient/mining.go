@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // FutureGenerateResult is a future promise to deliver the result of a
@@ -169,46 +169,6 @@ func (c *Client) SetGenerateAsync(enable bool, numCPUs int) FutureSetGenerateRes
 // SetGenerate sets the server to generate coins (mine) or not.
 func (c *Client) SetGenerate(enable bool, numCPUs int) error {
 	return c.SetGenerateAsync(enable, numCPUs).Receive()
-}
-
-// FutureGetHashesPerSecResult is a future promise to deliver the result of a
-// GetHashesPerSecAsync RPC invocation (or an applicable error).
-type FutureGetHashesPerSecResult chan *Response
-
-// Receive waits for the Response promised by the future and returns a recent
-// hashes per second performance measurement while generating coins (mining).
-// Zero is returned if the server is not mining.
-func (r FutureGetHashesPerSecResult) Receive() (int64, error) {
-	res, err := ReceiveFuture(r)
-	if err != nil {
-		return -1, err
-	}
-
-	// Unmarshal result as an int64.
-	var result int64
-	err = json.Unmarshal(res, &result)
-	if err != nil {
-		return 0, err
-	}
-
-	return result, nil
-}
-
-// GetHashesPerSecAsync returns an instance of a type that can be used to get
-// the result of the RPC at some future time by invoking the Receive function on
-// the returned instance.
-//
-// See GetHashesPerSec for the blocking version and more details.
-func (c *Client) GetHashesPerSecAsync() FutureGetHashesPerSecResult {
-	cmd := btcjson.NewGetHashesPerSecCmd()
-	return c.SendCmd(cmd)
-}
-
-// GetHashesPerSec returns a recent hashes per second performance measurement
-// while generating coins (mining).  Zero is returned if the server is not
-// mining.
-func (c *Client) GetHashesPerSec() (int64, error) {
-	return c.GetHashesPerSecAsync().Receive()
 }
 
 // FutureGetMiningInfoResult is a future promise to deliver the result of a
@@ -456,7 +416,7 @@ func (c *Client) SubmitBlockAsync(block *btcutil.Block, options *btcjson.SubmitB
 	return c.SendCmd(cmd)
 }
 
-// SubmitBlock attempts to submit a new block into the bitcoin network.
+// SubmitBlock attempts to submit a new block into the network.
 func (c *Client) SubmitBlock(block *btcutil.Block, options *btcjson.SubmitBlockOptions) error {
 	return c.SubmitBlockAsync(block, options).Receive()
 }

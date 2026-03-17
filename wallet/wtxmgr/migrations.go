@@ -1,22 +1,20 @@
 package wtxmgr
 
 import (
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/btcsuite/btcwallet/walletdb/migration"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb/migration"
 )
 
 // versions is a list of the different database versions. The last entry should
 // reflect the latest database state. If the database happens to be at a version
 // number lower than the latest, migrations will be performed in order to catch
 // it up.
+//
+// Currently no migrations are defined as this is a new project.
 var versions = []migration.Version{
 	{
 		Number:    1,
 		Migration: nil,
-	},
-	{
-		Number:    2,
-		Migration: dropTransactionHistory,
 	},
 }
 
@@ -84,27 +82,4 @@ func (m *MigrationManager) SetVersion(ns walletdb.ReadWriteBucket,
 // NOTE: This method is part of the migration.Manager interface.
 func (m *MigrationManager) Versions() []migration.Version {
 	return versions
-}
-
-// dropTransactionHistory is a migration that attempts to recreate the
-// transaction store with a clean state.
-func dropTransactionHistory(ns walletdb.ReadWriteBucket) error {
-	log.Info("Dropping wallet transaction history")
-
-	// To drop the store's transaction history, we'll need to remove all of
-	// the relevant descendant buckets and key/value pairs.
-	if err := deleteBuckets(ns); err != nil {
-		return err
-	}
-	if err := ns.Delete(rootMinedBalance); err != nil {
-		return err
-	}
-
-	// With everything removed, we'll now recreate our buckets.
-	if err := createBuckets(ns); err != nil {
-		return err
-	}
-
-	// Finally, we'll insert a 0 value for our mined balance.
-	return putMinedBalance(ns, 0)
 }

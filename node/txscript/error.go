@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2019 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -34,15 +34,6 @@ const (
 	// ErrUnsupportedAddress is returned when a concrete type that
 	// implements a btcutil.Address is not a supported type.
 	ErrUnsupportedAddress
-
-	// ErrNotMultisigScript is returned from CalcMultiSigStats when the
-	// provided script is not a multisig script.
-	ErrNotMultisigScript
-
-	// ErrTooManyRequiredSigs is returned from MultiSigScript when the
-	// specified number of required signatures is larger than the number of
-	// provided public keys.
-	ErrTooManyRequiredSigs
 
 	// ErrTooMuchNullData is returned from NullDataScript when the length of
 	// the provided data exceeds MaxDataCarrierSize.
@@ -95,16 +86,6 @@ const (
 	// ErrStackOverflow is returned when stack and altstack combined depth
 	// is over the limit.
 	ErrStackOverflow
-
-	// ErrInvalidPubKeyCount is returned when the number of public keys
-	// specified for a multsig is either negative or greater than
-	// MaxPubKeysPerMultiSig.
-	ErrInvalidPubKeyCount
-
-	// ErrInvalidSignatureCount is returned when the number of signatures
-	// specified for a multisig is either negative or greater than the
-	// number of public keys.
-	ErrInvalidSignatureCount
 
 	// ErrNumberTooBig is returned when the argument for an opcode that
 	// expects numeric input is larger than the expected maximum number of
@@ -171,9 +152,8 @@ const (
 	// Failures related to malleability.
 	// ---------------------------------
 
-	// ErrMinimalData is returned when the ScriptVerifyMinimalData flag
-	// is set and the script contains push operations that do not use
-	// the minimal opcode required.
+	// ErrMinimalData is returned when the script contains push operations
+	// that do not use the minimal opcode required.
 	ErrMinimalData
 
 	// ErrInvalidSigHashType is returned when a signature hash type is not
@@ -251,10 +231,8 @@ const (
 	// half order.
 	ErrSigHighS
 
-	// ErrNotPushOnly is returned when a script that is required to only
-	// push data to the stack performs other operations.  A couple of cases
-	// where this applies is for a pay-to-script-hash signature script when
-	// bip16 is active and when the ScriptVerifySigPushOnly flag is set.
+	// ErrNotPushOnly is returned when a signature script that is required
+	// to only push data to the stack performs other operations.
 	ErrNotPushOnly
 
 	// ErrSigNullDummy is returned when the ScriptStrictMultiSig flag is set
@@ -266,14 +244,12 @@ const (
 	// flag is set and the script contains invalid public keys.
 	ErrPubKeyType
 
-	// ErrCleanStack is returned when the ScriptVerifyCleanStack flag
-	// is set, and after evaluation, the stack does not contain only a
-	// single element.
+	// ErrCleanStack is returned when after evaluation, the stack does
+	// not contain only a single element.
 	ErrCleanStack
 
-	// ErrNullFail is returned when the ScriptVerifyNullFail flag is
-	// set and signatures are not empty on failed checksig or checkmultisig
-	// operations.
+	// ErrNullFail is returned when signatures are not empty on failed
+	// checksig or checkmultisig operations.
 	ErrNullFail
 
 	// ErrWitnessMalleated is returned if ScriptVerifyWitness is set and a
@@ -289,9 +265,8 @@ const (
 	// Failures related to soft forks.
 	// -------------------------------
 
-	// ErrDiscourageUpgradableNOPs is returned when the
-	// ScriptDiscourageUpgradableNops flag is set and a NOP opcode is
-	// encountered in a script.
+	// ErrDiscourageUpgradableNOPs is returned when a reserved NOP opcode
+	// is encountered in a script.
 	ErrDiscourageUpgradableNOPs
 
 	// ErrNegativeLockTime is returned when a script contains an opcode that
@@ -416,6 +391,24 @@ const (
 	// non-segwit script.
 	ErrCodeSeparator
 
+	// ------------------------------------------
+	// Failures related to P2MR (Pay-to-Merkle-Root, SegWit v2).
+	// ------------------------------------------
+
+	// ErrMerkleRootNoKeyPathSpend is returned when a P2MR output is
+	// spent with a single witness element (key-path style). P2MR only
+	// supports script-path spends.
+	ErrMerkleRootNoKeyPathSpend
+
+	// ErrMerkleRootMerkleProofInvalid is returned when the Merkle
+	// inclusion proof in a P2MR control block does not reconstruct to
+	// the witness program (the committed Merkle root).
+	ErrMerkleRootMerkleProofInvalid
+
+	// ErrMerkleRootControlBlockInvalidParity is returned when a P2MR
+	// control block's parity bit is not 1, as required by BIP 360.
+	ErrMerkleRootControlBlockInvalidParity
+
 	// numErrorCodes is the maximum error code number used in tests.  This
 	// entry MUST be the last entry in the enum.
 	numErrorCodes
@@ -427,8 +420,6 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrInvalidFlags:                        "ErrInvalidFlags",
 	ErrInvalidIndex:                        "ErrInvalidIndex",
 	ErrUnsupportedAddress:                  "ErrUnsupportedAddress",
-	ErrNotMultisigScript:                   "ErrNotMultisigScript",
-	ErrTooManyRequiredSigs:                 "ErrTooManyRequiredSigs",
 	ErrTooMuchNullData:                     "ErrTooMuchNullData",
 	ErrUnsupportedScriptVersion:            "ErrUnsupportedScriptVersion",
 	ErrEarlyReturn:                         "ErrEarlyReturn",
@@ -440,8 +431,6 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrElementTooBig:                       "ErrElementTooBig",
 	ErrTooManyOperations:                   "ErrTooManyOperations",
 	ErrStackOverflow:                       "ErrStackOverflow",
-	ErrInvalidPubKeyCount:                  "ErrInvalidPubKeyCount",
-	ErrInvalidSignatureCount:               "ErrInvalidSignatureCount",
 	ErrNumberTooBig:                        "ErrNumberTooBig",
 	ErrVerify:                              "ErrVerify",
 	ErrEqualVerify:                         "ErrEqualVerify",
@@ -504,6 +493,9 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrTaprootMaxSigOps:                    "ErrTaprootMaxSigOps",
 	ErrNonConstScriptCode:                  "ErrNonConstScriptCode",
 	ErrCodeSeparator:                       "ErrCodeSeparator",
+	ErrMerkleRootNoKeyPathSpend:            "ErrMerkleRootNoKeyPathSpend",
+	ErrMerkleRootMerkleProofInvalid:        "ErrMerkleRootMerkleProofInvalid",
+	ErrMerkleRootControlBlockInvalidParity: "ErrMerkleRootControlBlockInvalidParity",
 }
 
 // String returns the ErrorCode as a human-readable name.

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -178,12 +178,12 @@ func TestHandleTestMempoolAcceptMixedResults(t *testing.T) {
 		Allowed: true,
 		Vsize:   100,
 		Fees: &btcjson.TestMempoolAcceptFees{
-			Base:             feeSats.ToBTC(),
-			EffectiveFeeRate: feeSats.ToBTC() * 1e3 / 100,
+			Base:             feeSats.ToPRL(),
+			EffectiveFeeRate: feeSats.ToPRL() * 1e3 / 100,
 		},
 	}
 
-	// Create a mock request with default max fee rate of 0.1 BTC/KvB.
+	// Create a mock request with default max fee rate of 0.1 PRL/KvB.
 	cmd := btcjson.NewTestMempoolAcceptCmd(
 		[]string{txHex1, txHex2, txHex3}, 0.1,
 	)
@@ -204,14 +204,14 @@ func TestValidateFeeRate(t *testing.T) {
 	t.Parallel()
 
 	const (
-		// testFeeRate is in BTC/kvB.
+		// testFeeRate is in PRL/kvB.
 		testFeeRate = 0.1
 
 		// testTxSize is in vb.
 		testTxSize = 100
 
 		// testFeeSats is in sats.
-		// We have 0.1BTC/kvB =
+		// We have 0.1PRL/kvB =
 		//   0.1 * 1e8 sats/kvB =
 		//   0.1 * 1e8 / 1e3 sats/vb = 0.1 * 1e5 sats/vb.
 		testFeeSats = btcutil.Amount(testFeeRate * 1e5 * testTxSize)
@@ -243,7 +243,7 @@ func TestValidateFeeRate(t *testing.T) {
 			txSize:     testTxSize,
 			maxFeeRate: testFeeRate,
 			expectedFees: &btcjson.TestMempoolAcceptFees{
-				Base:             testFeeSats.ToBTC(),
+				Base:             testFeeSats.ToPRL(),
 				EffectiveFeeRate: testFeeRate,
 			},
 			allowed: true,
@@ -265,7 +265,7 @@ func TestValidateFeeRate(t *testing.T) {
 			feeSats: testFeeSats,
 			txSize:  testTxSize,
 			expectedFees: &btcjson.TestMempoolAcceptFees{
-				Base:             testFeeSats.ToBTC(),
+				Base:             testFeeSats.ToPRL(),
 				EffectiveFeeRate: testFeeRate,
 			},
 			allowed: true,
@@ -302,7 +302,7 @@ func TestHandleTestMempoolAcceptFees(t *testing.T) {
 	}}
 
 	const (
-		// Set transaction's fee rate to be 0.2BTC/kvB.
+		// Set transaction's fee rate to be 0.2PRL/kvB.
 		feeRate = defaultMaxFeeRate * 2
 
 		// txSize is 100vb.
@@ -340,7 +340,7 @@ func TestHandleTestMempoolAcceptFees(t *testing.T) {
 		},
 		{
 			// When the max fee rate is not set, the default
-			// 0.1BTC/kvB is used and the fee rate(0.2) used by the
+			// 0.1PRL/kvB is used and the fee rate(0.2) used by the
 			// tx is above it, the result should disallow it.
 			name:         "above default max fee rate",
 			txHex:        txHex1,

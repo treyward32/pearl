@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/btcsuite/btcwallet/walletdb/walletdbtest"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb/walletdbtest"
 )
 
 // TestInterface performs all interfaces tests for this database driver.
@@ -26,5 +26,7 @@ func TestInterface(t *testing.T) {
 
 	dbPath := filepath.Join(tempDir, "db")
 	defer os.RemoveAll(dbPath)
-	walletdbtest.TestInterface(t, dbType, dbPath, true, defaultDBTimeout)
+	walletdbtest.TestInterface(
+		t, dbType, dbPath, true, defaultDBTimeout, false,
+	)
 }

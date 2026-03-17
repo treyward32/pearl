@@ -3,8 +3,8 @@ package waddrmgr
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/btcec/v2/schnorr"
-	"github.com/btcsuite/btcd/txscript"
+	"github.com/pearl-research-labs/pearl/node/btcec/schnorr"
+	"github.com/pearl-research-labs/pearl/node/txscript"
 	"github.com/stretchr/testify/require"
 )
 

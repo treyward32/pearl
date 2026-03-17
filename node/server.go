@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Copyright (c) 2015-2018 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
@@ -22,30 +22,31 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/addrmgr"
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/blockchain/indexers"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/bloom"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/connmgr"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/mempool"
-	"github.com/btcsuite/btcd/mining"
-	"github.com/btcsuite/btcd/mining/cpuminer"
-	"github.com/btcsuite/btcd/netsync"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/decred/dcrd/lru"
+	"github.com/pearl-research-labs/pearl/node/addrmgr"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/blockchain/indexers"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/bloom"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/connmgr"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/mempool"
+	"github.com/pearl-research-labs/pearl/node/mining"
+	"github.com/pearl-research-labs/pearl/node/mining/cpuminer"
+	"github.com/pearl-research-labs/pearl/node/netsync"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	pearlversion "github.com/pearl-research-labs/pearl/version"
 )
 
 const (
 	// defaultServices describes the default services that are supported by
 	// the server.
 	defaultServices = wire.SFNodeNetwork | wire.SFNodeNetworkLimited |
-		wire.SFNodeBloom | wire.SFNodeWitness | wire.SFNodeCF
+		wire.SFNodeBloom | wire.SFNodeWitness | wire.SFNodeCF | wire.SFNodeP2PV2
 
 	// defaultRequiredServices describes the default services that are
 	// required to be supported by outbound peers.
@@ -62,12 +63,12 @@ const (
 
 var (
 	// userAgentName is the user agent name and is used to help identify
-	// ourselves to other bitcoin peers.
-	userAgentName = "btcd"
+	// ourselves to other peers on the network.
+	userAgentName = "pearld"
 
 	// userAgentVersion is the user agent version and is used to help
-	// identify ourselves to other bitcoin peers.
-	userAgentVersion = fmt.Sprintf("%d.%d.%d", appMajor, appMinor, appPatch)
+	// identify ourselves to other peers on the network.
+	userAgentVersion = fmt.Sprintf("%d.%d.%d", pearlversion.Major, pearlversion.Minor, pearlversion.Patch)
 )
 
 // zeroHash is the zero value hash (all zeros).  It is defined as a convenience.
@@ -117,7 +118,7 @@ func (a simpleAddr) Network() string {
 // Ensure simpleAddr implements the net.Addr interface.
 var _ net.Addr = simpleAddr{}
 
-// broadcastMsg provides the ability to house a bitcoin message to be broadcast
+// broadcastMsg provides the ability to house a wire message to be broadcast
 // to all connected peers except specified excluded peers.
 type broadcastMsg struct {
 	message      wire.Message
@@ -149,6 +150,25 @@ type updatePeerHeightsMsg struct {
 	newHash    *chainhash.Hash
 	newHeight  int32
 	originPeer *peer.Peer
+}
+
+// peerLifecycleAction describes the type of peer lifecycle event.
+type peerLifecycleAction uint8
+
+const (
+	peerAdd peerLifecycleAction = iota
+	peerDone
+)
+
+// peerLifecycleEvent represents a peer connection or disconnection
+// event. Both event types for a given peer are sent by a single
+// goroutine (peerLifecycleHandler), guaranteeing that if peerAdd is
+// sent, it is always enqueued before peerDone. peerAdd may be
+// skipped entirely when the peer disconnects before or concurrently
+// with verack.
+type peerLifecycleEvent struct {
+	action peerLifecycleAction
+	sp     *serverPeer
 }
 
 // peerState maintains state of inbound, persistent, outbound peers as well
@@ -194,8 +214,8 @@ type cfHeaderKV struct {
 	filterHeader chainhash.Hash
 }
 
-// server provides a bitcoin server for handling communications to and from
-// bitcoin peers.
+// server provides a Pearl server for handling communications to and from
+// peers.
 type server struct {
 	// The following variables must only be used atomically.
 	// Putting the uint64s first makes them 64-bit aligned for 32-bit systems.
@@ -217,8 +237,7 @@ type server struct {
 	txMemPool            *mempool.TxPool
 	cpuMiner             *cpuminer.CPUMiner
 	modifyRebroadcastInv chan interface{}
-	newPeers             chan *serverPeer
-	donePeers            chan *serverPeer
+	peerLifecycle        chan peerLifecycleEvent
 	banPeers             chan *serverPeer
 	query                chan interface{}
 	relayInv             chan relayMsg
@@ -278,9 +297,11 @@ type serverPeer struct {
 	knownAddresses lru.Cache
 	banScore       connmgr.DynamicBanScore
 	quit           chan struct{}
+	// Closed when OnVerAck fires.
+	verAckCh chan struct{}
 	// The following chans are used to sync blockmanager and server.
 	txProcessed    chan struct{}
-	blockProcessed chan struct{}
+	blockProcessed chan error
 }
 
 // newServerPeer returns a new serverPeer instance. The peer needs to be set by
@@ -292,8 +313,9 @@ func newServerPeer(s *server, isPersistent bool) *serverPeer {
 		filter:         bloom.LoadFilter(nil),
 		knownAddresses: lru.NewCache(5000),
 		quit:           make(chan struct{}),
+		verAckCh:       make(chan struct{}),
 		txProcessed:    make(chan struct{}, 1),
-		blockProcessed: make(chan struct{}, 1),
+		blockProcessed: make(chan error, 1),
 	}
 }
 
@@ -457,7 +479,7 @@ func hasServices(advertised, desired wire.ServiceFlag) bool {
 	return advertised&desired == desired
 }
 
-// OnVersion is invoked when a peer receives a version bitcoin message
+// OnVersion is invoked when a peer receives a version wire message
 // and is used to negotiate the protocol version details as well as kick start
 // the communications.
 func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgReject {
@@ -496,26 +518,6 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 		return wire.NewMsgReject(msg.Command(), wire.RejectNonstandard, reason)
 	}
 
-	if !cfg.SimNet && !isInbound {
-		// After soft-fork activation, only make outbound
-		// connection to peers if they flag that they're segwit
-		// enabled.
-		chain := sp.server.chain
-		segwitActive, err := chain.IsDeploymentActive(chaincfg.DeploymentSegwit)
-		if err != nil {
-			peerLog.Errorf("Unable to query for segwit soft-fork state: %v",
-				err)
-			return nil
-		}
-
-		if segwitActive && !sp.IsWitnessEnabled() {
-			peerLog.Infof("Disconnecting non-segwit peer %v, isn't segwit "+
-				"enabled and we need more segwit enabled peers", sp)
-			sp.Disconnect()
-			return nil
-		}
-	}
-
 	// Add the remote peer time as a sample for creating an offset against
 	// the local clock to keep the network time in sync.
 	sp.server.timeSource.AddTimeSample(sp.Addr(), msg.Timestamp)
@@ -527,13 +529,20 @@ func (sp *serverPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	return nil
 }
 
-// OnVerAck is invoked when a peer receives a verack bitcoin message and is used
-// to kick start communication with them.
+// OnVerAck is invoked when a peer receives a verack wire message.
+// It signals the peer's lifecycle handler that the handshake is
+// complete so it can register the peer with the server.
 func (sp *serverPeer) OnVerAck(_ *peer.Peer, _ *wire.MsgVerAck) {
-	sp.server.AddPeer(sp)
+	select {
+	case <-sp.verAckCh:
+		peerLog.Errorf("OnVerAck called more than once "+
+			"for peer %v", sp)
+	default:
+		close(sp.verAckCh)
+	}
 }
 
-// OnMemPool is invoked when a peer receives a mempool bitcoin message.
+// OnMemPool is invoked when a peer receives a mempool wire message.
 // It creates and sends an inventory message with the contents of the memory
 // pool up to the maximum inventory allowed per message.  When the peer has a
 // bloom filter loaded, the contents are filtered accordingly.
@@ -583,8 +592,8 @@ func (sp *serverPeer) OnMemPool(_ *peer.Peer, msg *wire.MsgMemPool) {
 	}
 }
 
-// OnTx is invoked when a peer receives a tx bitcoin message.  It blocks
-// until the bitcoin transaction has been fully processed.  Unlock the block
+// OnTx is invoked when a peer receives a tx wire message.  It blocks
+// until the transaction has been fully processed.  Unlock the block
 // handler this does not serialize all transactions through a single thread
 // transactions don't rely on the previous one in a linear fashion like blocks.
 func (sp *serverPeer) OnTx(_ *peer.Peer, msg *wire.MsgTx) {
@@ -610,8 +619,8 @@ func (sp *serverPeer) OnTx(_ *peer.Peer, msg *wire.MsgTx) {
 	<-sp.txProcessed
 }
 
-// OnBlock is invoked when a peer receives a block bitcoin message.  It
-// blocks until the bitcoin block has been fully processed.
+// OnBlock is invoked when a peer receives a block wire message.  It
+// blocks until the block has been fully processed.
 func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 	// Convert the raw MsgBlock to a btcutil.Block which provides some
 	// convenience methods and things such as hash caching.
@@ -623,7 +632,7 @@ func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 
 	// Queue the block up to be handled by the block
 	// manager and intentionally block further receives
-	// until the bitcoin block is fully processed and known
+	// until the block is fully processed and known
 	// good or bad.  This helps prevent a malicious peer
 	// from queuing up a bunch of bad blocks before
 	// disconnecting (or being disconnected) and wasting
@@ -631,12 +640,71 @@ func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 	// by at least the block acceptance test tool as the
 	// reference implementation processes blocks in the same
 	// thread and therefore blocks further messages until
-	// the bitcoin block has been fully processed.
+	// the block has been fully processed.
 	sp.server.syncManager.QueueBlock(block, sp.Peer, sp.blockProcessed)
-	<-sp.blockProcessed
+	if err := <-sp.blockProcessed; err != nil {
+		if rErr, ok := err.(blockchain.RuleError); ok {
+			protected := ""
+			if cfg.DisableBanning || sp.isWhitelisted {
+				protected = " protected"
+			}
+			switch rErr.ErrorCode {
+			case blockchain.ErrBlockTooBig,
+				blockchain.ErrTimeTooOld,
+				blockchain.ErrUnexpectedDifficulty,
+				blockchain.ErrHighHash,
+				blockchain.ErrCertificateTooLarge,
+				blockchain.ErrCertificateMissing,
+				blockchain.ErrBadMerkleRoot,
+				blockchain.ErrNoTransactions,
+				blockchain.ErrNoTxInputs,
+				blockchain.ErrNoTxOutputs,
+				blockchain.ErrTxTooBig,
+				blockchain.ErrBadTxOutValue,
+				blockchain.ErrDuplicateTxInputs,
+				blockchain.ErrBadTxInput,
+				blockchain.ErrMissingTxOut,
+				blockchain.ErrUnfinalizedTx,
+				blockchain.ErrDuplicateTx,
+				blockchain.ErrOverwriteTx,
+				blockchain.ErrImmatureSpend,
+				blockchain.ErrSpendTooHigh,
+				blockchain.ErrBadFees,
+				blockchain.ErrFirstTxNotCoinbase,
+				blockchain.ErrMultipleCoinbases,
+				blockchain.ErrBadCoinbaseScriptLen,
+				blockchain.ErrBadCoinbaseValue,
+				blockchain.ErrScriptMalformed,
+				blockchain.ErrScriptValidation:
+				peerLog.Warnf("Banning%s peer %s for sending invalid block %s: %v",
+					protected, sp, block.Hash(), rErr)
+				sp.addBanScore(101, 0, rErr.Error())
+
+			case blockchain.ErrDisallowedCertVersion,
+				blockchain.ErrBadCheckpoint,
+				blockchain.ErrCheckpointTimeTooOld,
+				blockchain.ErrMissingCoinbaseHeight,
+				blockchain.ErrForkTooOld,
+				blockchain.ErrBadCoinbaseHeight,
+				blockchain.ErrUnexpectedWitness,
+				blockchain.ErrInvalidWitnessCommitment,
+				blockchain.ErrWitnessCommitmentMismatch,
+				blockchain.ErrDifficultyTooLow:
+				peerLog.Warnf("Disconnecting%s peer %s for sending invalid block %s: %v",
+					protected, sp, block.Hash(), rErr)
+				if protected == "" {
+					sp.Disconnect()
+				}
+
+			default:
+				peerLog.Warnf("Not punishing%s peer %s however sending invalid block %s: %v",
+					protected, sp, block.Hash(), rErr)
+			}
+		}
+	}
 }
 
-// OnInv is invoked when a peer receives an inv bitcoin message and is
+// OnInv is invoked when a peer receives an inv wire message and is
 // used to examine the inventory being advertised by the remote peer and react
 // accordingly.  We pass the message down to blockmanager which will call
 // QueueMessage with any appropriate responses.
@@ -651,15 +719,10 @@ func (sp *serverPeer) OnInv(_ *peer.Peer, msg *wire.MsgInv) {
 	newInv := wire.NewMsgInvSizeHint(uint(len(msg.InvList)))
 	for _, invVect := range msg.InvList {
 		if invVect.Type == wire.InvTypeTx {
-			peerLog.Tracef("Ignoring tx %v in inv from %v -- "+
-				"blocksonly enabled", invVect.Hash, sp)
-			if sp.ProtocolVersion() >= wire.BIP0037Version {
-				peerLog.Infof("Peer %v is announcing "+
-					"transactions -- disconnecting", sp)
-				sp.Disconnect()
-				return
-			}
-			continue
+			peerLog.Infof("Peer %v is announcing "+
+				"transactions in blocksonly mode -- disconnecting", sp)
+			sp.Disconnect()
+			return
 		}
 		err := newInv.AddInvVect(invVect)
 		if err != nil {
@@ -673,95 +736,152 @@ func (sp *serverPeer) OnInv(_ *peer.Peer, msg *wire.MsgInv) {
 	}
 }
 
-// OnHeaders is invoked when a peer receives a headers bitcoin
+// OnHeaders is invoked when a peer receives a headers wire
 // message.  The message is passed down to the sync manager.
 func (sp *serverPeer) OnHeaders(_ *peer.Peer, msg *wire.MsgHeaders) {
 	sp.server.syncManager.QueueHeaders(msg, sp.Peer)
 }
 
-// handleGetData is invoked when a peer receives a getdata bitcoin message and
-// is used to deliver block and transaction information.
+// OnGetData is invoked when a peer receives a getdata wire message and is
+// used to deliver block and transaction information.
 func (sp *serverPeer) OnGetData(_ *peer.Peer, msg *wire.MsgGetData) {
-	numAdded := 0
-	notFound := wire.NewMsgNotFound()
+	// failedMsg is an inventory that stores all the failed msgs - either
+	// the msg is an unknown type, or there's an error processing it.
+	failedMsg := wire.NewMsgNotFound()
 
 	length := len(msg.InvList)
-	// A decaying ban score increase is applied to prevent exhausting resources
-	// with unusually large inventory queries.
-	// Requesting more than the maximum inventory vector length within a short
-	// period of time yields a score above the default ban threshold. Sustained
-	// bursts of small requests are not penalized as that would potentially ban
-	// peers performing IBD.
+
+	// A decaying ban score increase is applied to prevent exhausting
+	// resources with unusually large inventory queries.
+	//
+	// Requesting more than the maximum inventory vector length within a
+	// short period of time yields a score above the default ban threshold.
+	// Sustained bursts of small requests are not penalized as that would
+	// potentially ban peers performing IBD.
+	//
 	// This incremental score decays each minute to half of its value.
 	if sp.addBanScore(0, uint32(length)*99/wire.MaxInvPerMsg, "getdata") {
 		return
 	}
 
-	// We wait on this wait channel periodically to prevent queuing
-	// far more data than we can send in a reasonable time, wasting memory.
-	// The waiting occurs after the database fetch for the next one to
-	// provide a little pipelining.
-	var waitChan chan struct{}
-	doneChan := make(chan struct{}, 1)
+	// We wait on this wait channel periodically to prevent queuing far
+	// more data than we can send in a reasonable time, wasting memory. The
+	// waiting occurs after the database fetch for the next one to provide
+	// a little pipelining.
+
+	// We now create a doneChans with a size of 5, which essentially
+	// behaves like a semaphore that allows 5 goroutines to be running at
+	// the same time.
+	const numBuffered = 5
+	doneChans := make([]chan struct{}, 0, numBuffered)
 
 	for i, iv := range msg.InvList {
-		var c chan struct{}
-		// If this will be the last message we send.
-		if i == length-1 && len(notFound.InvList) == 0 {
-			c = doneChan
-		} else if (i+1)%3 == 0 {
-			// Buffered so as to not make the send goroutine block.
-			c = make(chan struct{}, 1)
+		// doneChan behaves like a semaphore - every time a msg is
+		// processed, either succeeded or failed, a signal is sent to
+		// this doneChan.
+		doneChan := make(chan struct{}, 1)
+
+		// Add this doneChan for tracking.
+		doneChans = append(doneChans, doneChan)
+
+		err := sp.server.pushInventory(sp, iv, doneChan)
+		if err != nil {
+			failedMsg.AddInvVect(iv)
 		}
-		var err error
-		switch iv.Type {
-		case wire.InvTypeWitnessTx:
-			err = sp.server.pushTxMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
-		case wire.InvTypeTx:
-			err = sp.server.pushTxMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
-		case wire.InvTypeWitnessBlock:
-			err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
-		case wire.InvTypeBlock:
-			err = sp.server.pushBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
-		case wire.InvTypeFilteredWitnessBlock:
-			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.WitnessEncoding)
-		case wire.InvTypeFilteredBlock:
-			err = sp.server.pushMerkleBlockMsg(sp, &iv.Hash, c, waitChan, wire.BaseEncoding)
-		default:
-			peerLog.Warnf("Unknown type in inventory request %d",
-				iv.Type)
+
+		// Move to the next item if we haven't processed 5 times yet.
+		if (i+1)%numBuffered != 0 {
 			continue
 		}
-		if err != nil {
-			notFound.AddInvVect(iv)
 
-			// When there is a failure fetching the final entry
-			// and the done channel was sent in due to there
-			// being no outstanding not found inventory, consume
-			// it here because there is now not found inventory
-			// that will use the channel momentarily.
-			if i == len(msg.InvList)-1 && c != nil {
-				<-c
+		// Empty all the slots.
+		for _, dc := range doneChans {
+			select {
+			// NOTE: We always expect am empty struct to be sent to
+			// this doneChan, even when `pushInventory` failed.
+			case <-dc:
+
+			// Exit if the server is shutting down.
+			case <-sp.quit:
+				peerLog.Debug("Server shutting down in " +
+					"OnGetData")
+
+				return
 			}
 		}
-		numAdded++
-		waitChan = c
-	}
-	if len(notFound.InvList) != 0 {
-		sp.QueueMessage(notFound, doneChan)
+
+		// Re-initialize the done chans.
+		doneChans = make([]chan struct{}, 0, numBuffered)
 	}
 
-	// Wait for messages to be sent. We can send quite a lot of data at this
-	// point and this will keep the peer busy for a decent amount of time.
-	// We don't process anything else by them in this time so that we
+	if len(failedMsg.InvList) != 0 {
+		doneChan := make(chan struct{}, 1)
+
+		// Add this doneChan for tracking.
+		doneChans = append(doneChans, doneChan)
+
+		// Send the failed msgs.
+		sp.QueueMessage(failedMsg, doneChan)
+	}
+
+	// Wait for messages to be sent. We can send quite a lot of data at
+	// this point and this will keep the peer busy for a decent amount of
+	// time. We don't process anything else by them in this time so that we
 	// have an idea of when we should hear back from them - else the idle
 	// timeout could fire when we were only half done sending the blocks.
-	if numAdded > 0 {
-		<-doneChan
+	for _, dc := range doneChans {
+		select {
+		case <-dc:
+
+		// Exit if the server is shutting down.
+		case <-sp.quit:
+			peerLog.Debug("Server shutting down in OnGetData")
+			return
+		}
 	}
 }
 
-// OnGetBlocks is invoked when a peer receives a getblocks bitcoin
+// pushInventory sends the requested inventory to the given peer.
+func (s *server) pushInventory(sp *serverPeer, iv *wire.InvVect,
+	doneChan chan<- struct{}) error {
+
+	switch iv.Type {
+	case wire.InvTypeWitnessTx:
+		return s.pushTxMsg(sp, &iv.Hash, doneChan, wire.WitnessEncoding)
+
+	case wire.InvTypeTx:
+		return s.pushTxMsg(sp, &iv.Hash, doneChan, wire.BaseEncoding)
+
+	case wire.InvTypeWitnessBlock:
+		return s.pushBlockMsg(
+			sp, &iv.Hash, doneChan, wire.WitnessEncoding,
+		)
+
+	case wire.InvTypeBlock:
+		return s.pushBlockMsg(sp, &iv.Hash, doneChan, wire.BaseEncoding)
+
+	case wire.InvTypeFilteredWitnessBlock:
+		return s.pushMerkleBlockMsg(
+			sp, &iv.Hash, doneChan, wire.WitnessEncoding,
+		)
+
+	case wire.InvTypeFilteredBlock:
+		return s.pushMerkleBlockMsg(
+			sp, &iv.Hash, doneChan, wire.BaseEncoding,
+		)
+
+	default:
+		peerLog.Warnf("Unknown type in inventory request %d", iv.Type)
+
+		if doneChan != nil {
+			doneChan <- struct{}{}
+		}
+
+		return errors.New("unknown inventory type")
+	}
+}
+
+// OnGetBlocks is invoked when a peer receives a getblocks wire
 // message.
 func (sp *serverPeer) OnGetBlocks(_ *peer.Peer, msg *wire.MsgGetBlocks) {
 	// Find the most recent known block in the best chain based on the block
@@ -800,7 +920,7 @@ func (sp *serverPeer) OnGetBlocks(_ *peer.Peer, msg *wire.MsgGetBlocks) {
 	}
 }
 
-// OnGetHeaders is invoked when a peer receives a getheaders bitcoin
+// OnGetHeaders is invoked when a peer receives a getheaders wire
 // message.
 func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
 	// Ignore getheaders requests if not in sync.
@@ -819,17 +939,13 @@ func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
 	//
 	// This mirrors the behavior in the reference implementation.
 	chain := sp.server.chain
-	headers := chain.LocateHeaders(msg.BlockLocatorHashes, &msg.HashStop)
+	headers := chain.LocateHeaders(msg.BlockLocatorHashes, &msg.HashStop, msg.IncludeCertificates)
 
 	// Send found headers to the requesting peer.
-	blockHeaders := make([]*wire.BlockHeader, len(headers))
-	for i := range headers {
-		blockHeaders[i] = &headers[i]
-	}
-	sp.QueueMessage(&wire.MsgHeaders{Headers: blockHeaders}, nil)
+	sp.QueueMessage(&wire.MsgHeaders{Headers: headers}, nil)
 }
 
-// OnGetCFilters is invoked when a peer receives a getcfilters bitcoin message.
+// OnGetCFilters is invoked when a peer receives a getcfilters wire message.
 func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
 	// Ignore getcfilters requests if not in sync.
 	if !sp.server.syncManager.IsCurrent() {
@@ -885,7 +1001,7 @@ func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
 	}
 }
 
-// OnGetCFHeaders is invoked when a peer receives a getcfheader bitcoin message.
+// OnGetCFHeaders is invoked when a peer receives a getcfheader wire message.
 func (sp *serverPeer) OnGetCFHeaders(_ *peer.Peer, msg *wire.MsgGetCFHeaders) {
 	// Ignore getcfilterheader requests if not in sync.
 	if !sp.server.syncManager.IsCurrent() {
@@ -1002,7 +1118,7 @@ func (sp *serverPeer) OnGetCFHeaders(_ *peer.Peer, msg *wire.MsgGetCFHeaders) {
 	sp.QueueMessage(headersMsg, nil)
 }
 
-// OnGetCFCheckpt is invoked when a peer receives a getcfcheckpt bitcoin message.
+// OnGetCFCheckpt is invoked when a peer receives a getcfcheckpt wire message.
 func (sp *serverPeer) OnGetCFCheckpt(_ *peer.Peer, msg *wire.MsgGetCFCheckpt) {
 	// Ignore getcfcheckpt requests if not in sync.
 	if !sp.server.syncManager.IsCurrent() {
@@ -1167,9 +1283,7 @@ func (sp *serverPeer) enforceNodeBloomFlag(cmd string) bool {
 		// whether or not banning is enabled, it is checked here as well
 		// to ensure the violation is logged and the peer is
 		// disconnected regardless.
-		if sp.ProtocolVersion() >= wire.BIP0111Version &&
-			!cfg.DisableBanning {
-
+		if !cfg.DisableBanning {
 			// Disconnect the peer regardless of whether it was
 			// banned.
 			sp.addBanScore(100, 0, cmd)
@@ -1177,8 +1291,7 @@ func (sp *serverPeer) enforceNodeBloomFlag(cmd string) bool {
 			return false
 		}
 
-		// Disconnect the peer regardless of protocol version or banning
-		// state.
+		// Disconnect the peer regardless of banning state.
 		peerLog.Debugf("%s sent an unsupported %s request -- "+
 			"disconnecting", sp, cmd)
 		sp.Disconnect()
@@ -1188,13 +1301,13 @@ func (sp *serverPeer) enforceNodeBloomFlag(cmd string) bool {
 	return true
 }
 
-// OnFeeFilter is invoked when a peer receives a feefilter bitcoin message and
+// OnFeeFilter is invoked when a peer receives a feefilter wire message and
 // is used by remote peers to request that no transactions which have a fee rate
 // lower than provided value are inventoried to them.  The peer will be
 // disconnected if an invalid fee filter value is provided.
 func (sp *serverPeer) OnFeeFilter(_ *peer.Peer, msg *wire.MsgFeeFilter) {
 	// Check that the passed minimum fee is a valid amount.
-	if msg.MinFee < 0 || msg.MinFee > btcutil.MaxSatoshi {
+	if msg.MinFee < 0 || msg.MinFee > btcutil.MaxGrain {
 		peerLog.Debugf("Peer %v sent an invalid feefilter '%v' -- "+
 			"disconnecting", sp, btcutil.Amount(msg.MinFee))
 		sp.Disconnect()
@@ -1204,7 +1317,7 @@ func (sp *serverPeer) OnFeeFilter(_ *peer.Peer, msg *wire.MsgFeeFilter) {
 	atomic.StoreInt64(&sp.feeFilter, msg.MinFee)
 }
 
-// OnFilterAdd is invoked when a peer receives a filteradd bitcoin
+// OnFilterAdd is invoked when a peer receives a filteradd wire
 // message and is used by remote peers to add data to an already loaded bloom
 // filter.  The peer will be disconnected if a filter is not loaded when this
 // message is received or the server is not configured to allow bloom filters.
@@ -1225,7 +1338,7 @@ func (sp *serverPeer) OnFilterAdd(_ *peer.Peer, msg *wire.MsgFilterAdd) {
 	sp.filter.Add(msg.Data)
 }
 
-// OnFilterClear is invoked when a peer receives a filterclear bitcoin
+// OnFilterClear is invoked when a peer receives a filterclear wire
 // message and is used by remote peers to clear an already loaded bloom filter.
 // The peer will be disconnected if a filter is not loaded when this message is
 // received  or the server is not configured to allow bloom filters.
@@ -1246,7 +1359,7 @@ func (sp *serverPeer) OnFilterClear(_ *peer.Peer, msg *wire.MsgFilterClear) {
 	sp.filter.Unload()
 }
 
-// OnFilterLoad is invoked when a peer receives a filterload bitcoin
+// OnFilterLoad is invoked when a peer receives a filterload wire
 // message and it used to load a bloom filter that should be used for
 // delivering merkle blocks and associated transactions that match the filter.
 // The peer will be disconnected if the server is not configured to allow bloom
@@ -1263,7 +1376,7 @@ func (sp *serverPeer) OnFilterLoad(_ *peer.Peer, msg *wire.MsgFilterLoad) {
 	sp.filter.Reload(msg)
 }
 
-// OnGetAddr is invoked when a peer receives a getaddr bitcoin message
+// OnGetAddr is invoked when a peer receives a getaddr wire message
 // and is used to provide the peer with known addresses from the address
 // manager.
 func (sp *serverPeer) OnGetAddr(_ *peer.Peer, msg *wire.MsgGetAddr) {
@@ -1299,7 +1412,7 @@ func (sp *serverPeer) OnGetAddr(_ *peer.Peer, msg *wire.MsgGetAddr) {
 	sp.pushAddrMsg(addrCache)
 }
 
-// OnAddr is invoked when a peer receives an addr bitcoin message and is
+// OnAddr is invoked when a peer receives an addr wire message and is
 // used to notify the server about advertised addresses.
 func (sp *serverPeer) OnAddr(_ *peer.Peer, msg *wire.MsgAddr) {
 	// Ignore addresses when running on the simulation test network.  This
@@ -1307,11 +1420,6 @@ func (sp *serverPeer) OnAddr(_ *peer.Peer, msg *wire.MsgAddr) {
 	// since it will not be able to learn about other peers that have not
 	// specifically been provided.
 	if cfg.SimNet {
-		return
-	}
-
-	// Ignore old style addresses which don't include a timestamp.
-	if sp.ProtocolVersion() < wire.NetAddressTimeVersion {
 		return
 	}
 
@@ -1356,7 +1464,7 @@ func (sp *serverPeer) OnAddr(_ *peer.Peer, msg *wire.MsgAddr) {
 	sp.server.addrManager.AddAddresses(addrs, sp.NA())
 }
 
-// OnAddrV2 is invoked when a peer receives an addrv2 bitcoin message and is
+// OnAddrV2 is invoked when a peer receives an addrv2 wire message and is
 // used to notify the server about advertised addresses.
 func (sp *serverPeer) OnAddrV2(_ *peer.Peer, msg *wire.MsgAddrV2) {
 	// Ignore if simnet for the same reasons as the regular addr message.
@@ -1528,8 +1636,8 @@ func (s *server) TransactionConfirmed(tx *btcutil.Tx) {
 
 // pushTxMsg sends a tx message for the provided transaction hash to the
 // connected peer.  An error is returned if the transaction hash is not known.
-func (s *server) pushTxMsg(sp *serverPeer, hash *chainhash.Hash, doneChan chan<- struct{},
-	waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
+func (s *server) pushTxMsg(sp *serverPeer, hash *chainhash.Hash,
+	doneChan chan<- struct{}, encoding wire.MessageEncoding) error {
 
 	// Attempt to fetch the requested transaction from the pool.  A
 	// call could be made to check for existence first, but simply trying
@@ -1545,11 +1653,6 @@ func (s *server) pushTxMsg(sp *serverPeer, hash *chainhash.Hash, doneChan chan<-
 		return err
 	}
 
-	// Once we have fetched data wait for any previous operation to finish.
-	if waitChan != nil {
-		<-waitChan
-	}
-
 	sp.QueueMessageWithEncoding(tx.MsgTx(), doneChan, encoding)
 
 	return nil
@@ -1557,8 +1660,8 @@ func (s *server) pushTxMsg(sp *serverPeer, hash *chainhash.Hash, doneChan chan<-
 
 // pushBlockMsg sends a block message for the provided block hash to the
 // connected peer.  An error is returned if the block hash is not known.
-func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash, doneChan chan<- struct{},
-	waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
+func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash,
+	doneChan chan<- struct{}, encoding wire.MessageEncoding) error {
 
 	// Fetch the raw block bytes from the database.
 	var blockBytes []byte
@@ -1588,11 +1691,6 @@ func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash, doneChan cha
 			doneChan <- struct{}{}
 		}
 		return err
-	}
-
-	// Once we have fetched data wait for any previous operation to finish.
-	if waitChan != nil {
-		<-waitChan
 	}
 
 	// We only send the channel for this message if we aren't sending
@@ -1626,7 +1724,7 @@ func (s *server) pushBlockMsg(sp *serverPeer, hash *chainhash.Hash, doneChan cha
 // loaded, this call will simply be ignored if there is no filter loaded.  An
 // error is returned if the block hash is not known.
 func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
-	doneChan chan<- struct{}, waitChan <-chan struct{}, encoding wire.MessageEncoding) error {
+	doneChan chan<- struct{}, encoding wire.MessageEncoding) error {
 
 	// Do not send a response if the peer doesn't have a filter loaded.
 	if !sp.filter.IsLoaded() {
@@ -1651,11 +1749,6 @@ func (s *server) pushMerkleBlockMsg(sp *serverPeer, hash *chainhash.Hash,
 	// Generate a merkle block by filtering the requested block according
 	// to the filter for the peer.
 	merkle, matchedTxIndices := bloom.NewMerkleBlock(blk, sp.filter)
-
-	// Once we have fetched data wait for any previous operation to finish.
-	if waitChan != nil {
-		<-waitChan
-	}
 
 	// Send the merkleblock.  Only send the done channel with this message
 	// if no transactions will be sent afterwards.
@@ -1802,11 +1895,8 @@ func (s *server) handleAddPeerMsg(state *peerState, sp *serverPeer) bool {
 			}
 		}
 
-		// Request known addresses if the server address manager needs
-		// more and the peer has a protocol version new enough to
-		// include a timestamp with addresses.
-		hasTimestamp := sp.ProtocolVersion() >= wire.NetAddressTimeVersion
-		if s.addrManager.NeedMoreAddresses() && hasTimestamp {
+		// Request known addresses if the server address manager needs more.
+		if s.addrManager.NeedMoreAddresses() {
 			sp.QueueMessage(wire.NewMsgGetAddr(), nil)
 		}
 
@@ -1833,9 +1923,11 @@ func (s *server) handleDonePeerMsg(state *peerState, sp *serverPeer) {
 	// our connection manager about the disconnection. This can happen if we
 	// process a peer's `done` message before its `add`.
 	if !sp.Inbound() {
-		if sp.persistent {
+		switch {
+		case sp.persistent:
 			s.connManager.Disconnect(sp.connReq.ID())
-		} else {
+
+		default:
 			s.connManager.Remove(sp.connReq.ID())
 			go s.connManager.NewConnReq()
 		}
@@ -1847,7 +1939,23 @@ func (s *server) handleDonePeerMsg(state *peerState, sp *serverPeer) {
 		}
 		delete(list, sp.ID())
 		srvrLog.Debugf("Removed peer %s", sp)
-		return
+	}
+
+	// Notify the sync manager the peer is gone and evict any
+	// remaining orphans that were sent by the peer. This is done
+	// here rather than in peerLifecycleHandler so that the
+	// notification is serialized with NewPeer calls through the
+	// peerHandler goroutine, guaranteeing that the sync manager
+	// always sees NewPeer before DonePeer for a given peer.
+	if sp.VerAckReceived() {
+		s.syncManager.DonePeer(sp.Peer)
+
+		numEvicted := s.txMemPool.RemoveOrphansByTag(mempool.Tag(sp.ID()))
+		if numEvicted > 0 {
+			txmpLog.Debugf("Evicted %d %s from peer %v (id %d)",
+				numEvicted, pickNoun(numEvicted, "orphan",
+					"orphans"), sp, sp.ID())
+		}
 	}
 }
 
@@ -1877,14 +1985,13 @@ func (s *server) handleRelayInvMsg(state *peerState, msg relayMsg) {
 		// generate and send a headers message instead of an inventory
 		// message.
 		if msg.invVect.Type == wire.InvTypeBlock && sp.WantsHeaders() {
-			blockHeader, ok := msg.data.(wire.BlockHeader)
+			msgHeader, ok := msg.data.(wire.MsgHeader)
 			if !ok {
-				peerLog.Warnf("Underlying data for headers" +
-					" is not a block header")
+				peerLog.Warnf("Underlying data for headers is not a MsgHeader: %T", msg.data)
 				return
 			}
 			msgHeaders := wire.NewMsgHeaders()
-			if err := msgHeaders.AddBlockHeader(&blockHeader); err != nil {
+			if err := msgHeaders.AddBlockHeader(msgHeader.BlockHeader, msgHeader.BlockCertificate()); err != nil {
 				peerLog.Errorf("Failed to add block"+
 					" header: %v", err)
 				return
@@ -2145,12 +2252,6 @@ func newPeerConfig(sp *serverPeer) *peer.Config {
 			OnRead:         sp.OnRead,
 			OnWrite:        sp.OnWrite,
 			OnNotFound:     sp.OnNotFound,
-
-			// Note: The reference client currently bans peers that send alerts
-			// not signed with its key.  We could verify against their key, but
-			// since the reference client is currently unwilling to support
-			// other implementations' alert messages, we will not relay theirs.
-			OnAlert: nil,
 		},
 		NewestBlock:         sp.newestBlock,
 		HostToNetAddress:    sp.server.addrManager.HostToNetAddress,
@@ -2176,7 +2277,7 @@ func (s *server) inboundPeerConnected(conn net.Conn) {
 	sp.isWhitelisted = isWhitelisted(conn.RemoteAddr())
 	sp.Peer = peer.NewInboundPeer(newPeerConfig(sp))
 	sp.AssociateConnection(conn)
-	go s.peerDoneHandler(sp)
+	go s.peerLifecycleHandler(sp)
 }
 
 // outboundPeerConnected is invoked by the connection manager when a new
@@ -2185,10 +2286,17 @@ func (s *server) inboundPeerConnected(conn net.Conn) {
 // request instance and the connection itself, and finally notifies the address
 // manager of the attempt.
 func (s *server) outboundPeerConnected(c *connmgr.ConnReq, conn net.Conn) {
+	// Just an alias.
+	peerAddr := c.Addr.String()
 	sp := newServerPeer(s, c.Permanent)
-	p, err := peer.NewOutboundPeer(newPeerConfig(sp), c.Addr.String())
+
+	peerCfg := newPeerConfig(sp)
+
+	p, err := peer.NewOutboundPeer(peerCfg, peerAddr)
 	if err != nil {
-		srvrLog.Debugf("Cannot create outbound peer %s: %v", c.Addr, err)
+		srvrLog.Debugf("Cannot create outbound peer %s: %v",
+			c.Addr, err)
+
 		if c.Permanent {
 			s.connManager.Disconnect(c.ID())
 		} else {
@@ -2197,30 +2305,38 @@ func (s *server) outboundPeerConnected(c *connmgr.ConnReq, conn net.Conn) {
 		}
 		return
 	}
+
 	sp.Peer = p
 	sp.connReq = c
 	sp.isWhitelisted = isWhitelisted(conn.RemoteAddr())
 	sp.AssociateConnection(conn)
-	go s.peerDoneHandler(sp)
+	go s.peerLifecycleHandler(sp)
 }
 
-// peerDoneHandler handles peer disconnects by notifying the server that it's
-// done along with other performing other desirable cleanup.
-func (s *server) peerDoneHandler(sp *serverPeer) {
-	sp.WaitForDisconnect()
-	s.donePeers <- sp
-
-	// Only tell sync manager we are gone if we ever told it we existed.
-	if sp.VerAckReceived() {
-		s.syncManager.DonePeer(sp.Peer)
-
-		// Evict any remaining orphans that were sent by the peer.
-		numEvicted := s.txMemPool.RemoveOrphansByTag(mempool.Tag(sp.ID()))
-		if numEvicted > 0 {
-			txmpLog.Debugf("Evicted %d %s from peer %v (id %d)",
-				numEvicted, pickNoun(numEvicted, "orphan",
-					"orphans"), sp, sp.ID())
+// peerLifecycleHandler is the sole sender of lifecycle events for a
+// given peer. It waits for either verack (handshake complete) or
+// disconnect (handshake failed/timed out), sends peerAdd if verack
+// was received, then waits for disconnect and sends peerDone.
+// Because both sends originate from this single goroutine,
+// peerAdd is always enqueued before peerDone.
+func (s *server) peerLifecycleHandler(sp *serverPeer) {
+	// Wait for the handshake to complete or the peer to
+	// disconnect, whichever comes first.
+	select {
+	case <-sp.verAckCh:
+		s.peerLifecycle <- peerLifecycleEvent{
+			action: peerAdd, sp: sp,
 		}
+
+	case <-sp.Peer.Done():
+		// Disconnected before verack; no peerAdd needed.
+	}
+
+	// Wait for full disconnect (may already be done).
+	sp.WaitForDisconnect()
+
+	s.peerLifecycle <- peerLifecycleEvent{
+		action: peerDone, sp: sp,
 	}
 	close(sp.quit)
 }
@@ -2250,11 +2366,10 @@ func (s *server) peerHandler() {
 	if !cfg.DisableDNSSeed {
 		// Add peers discovered through DNS to the address manager.
 		connmgr.SeedFromDNS(activeNetParams.Params, defaultRequiredServices,
-			btcdLookup, func(addrs []*wire.NetAddressV2) {
-				// Bitcoind uses a lookup of the dns seeder here. This
-				// is rather strange since the values looked up by the
-				// DNS seed lookups will vary quite a lot.
-				// to replicate this behaviour we put all addresses as
+			pearldLookup, func(addrs []*wire.NetAddressV2) {
+				// DNS seed lookups return varying addresses; we add
+				// all as having come from the seeder to ensure a
+				// diverse initial peer set. We put all addresses as
 				// having come from the first one.
 				s.addrManager.AddAddresses(addrs, addrs[0])
 			})
@@ -2264,13 +2379,14 @@ func (s *server) peerHandler() {
 out:
 	for {
 		select {
-		// New peers connected to the server.
-		case p := <-s.newPeers:
-			s.handleAddPeerMsg(state, p)
-
-		// Disconnected peers.
-		case p := <-s.donePeers:
-			s.handleDonePeerMsg(state, p)
+		// Peer connected or disconnected.
+		case event := <-s.peerLifecycle:
+			switch event.action {
+			case peerAdd:
+				s.handleAddPeerMsg(state, event.sp)
+			case peerDone:
+				s.handleDonePeerMsg(state, event.sp)
+			}
 
 		// Block accepted in mainchain or orphan, update peer height.
 		case umsg := <-s.peerHeightsUpdate:
@@ -2311,8 +2427,7 @@ out:
 cleanup:
 	for {
 		select {
-		case <-s.newPeers:
-		case <-s.donePeers:
+		case <-s.peerLifecycle:
 		case <-s.peerHeightsUpdate:
 		case <-s.relayInv:
 		case <-s.broadcast:
@@ -2323,11 +2438,6 @@ cleanup:
 	}
 	s.wg.Done()
 	srvrLog.Tracef("Peer handler done")
-}
-
-// AddPeer adds a new peer that has already been connected to the server.
-func (s *server) AddPeer(sp *serverPeer) {
-	s.newPeers <- sp
 }
 
 // BanPeer bans a peer that has already been connected to the server by ip.
@@ -2630,7 +2740,7 @@ out:
 			// listen port?
 			// XXX this assumes timeout is in seconds.
 			listenPort, err := s.nat.AddPortMapping("tcp", int(lport), int(lport),
-				"btcd listen port", 20*60)
+				"pearld listen port", 20*60)
 			if err != nil {
 				srvrLog.Warnf("can't add UPnP port mapping: %v", err)
 			}
@@ -2717,8 +2827,8 @@ func setupRPCListeners() ([]net.Listener, error) {
 	return listeners, nil
 }
 
-// newServer returns a new btcd server configured to listen on addr for the
-// bitcoin network type specified by chainParams.  Use start to begin accepting
+// newServer returns a new pearld server configured to listen on addr for the
+// network type specified by chainParams.  Use start to begin accepting
 // connections from peers.
 func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	db database.DB, chainParams *chaincfg.Params,
@@ -2734,8 +2844,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if cfg.Prune != 0 {
 		services &^= wire.SFNodeNetwork
 	}
-
-	amgr := addrmgr.New(cfg.DataDir, btcdLookup)
+	amgr := addrmgr.New(cfg.DataDir, pearldLookup)
 
 	var listeners []net.Listener
 	var nat NAT
@@ -2760,8 +2869,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	s := server{
 		chainParams:          chainParams,
 		addrManager:          amgr,
-		newPeers:             make(chan *serverPeer, cfg.MaxPeers),
-		donePeers:            make(chan *serverPeer, cfg.MaxPeers),
+		peerLifecycle:        make(chan peerLifecycleEvent, cfg.MaxPeers*2),
 		banPeers:             make(chan *serverPeer, cfg.MaxPeers),
 		query:                make(chan interface{}),
 		relayInv:             make(chan relayMsg, cfg.MaxPeers),
@@ -2826,7 +2934,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 
 	// Log that the node is pruned.
 	if cfg.Prune != 0 {
-		btcdLog.Infof("Prune set to %d MiB", cfg.Prune)
+		prldLog.Infof("Prune set to %d MiB", cfg.Prune)
 	}
 
 	// Create a new block chain instance with the appropriate configuration.
@@ -2884,10 +2992,10 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 			FreeTxRelayLimit:     cfg.FreeTxRelayLimit,
 			MaxOrphanTxs:         cfg.MaxOrphanTxs,
 			MaxOrphanTxSize:      defaultMaxOrphanTxSize,
-			MaxSigOpCostPerTx:    blockchain.MaxBlockSigOpsCost / 4,
 			MinRelayTxFee:        cfg.minRelayTxFee,
 			MaxTxVersion:         2,
 			RejectReplacement:    cfg.RejectReplacement,
+			MaxMempoolSize:       cfg.MaxMempool * 1000 * 1000,
 		},
 		ChainParams:    chainParams,
 		FetchUtxoView:  s.chain.FetchUtxoView,
@@ -2923,12 +3031,8 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	// NOTE: The CPU miner relies on the mempool, so the mempool has to be
 	// created before calling the function to create the CPU miner.
 	policy := mining.Policy{
-		BlockMinWeight:    cfg.BlockMinWeight,
-		BlockMaxWeight:    cfg.BlockMaxWeight,
-		BlockMinSize:      cfg.BlockMinSize,
-		BlockMaxSize:      cfg.BlockMaxSize,
-		BlockPrioritySize: cfg.BlockPrioritySize,
-		TxMinFreeFee:      cfg.minRelayTxFee,
+		BlockMinVsize: cfg.BlockMinVsize,
+		BlockMaxVsize: cfg.BlockMaxVsize,
 	}
 	blockTemplateGenerator := mining.NewBlkTmplGenerator(&policy,
 		s.chainParams, s.txMemPool, s.chain, s.timeSource,
@@ -3001,7 +3105,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		OnAccept:       s.inboundPeerConnected,
 		RetryDuration:  connectionRetryInterval,
 		TargetOutbound: uint32(targetOutbound),
-		Dial:           btcdDial,
+		Dial:           pearldDial,
 		OnConnection:   s.outboundPeerConnected,
 		GetNewAddress:  newAddressFunc,
 	})
@@ -3181,7 +3285,7 @@ func addrStringToNetAddr(addr string) (net.Addr, error) {
 	}
 
 	// Attempt to look up an IP address associated with the parsed host.
-	ips, err := btcdLookup(host)
+	ips, err := pearldLookup(host)
 	if err != nil {
 		return nil, err
 	}

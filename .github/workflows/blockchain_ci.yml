@@ -1,0 +1,70 @@
+name: Blockchain / Build and Test
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'node/**'
+      - 'wallet/**'
+      - 'spv/**'
+      - 'zk-pow/**'
+      - 'plonky2/**'
+      - 'Taskfile.yml'
+      - 'go.mod'
+      - '.github/workflows/blockchain_ci.yml'
+      - '.github/actions/setup/action.yml'
+  workflow_dispatch:
+
+
+env:
+  # go needs absolute directories, using the $HOME variable doesn't work here.
+  GOCACHE: /home/runner/work/go/pkg/build
+  GOPATH: /home/runner/work/go
+
+jobs:
+  format-tidy:
+    name: Format and Tidy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+
+      - name: Format and Tidy
+        run: task fmt:go fmt:rust tidy
+
+      - name: Check for Changed Files
+        id: verify-changed
+        uses: tj-actions/verify-changed-files@v20.0.4
+
+      - name: Fail if files changed
+        if: steps.verify-changed.outputs.files_changed == 'true'
+        env:
+          CHANGED_FILES: ${{ steps.verify-changed.outputs.changed_files }}
+        run: |
+          echo "::error::Files were modified by 'task fmt:go fmt:rust tidy'. Please run it locally and commit the changes."
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          exit 1
+
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+
+      - name: Build
+        run: task build:blockchain
+        env:
+          GOPRIVATE: github.com/pearl-research-labs/*
+
+      - name: Test
+        run: task test:go GOTESTSUM_FORMAT=pkgname-and-test-fails
+        env:
+          GOPRIVATE: github.com/pearl-research-labs/*

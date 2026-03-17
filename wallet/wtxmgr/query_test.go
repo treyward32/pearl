@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 type queryState struct {
@@ -250,11 +250,14 @@ func TestStoreQueries(t *testing.T) {
 	var tests []queryTest
 
 	// Create the store and test initial state.
-	s, db, teardown, err := testStore()
-	defer teardown()
+	s, db, err := testStore(t)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		db.Close()
+	}()
+
 	lastState := newQueryState()
 	tests = append(tests, queryTest{
 		desc:    "initial store",
@@ -310,7 +313,7 @@ func TestStoreQueries(t *testing.T) {
 	})
 
 	// Insert another unmined transaction which spends txA:0, splitting the
-	// amount into outputs of 40 and 60 BTC.
+	// amount into outputs of 40 and 60 PRL.
 	txB := spendOutput(&recA.Hash, 0, 40e8, 60e8)
 	recB, err := NewTxRecordFromMsgTx(txB, timeNow())
 	if err != nil {
@@ -528,11 +531,13 @@ func TestStoreQueries(t *testing.T) {
 func TestPreviousPkScripts(t *testing.T) {
 	t.Parallel()
 
-	s, db, teardown, err := testStore()
-	defer teardown()
+	s, db, err := testStore(t)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		db.Close()
+	}()
 
 	// Invalid scripts but sufficient for testing.
 	var (

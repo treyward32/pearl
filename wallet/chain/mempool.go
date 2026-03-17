@@ -6,20 +6,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 const (
-	// txNotFoundErr is an error returned from bitcoind's
-	// `getrawtransaction` RPC when the requested txid cannot be found.
-	// https://github.com/bitcoin/bitcoin/blob/fa05a726c225dc65dee79367bb67f099ae4f99e6/src/rpc/rawtransaction.cpp#L366
+	// txNotFoundErr is an error returned from the getrawtransaction RPC
+	// when the requested txid cannot be found.
 	txNotFoundErr = "-5: No such mempool"
 
 	// DefaultGetRawTxBatchSize specifies the default number of requests to
-	// be batched before sending them to the bitcoind client.
+	// be batched before sending them to the chain client.
 	DefaultGetRawTxBatchSize = 1000
 
 	// DefaultBatchWaitInterval defines the default time to sleep between
@@ -135,7 +134,7 @@ type mempoolConfig struct {
 	client batchClient
 
 	// getRawTxBatchSize specifies the number of getrawtransaction requests
-	// to be batched before sending them to the bitcoind client.
+	// to be batched before sending them to the chain client.
 	getRawTxBatchSize uint32
 
 	// batchWaitInterval defines the default time to sleep between each
@@ -156,8 +155,8 @@ type mempoolConfig struct {
 	// can remove this hack.
 	rawTxReceiver func(chainhash.Hash, getRawTxReceiver) *btcutil.Tx
 
-	// hasPrevoutRPC is set when the bitcoind version is >= 24.0.0, in
-	// which `gettxspendingprevout` can be used to fetch mempool spent for
+	// hasPrevoutRPC is set when the connected node supports
+	// gettxspendingprevout, which can be used to fetch mempool spent for
 	// a given input so there's no need to create the `inputs` map used in
 	// `mempool` here.
 	hasPrevoutRPC bool
@@ -172,7 +171,7 @@ func newMempool(cfg *mempoolConfig) *mempool {
 		quit:    make(chan struct{}),
 	}
 
-	// Init the `inputs` map if the bitcoind version doesn't support
+	// Init the `inputs` map if the connected node doesn't support
 	// `gettxspendingprevout`.
 	if !cfg.hasPrevoutRPC {
 		m.inputs = newCachedInputs()
@@ -247,7 +246,7 @@ func (m *mempool) containsTx(hash chainhash.Hash) bool {
 //
 // NOTE: must be used inside a lock.
 func (m *mempool) containsInput(op wire.OutPoint) (chainhash.Hash, bool) {
-	// TODO(yy): port `getprevout` to bitcoind and use it here?
+	// TODO Or: use gettxspendingprevout when available.
 	if m.inputs == nil {
 		return chainhash.Hash{}, false
 	}
@@ -524,7 +523,7 @@ func (m *mempool) batchGetRawTxes(txids []*chainhash.Hash,
 	}
 
 	// processBatch asks the batch client to send its cached requests to
-	// bitcoind and waits for all the responses to return. Each time a
+	// the chain client and waits for all the responses to return. Each time a
 	// response is received, it will be used to update the local mempool
 	// state and conditionally saved to a slice that will be returned.
 	processBatch := func(results txRecievers) error {
@@ -609,8 +608,8 @@ func (m *mempool) batchGetRawTxes(txids []*chainhash.Hash,
 // returned since we can't do anything about it here in the mempool.
 //
 // NOTE: if `txindex` is not enabled, `GetRawTransactionAsync` will only look
-// for the txid in bitcoind's mempool. If the tx is replaced, confirmed, or not
-// yet included in bitcoind's mempool, the error txNotFoundErr will be
+// for the txid in the node's mempool. If the tx is replaced, confirmed, or not
+// yet included in the node's mempool, the error txNotFoundErr will be
 // returned.
 func getRawTxIgnoreErr(txid chainhash.Hash,
 	rawTx getRawTxReceiver) *btcutil.Tx {

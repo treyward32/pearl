@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // TestBlock tests the MsgBlock API.
@@ -20,11 +20,10 @@ func TestBlock(t *testing.T) {
 	pver := ProtocolVersion
 
 	// Block 1 header.
-	prevHash := &blockOne.Header.PrevBlock
-	merkleHash := &blockOne.Header.MerkleRoot
-	bits := blockOne.Header.Bits
-	nonce := blockOne.Header.Nonce
-	bh := NewBlockHeader(1, prevHash, merkleHash, bits, nonce)
+	prevHash := &blockOne.BlockHeader().PrevBlock
+	merkleHash := &blockOne.BlockHeader().MerkleRoot
+	bits := blockOne.BlockHeader().Bits
+	bh := NewBlockHeader(1, prevHash, merkleHash, bits)
 
 	// Ensure the command is expected value.
 	wantCmd := "block"
@@ -35,8 +34,8 @@ func TestBlock(t *testing.T) {
 	}
 
 	// Ensure max payload is expected value for latest protocol version.
-	// Num addresses (varInt) + max allowed addresses.
-	wantPayload := uint32(4000000)
+	// Updated to 4M to match MaxBlockVsize (1M) × WitnessScaleFactor (4)
+	wantPayload := uint32(1000 * 4000)
 	maxPayload := msg.MaxPayloadLength(pver)
 	if maxPayload != wantPayload {
 		t.Errorf("MaxPayloadLength: wrong max payload length for "+
@@ -45,9 +44,9 @@ func TestBlock(t *testing.T) {
 	}
 
 	// Ensure we get the same block header data back out.
-	if !reflect.DeepEqual(&msg.Header, bh) {
+	if !reflect.DeepEqual(msg.BlockHeader(), bh) {
 		t.Errorf("NewMsgBlock: wrong block header - got %v, want %v",
-			spew.Sdump(&msg.Header), spew.Sdump(bh))
+			spew.Sdump(msg.BlockHeader()), spew.Sdump(bh))
 	}
 
 	// Ensure transactions are added properly.
@@ -91,8 +90,8 @@ func TestBlockTxHashes(t *testing.T) {
 
 // TestBlockHash tests the ability to generate the hash of a block accurately.
 func TestBlockHash(t *testing.T) {
-	// Block 1 hash.
-	hashStr := "839a8e6886ab5951d76f411475428afc90947ee320161bbf18eb6048"
+	// Block 1 hash (includes ProofCommitment in header serialization).
+	hashStr := "6643bd66869e22adfb818d235d01a517a173cab7d9e45f3bd2b6ef058e101bb1"
 	wantHash, err := chainhash.NewHashFromStr(hashStr)
 	if err != nil {
 		t.Errorf("NewHashFromStr: %v", err)
@@ -109,6 +108,10 @@ func TestBlockHash(t *testing.T) {
 // TestBlockWire tests the MsgBlock wire encode and decode for various numbers
 // of transaction inputs and outputs and protocol versions.
 func TestBlockWire(t *testing.T) {
+	// Use blockOneBytes which includes header + ProofOfWork + certificate
+	blockOneBytesWithCert := blockOneBytes
+	blockOneTxLocsWithCert := blockOneTxLocs
+
 	tests := []struct {
 		in     *MsgBlock       // Message to encode
 		out    *MsgBlock       // Expected decoded message
@@ -121,49 +124,49 @@ func TestBlockWire(t *testing.T) {
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
 			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0035Version.
+		// Protocol version ProtocolVersion.
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
-			BIP0035Version,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version BIP0031Version.
+		// Protocol version ProtocolVersion.
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
-			BIP0031Version,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version NetAddressTimeVersion.
+		// Protocol version ProtocolVersion.
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
-			NetAddressTimeVersion,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 
-		// Protocol version MultipleAddressVersion.
+		// Protocol version ProtocolVersion.
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
-			MultipleAddressVersion,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
+			ProtocolVersion,
 			BaseEncoding,
 		},
 		// TODO(roasbeef): add case for witnessy block
@@ -173,13 +176,13 @@ func TestBlockWire(t *testing.T) {
 	for i, test := range tests {
 		// Encode the message to wire format.
 		var buf bytes.Buffer
-		err := test.in.BtcEncode(&buf, test.pver, test.enc)
+		err := test.in.PrlEncode(&buf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcEncode #%d error %v", i, err)
+			t.Errorf("PrlEncode #%d error %v", i, err)
 			continue
 		}
 		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("BtcEncode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlEncode #%d\n got: %s want: %s", i,
 				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
 			continue
 		}
@@ -187,13 +190,13 @@ func TestBlockWire(t *testing.T) {
 		// Decode the message from wire format.
 		var msg MsgBlock
 		rbuf := bytes.NewReader(test.buf)
-		err = msg.BtcDecode(rbuf, test.pver, test.enc)
+		err = msg.PrlDecode(rbuf, test.pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcDecode #%d error %v", i, err)
+			t.Errorf("PrlDecode #%d error %v", i, err)
 			continue
 		}
 		if !reflect.DeepEqual(&msg, test.out) {
-			t.Errorf("BtcDecode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlDecode #%d\n got: %s want: %s", i,
 				spew.Sdump(&msg), spew.Sdump(test.out))
 			continue
 		}
@@ -217,31 +220,29 @@ func TestBlockWireErrors(t *testing.T) {
 		writeErr error           // Expected write error
 		readErr  error           // Expected read error
 	}{
-		// Force error in version.
+		// Force error in certificate version (first 4 bytes).
 		{&blockOne, blockOneBytes, pver, BaseEncoding, 0, io.ErrShortWrite, io.EOF},
-		// Force error in prev block hash.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 4, io.ErrShortWrite, io.EOF},
-		// Force error in merkle root.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 36, io.ErrShortWrite, io.EOF},
-		// Force error in timestamp.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 68, io.ErrShortWrite, io.EOF},
-		// Force error in difficulty bits.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 72, io.ErrShortWrite, io.EOF},
-		// Force error in header nonce.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 76, io.ErrShortWrite, io.EOF},
-		// Force error in transaction count.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 80, io.ErrShortWrite, io.EOF},
-		// Force error in transactions.
-		{&blockOne, blockOneBytes, pver, BaseEncoding, 81, io.ErrShortWrite, io.EOF},
+		// Force error in header version (after 212-byte ZKCertificate, at offset 212).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 212, io.ErrShortWrite, io.EOF},
+		// Force error in prev block hash (partial read).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 220, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error in merkle root (partial read).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 256, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error at start of proof commitment (offset 288 = cert(212) + header fields before proofcommitment(76): version(4) + prevBlock(32) + merkleRoot(32) + timestamp(4) + bits(4)).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 288, io.ErrShortWrite, io.EOF},
+		// Force error in middle of proof commitment (partial read).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 298, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error in transactions (offset 321 = cert(212) + header(108) + varint(1)).
+		{&blockOne, blockOneBytes, pver, BaseEncoding, 321, io.ErrShortWrite, io.EOF},
 	}
 
 	t.Logf("Running %d tests", len(tests))
 	for i, test := range tests {
 		// Encode to wire format.
 		w := newFixedWriter(test.max)
-		err := test.in.BtcEncode(w, test.pver, test.enc)
+		err := test.in.PrlEncode(w, test.pver, test.enc)
 		if err != test.writeErr {
-			t.Errorf("BtcEncode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlEncode #%d wrong error got: %v, want: %v",
 				i, err, test.writeErr)
 			continue
 		}
@@ -249,9 +250,9 @@ func TestBlockWireErrors(t *testing.T) {
 		// Decode from wire format.
 		var msg MsgBlock
 		r := newFixedReader(test.max, test.buf)
-		err = msg.BtcDecode(r, test.pver, test.enc)
+		err = msg.PrlDecode(r, test.pver, test.enc)
 		if err != test.readErr {
-			t.Errorf("BtcDecode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlDecode #%d wrong error got: %v, want: %v",
 				i, err, test.readErr)
 			continue
 		}
@@ -260,6 +261,10 @@ func TestBlockWireErrors(t *testing.T) {
 
 // TestBlockSerialize tests MsgBlock serialize and deserialize.
 func TestBlockSerialize(t *testing.T) {
+	// Use blockOneBytes which includes header + ProofOfWork + certificate
+	blockOneBytesWithCert := blockOneBytes
+	blockOneTxLocsWithCert := blockOneTxLocs
+
 	tests := []struct {
 		in     *MsgBlock // Message to encode
 		out    *MsgBlock // Expected decoded message
@@ -269,8 +274,8 @@ func TestBlockSerialize(t *testing.T) {
 		{
 			&blockOne,
 			&blockOne,
-			blockOneBytes,
-			blockOneTxLocs,
+			blockOneBytesWithCert,
+			blockOneTxLocsWithCert,
 		},
 	}
 
@@ -335,22 +340,20 @@ func TestBlockSerializeErrors(t *testing.T) {
 		writeErr error     // Expected write error
 		readErr  error     // Expected read error
 	}{
-		// Force error in version.
+		// Force error in certificate version.
 		{&blockOne, blockOneBytes, 0, io.ErrShortWrite, io.EOF},
-		// Force error in prev block hash.
-		{&blockOne, blockOneBytes, 4, io.ErrShortWrite, io.EOF},
-		// Force error in merkle root.
-		{&blockOne, blockOneBytes, 36, io.ErrShortWrite, io.EOF},
-		// Force error in timestamp.
-		{&blockOne, blockOneBytes, 68, io.ErrShortWrite, io.EOF},
-		// Force error in difficulty bits.
-		{&blockOne, blockOneBytes, 72, io.ErrShortWrite, io.EOF},
-		// Force error in header nonce.
-		{&blockOne, blockOneBytes, 76, io.ErrShortWrite, io.EOF},
-		// Force error in transaction count.
-		{&blockOne, blockOneBytes, 80, io.ErrShortWrite, io.EOF},
-		// Force error in transactions.
-		{&blockOne, blockOneBytes, 81, io.ErrShortWrite, io.EOF},
+		// Force error in header version (after 212-byte ZKCertificate).
+		{&blockOne, blockOneBytes, 212, io.ErrShortWrite, io.EOF},
+		// Force error in prev block hash (partial read).
+		{&blockOne, blockOneBytes, 220, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error in merkle root (partial read).
+		{&blockOne, blockOneBytes, 256, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error at start of proof commitment (offset 288 = cert(212) + header fields before proofcommitment(76): version(4) + prevBlock(32) + merkleRoot(32) + timestamp(4) + bits(4)).
+		{&blockOne, blockOneBytes, 288, io.ErrShortWrite, io.EOF},
+		// Force error in middle of proof commitment (partial read).
+		{&blockOne, blockOneBytes, 298, io.ErrShortWrite, io.ErrUnexpectedEOF},
+		// Force error in transactions (offset 321 = cert(212) + header(108) + varint(1)).
+		{&blockOne, blockOneBytes, 321, io.ErrShortWrite, io.EOF},
 	}
 
 	t.Logf("Running %d tests", len(tests))
@@ -404,6 +407,27 @@ func TestBlockOverflowErrors(t *testing.T) {
 		// Block that claims to have ~uint64(0) transactions.
 		{
 			[]byte{
+				// Certificate (212 bytes): Version(4) + Hash(32) + PublicData(164) + ProofLen(4) + ProofData(8)
+				0x01, 0x00, 0x00, 0x00, // Version (1 = ZK)
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // BlockHash (32 bytes)
+				// PublicData (164 bytes)
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00,
+				0x08, 0x00, 0x00, 0x00, // ProofLen (8)
+				0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe, // ProofData (8 bytes)
+				// Then header (116 bytes):
 				0x01, 0x00, 0x00, 0x00, // Version 1
 				0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72,
 				0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f,
@@ -415,7 +439,10 @@ func TestBlockOverflowErrors(t *testing.T) {
 				0xcd, 0xb6, 0x06, 0xe8, 0x57, 0x23, 0x3e, 0x0e, // MerkleRoot
 				0x61, 0xbc, 0x66, 0x49, // Timestamp
 				0xff, 0xff, 0x00, 0x1d, // Bits
-				0x01, 0xe3, 0x62, 0x99, // Nonce
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ProofCommitment (32 zero bytes)
 				0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 				0xff, // TxnCount
 			}, pver, BaseEncoding, &MessageError{},
@@ -427,9 +454,9 @@ func TestBlockOverflowErrors(t *testing.T) {
 		// Decode from wire format.
 		var msg MsgBlock
 		r := bytes.NewReader(test.buf)
-		err := msg.BtcDecode(r, test.pver, test.enc)
+		err := msg.PrlDecode(r, test.pver, test.enc)
 		if reflect.TypeOf(err) != reflect.TypeOf(test.err) {
-			t.Errorf("BtcDecode #%d wrong error got: %v, want: %v",
+			t.Errorf("PrlDecode #%d wrong error got: %v, want: %v",
 				i, err, reflect.TypeOf(test.err))
 			continue
 		}
@@ -458,17 +485,18 @@ func TestBlockOverflowErrors(t *testing.T) {
 // various blocks is accurate.
 func TestBlockSerializeSize(t *testing.T) {
 	// Block with no transactions.
-	noTxBlock := NewMsgBlock(&blockOne.Header)
+	noTxBlock := NewMsgBlock(blockOne.BlockHeader())
+	noTxBlock.MsgHeader.MsgCertificate = blockOne.MsgHeader.MsgCertificate
 
 	tests := []struct {
 		in   *MsgBlock // Block to encode
 		size int       // Expected serialized size
 	}{
-		// Block with no transactions.
-		{noTxBlock, 81},
+		// Block with no transactions: 212 (ZKCertificate with 8-byte proof) + 108 (header) + 1 (varint tx count)
+		{noTxBlock, 321},
 
-		// First block in the mainnet block chain.
-		{&blockOne, len(blockOneBytes)},
+		// First block in the mainnet block chain: 212 (cert) + 108 (header) + 1 (varint) + 134 (tx)
+		{&blockOne, 455},
 	}
 
 	t.Logf("Running %d tests", len(tests))
@@ -483,25 +511,38 @@ func TestBlockSerializeSize(t *testing.T) {
 }
 
 // blockOne is the first block in the mainnet block chain.
+// Uses ZKCertificate with sample data for wire encoding tests (mainnet format).
 var blockOne = MsgBlock{
-	Header: BlockHeader{
-		Version: 1,
-		PrevBlock: chainhash.Hash([chainhash.HashSize]byte{ // Make go vet happy.
-			0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72,
-			0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f,
-			0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c,
-			0x68, 0xd6, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00,
-		}),
-		MerkleRoot: chainhash.Hash([chainhash.HashSize]byte{ // Make go vet happy.
-			0x98, 0x20, 0x51, 0xfd, 0x1e, 0x4b, 0xa7, 0x44,
-			0xbb, 0xbe, 0x68, 0x0e, 0x1f, 0xee, 0x14, 0x67,
-			0x7b, 0xa1, 0xa3, 0xc3, 0x54, 0x0b, 0xf7, 0xb1,
-			0xcd, 0xb6, 0x06, 0xe8, 0x57, 0x23, 0x3e, 0x0e,
-		}),
+	MsgHeader: MsgHeader{
+		BlockHeader: BlockHeader{
+			Version: 1,
+			PrevBlock: chainhash.Hash([chainhash.HashSize]byte{ // Make go vet happy.
+				0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72,
+				0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f,
+				0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c,
+				0x68, 0xd6, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00,
+			}),
+			MerkleRoot: chainhash.Hash([chainhash.HashSize]byte{ // Make go vet happy.
+				0x98, 0x20, 0x51, 0xfd, 0x1e, 0x4b, 0xa7, 0x44,
+				0xbb, 0xbe, 0x68, 0x0e, 0x1f, 0xee, 0x14, 0x67,
+				0x7b, 0xa1, 0xa3, 0xc3, 0x54, 0x0b, 0xf7, 0xb1,
+				0xcd, 0xb6, 0x06, 0xe8, 0x57, 0x23, 0x3e, 0x0e,
+			}),
 
-		Timestamp: time.Unix(0x4966bc61, 0), // 2009-01-08 20:54:25 -0600 CST
-		Bits:      0x1d00ffff,               // 486604799
-		Nonce:     0x9962e301,               // 2573394689
+			Timestamp: time.Unix(0x4966bc61, 0), // 2009-01-08 20:54:25 -0600 CST
+			Bits:      0x1d00ffff,               // 486604799
+		},
+		MsgCertificate: MsgCertificate{
+			Certificate: &ZKCertificate{
+				Hash: chainhash.Hash([chainhash.HashSize]byte{
+					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+					0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+					0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+				}),
+				ProofData: []byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe},
+			},
+		},
 	},
 	Transactions: []*MsgTx{
 		{
@@ -541,49 +582,19 @@ var blockOne = MsgBlock{
 	},
 }
 
-// Block one serialized bytes.
-var blockOneBytes = []byte{
-	0x01, 0x00, 0x00, 0x00, // Version 1
-	0x6f, 0xe2, 0x8c, 0x0a, 0xb6, 0xf1, 0xb3, 0x72,
-	0xc1, 0xa6, 0xa2, 0x46, 0xae, 0x63, 0xf7, 0x4f,
-	0x93, 0x1e, 0x83, 0x65, 0xe1, 0x5a, 0x08, 0x9c,
-	0x68, 0xd6, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00, // PrevBlock
-	0x98, 0x20, 0x51, 0xfd, 0x1e, 0x4b, 0xa7, 0x44,
-	0xbb, 0xbe, 0x68, 0x0e, 0x1f, 0xee, 0x14, 0x67,
-	0x7b, 0xa1, 0xa3, 0xc3, 0x54, 0x0b, 0xf7, 0xb1,
-	0xcd, 0xb6, 0x06, 0xe8, 0x57, 0x23, 0x3e, 0x0e, // MerkleRoot
-	0x61, 0xbc, 0x66, 0x49, // Timestamp
-	0xff, 0xff, 0x00, 0x1d, // Bits
-	0x01, 0xe3, 0x62, 0x99, // Nonce
-	0x01,                   // TxnCount
-	0x01, 0x00, 0x00, 0x00, // Version
-	0x01, // Varint for number of transaction inputs
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Previous output hash
-	0xff, 0xff, 0xff, 0xff, // Previous output index
-	0x07,                                     // Varint for length of signature script
-	0x04, 0xff, 0xff, 0x00, 0x1d, 0x01, 0x04, // Signature script (coinbase)
-	0xff, 0xff, 0xff, 0xff, // Sequence
-	0x01,                                           // Varint for number of transaction outputs
-	0x00, 0xf2, 0x05, 0x2a, 0x01, 0x00, 0x00, 0x00, // Transaction amount
-	0x43, // Varint for length of pk script
-	0x41, // OP_DATA_65
-	0x04, 0x96, 0xb5, 0x38, 0xe8, 0x53, 0x51, 0x9c,
-	0x72, 0x6a, 0x2c, 0x91, 0xe6, 0x1e, 0xc1, 0x16,
-	0x00, 0xae, 0x13, 0x90, 0x81, 0x3a, 0x62, 0x7c,
-	0x66, 0xfb, 0x8b, 0xe7, 0x94, 0x7b, 0xe6, 0x3c,
-	0x52, 0xda, 0x75, 0x89, 0x37, 0x95, 0x15, 0xd4,
-	0xe0, 0xa6, 0x04, 0xf8, 0x14, 0x17, 0x81, 0xe6,
-	0x22, 0x94, 0x72, 0x11, 0x66, 0xbf, 0x62, 0x1e,
-	0x73, 0xa8, 0x2c, 0xbf, 0x23, 0x42, 0xc8, 0x58,
-	0xee,                   // 65-byte uncompressed public key
-	0xac,                   // OP_CHECKSIG
-	0x00, 0x00, 0x00, 0x00, // Lock time
+// Block one serialized bytes (filled in init from blockOne.Serialize).
+var blockOneBytes []byte
+
+func init() {
+	var buf bytes.Buffer
+	if err := blockOne.Serialize(&buf); err != nil {
+		panic("init: failed to serialize blockOne: " + err.Error())
+	}
+	blockOneBytes = buf.Bytes()
 }
 
 // Transaction location information for block one transactions.
+// After certificate(212) + header(108) + varint(1) = 321
 var blockOneTxLocs = []TxLoc{
-	{TxStart: 81, TxLen: 134},
+	{TxStart: 321, TxLen: 134},
 }

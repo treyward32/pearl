@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -15,16 +15,10 @@ import (
 
 // TestBlockHeader tests the BlockHeader API.
 func TestBlockHeader(t *testing.T) {
-	nonce64, err := RandomUint64()
-	if err != nil {
-		t.Errorf("RandomUint64: Error generating nonce: %v", err)
-	}
-	nonce := uint32(nonce64)
-
 	hash := mainNetGenesisHash
 	merkleHash := mainNetGenesisMerkleRoot
 	bits := uint32(0x1d00ffff)
-	bh := NewBlockHeader(1, &hash, &merkleHash, bits, nonce)
+	bh := NewBlockHeader(1, &hash, &merkleHash, bits)
 
 	// Ensure we get the same data back out.
 	if !bh.PrevBlock.IsEqual(&hash) {
@@ -39,16 +33,11 @@ func TestBlockHeader(t *testing.T) {
 		t.Errorf("NewBlockHeader: wrong bits - got %v, want %v",
 			bh.Bits, bits)
 	}
-	if bh.Nonce != nonce {
-		t.Errorf("NewBlockHeader: wrong nonce - got %v, want %v",
-			bh.Nonce, nonce)
-	}
 }
 
 // TestBlockHeaderWire tests the BlockHeader wire encode and decode for various
 // protocol versions.
 func TestBlockHeaderWire(t *testing.T) {
-	nonce := uint32(123123) // 0x1e0f3
 	pver := uint32(70001)
 
 	// baseBlockHdr is used in the various tests as a baseline BlockHeader.
@@ -59,7 +48,6 @@ func TestBlockHeaderWire(t *testing.T) {
 		MerkleRoot: mainNetGenesisMerkleRoot,
 		Timestamp:  time.Unix(0x495fab29, 0), // 2009-01-03 12:15:05 -0600 CST
 		Bits:       bits,
-		Nonce:      nonce,
 	}
 
 	// baseBlockHdrEncoded is the wire encoded bytes of baseBlockHdr.
@@ -75,7 +63,10 @@ func TestBlockHeaderWire(t *testing.T) {
 		0x3a, 0x9f, 0xb8, 0xaa, 0x4b, 0x1e, 0x5e, 0x4a, // MerkleRoot
 		0x29, 0xab, 0x5f, 0x49, // Timestamp
 		0xff, 0xff, 0x00, 0x1d, // Bits
-		0xf3, 0xe0, 0x01, 0x00, // Nonce
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ProofCommitment (32 zero bytes)
 	}
 
 	tests := []struct {
@@ -91,42 +82,6 @@ func TestBlockHeaderWire(t *testing.T) {
 			baseBlockHdr,
 			baseBlockHdrEncoded,
 			ProtocolVersion,
-			BaseEncoding,
-		},
-
-		// Protocol version BIP0035Version.
-		{
-			baseBlockHdr,
-			baseBlockHdr,
-			baseBlockHdrEncoded,
-			BIP0035Version,
-			BaseEncoding,
-		},
-
-		// Protocol version BIP0031Version.
-		{
-			baseBlockHdr,
-			baseBlockHdr,
-			baseBlockHdrEncoded,
-			BIP0031Version,
-			BaseEncoding,
-		},
-
-		// Protocol version NetAddressTimeVersion.
-		{
-			baseBlockHdr,
-			baseBlockHdr,
-			baseBlockHdrEncoded,
-			NetAddressTimeVersion,
-			BaseEncoding,
-		},
-
-		// Protocol version MultipleAddressVersion.
-		{
-			baseBlockHdr,
-			baseBlockHdr,
-			baseBlockHdrEncoded,
-			MultipleAddressVersion,
 			BaseEncoding,
 		},
 	}
@@ -147,13 +102,13 @@ func TestBlockHeaderWire(t *testing.T) {
 		}
 
 		buf.Reset()
-		err = test.in.BtcEncode(&buf, pver, 0)
+		err = test.in.PrlEncode(&buf, pver, 0)
 		if err != nil {
-			t.Errorf("BtcEncode #%d error %v", i, err)
+			t.Errorf("PrlEncode #%d error %v", i, err)
 			continue
 		}
 		if !bytes.Equal(buf.Bytes(), test.buf) {
-			t.Errorf("BtcEncode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlEncode #%d\n got: %s want: %s", i,
 				spew.Sdump(buf.Bytes()), spew.Sdump(test.buf))
 			continue
 		}
@@ -173,13 +128,13 @@ func TestBlockHeaderWire(t *testing.T) {
 		}
 
 		rbuf = bytes.NewReader(test.buf)
-		err = bh.BtcDecode(rbuf, pver, test.enc)
+		err = bh.PrlDecode(rbuf, pver, test.enc)
 		if err != nil {
-			t.Errorf("BtcDecode #%d error %v", i, err)
+			t.Errorf("PrlDecode #%d error %v", i, err)
 			continue
 		}
 		if !reflect.DeepEqual(&bh, test.out) {
-			t.Errorf("BtcDecode #%d\n got: %s want: %s", i,
+			t.Errorf("PrlDecode #%d\n got: %s want: %s", i,
 				spew.Sdump(&bh), spew.Sdump(test.out))
 			continue
 		}
@@ -188,8 +143,6 @@ func TestBlockHeaderWire(t *testing.T) {
 
 // TestBlockHeaderSerialize tests BlockHeader serialize and deserialize.
 func TestBlockHeaderSerialize(t *testing.T) {
-	nonce := uint32(123123) // 0x1e0f3
-
 	// baseBlockHdr is used in the various tests as a baseline BlockHeader.
 	bits := uint32(0x1d00ffff)
 	baseBlockHdr := &BlockHeader{
@@ -198,7 +151,6 @@ func TestBlockHeaderSerialize(t *testing.T) {
 		MerkleRoot: mainNetGenesisMerkleRoot,
 		Timestamp:  time.Unix(0x495fab29, 0), // 2009-01-03 12:15:05 -0600 CST
 		Bits:       bits,
-		Nonce:      nonce,
 	}
 
 	// baseBlockHdrEncoded is the wire encoded bytes of baseBlockHdr.
@@ -214,7 +166,10 @@ func TestBlockHeaderSerialize(t *testing.T) {
 		0x3a, 0x9f, 0xb8, 0xaa, 0x4b, 0x1e, 0x5e, 0x4a, // MerkleRoot
 		0x29, 0xab, 0x5f, 0x49, // Timestamp
 		0xff, 0xff, 0x00, 0x1d, // Bits
-		0xf3, 0xe0, 0x01, 0x00, // Nonce
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // ProofCommitment (32 zero bytes)
 	}
 
 	tests := []struct {

@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 var (
@@ -34,6 +34,7 @@ func TestAddDuplicateDriver(t *testing.T) {
 		t.Errorf("no backends to test")
 		return
 	}
+
 	dbType := supportedDrivers[0]
 
 	// bogusCreateDB is a function which acts as a bogus create and open
@@ -62,7 +63,9 @@ func TestAddDuplicateDriver(t *testing.T) {
 	tempDir := t.TempDir()
 
 	dbPath := filepath.Join(tempDir, "db")
-	db, err := walletdb.Create(dbType, dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create(
+		dbType, dbPath, true, defaultDBTimeout, false,
+	)
 	if err != nil {
 		t.Errorf("failed to create database: %v", err)
 		return

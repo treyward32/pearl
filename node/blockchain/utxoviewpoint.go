@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -7,11 +7,11 @@ package blockchain
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 // txoFlags is a bitmask defining additional information and state for a
@@ -334,32 +334,6 @@ func (view *UtxoViewpoint) connectTransactions(block *btcutil.Block, stxos *[]Sp
 	return nil
 }
 
-// fetchEntryByHash attempts to find any available utxo for the given hash by
-// searching the entire set of possible outputs for the given hash.  It checks
-// the view first and then falls back to the database if needed.
-func (view *UtxoViewpoint) fetchEntryByHash(db database.DB, hash *chainhash.Hash) (*UtxoEntry, error) {
-	// First attempt to find a utxo with the provided hash in the view.
-	prevOut := wire.OutPoint{Hash: *hash}
-	for idx := uint32(0); idx < MaxOutputsPerBlock; idx++ {
-		prevOut.Index = idx
-		entry := view.LookupEntry(prevOut)
-		if entry != nil {
-			return entry, nil
-		}
-	}
-
-	// Check the database since it doesn't exist in the view.  This will
-	// often by the case since only specifically referenced utxos are loaded
-	// into the view.
-	var entry *UtxoEntry
-	err := db.View(func(dbTx database.Tx) error {
-		var err error
-		entry, err = dbFetchUtxoEntryByHash(dbTx, hash)
-		return err
-	})
-	return entry, err
-}
-
 // disconnectTransactions updates the view by removing all of the transactions
 // created by the passed block, restoring all utxos the transactions spent by
 // using the provided spent txo information, and setting the best hash for the
@@ -443,39 +417,6 @@ func (view *UtxoViewpoint) disconnectTransactions(db database.DB, block *btcutil
 				view.entries[*originOut] = entry
 			}
 
-			// The legacy v1 spend journal format only stored the
-			// coinbase flag and height when the output was the last
-			// unspent output of the transaction.  As a result, when
-			// the information is missing, search for it by scanning
-			// all possible outputs of the transaction since it must
-			// be in one of them.
-			//
-			// It should be noted that this is quite inefficient,
-			// but it realistically will almost never run since all
-			// new entries include the information for all outputs
-			// and thus the only way this will be hit is if a long
-			// enough reorg happens such that a block with the old
-			// spend data is being disconnected.  The probability of
-			// that in practice is extremely low to begin with and
-			// becomes vanishingly small the more new blocks are
-			// connected.  In the case of a fresh database that has
-			// only ever run with the new v2 format, this code path
-			// will never run.
-			if stxo.Height == 0 {
-				utxo, err := view.fetchEntryByHash(db, txHash)
-				if err != nil {
-					return err
-				}
-				if utxo == nil {
-					return AssertError(fmt.Sprintf("unable "+
-						"to resurrect legacy stxo %v",
-						*originOut))
-				}
-
-				stxo.Height = utxo.BlockHeight()
-				stxo.IsCoinBase = utxo.IsCoinBase()
-			}
-
 			// Restore the utxo using the stxo data from the spend
 			// journal and mark it as modified.
 			entry.amount = stxo.Amount
@@ -490,7 +431,7 @@ func (view *UtxoViewpoint) disconnectTransactions(db database.DB, block *btcutil
 
 	// Update the best hash for view to the previous block since all of the
 	// transactions for the current block have been disconnected.
-	view.SetBestHash(&block.MsgBlock().Header.PrevBlock)
+	view.SetBestHash(&block.MsgBlock().BlockHeader().PrevBlock)
 	return nil
 }
 

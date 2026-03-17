@@ -15,18 +15,19 @@ each.  In short summary, to call RPC server methods, a client must:
 
 The only exception to these steps is if the client is being written in Go.  In
 that case, the first step may be omitted by importing the bindings from
-btcwallet itself.
+Oyster itself.
 
 The rest of this document provides short examples of how to quickly get started
 by implementing a basic client that fetches the balance of the default account
-(account 0) from a testnet3 wallet listening on `localhost:18332` in several
+(account 0) from a testnet wallet listening on `localhost:44209` in several
 different languages:
 
-- [Go](#go)
-- [C++](#cpp)
-- [C#](#csharp)
-- [Node.js](#nodejs)
-- [Python](#python)
+- [Client usage](#client-usage)
+  - [Go](#go)
+  - [C++](#c)
+  - [C#](#c-1)
+  - [Node.js](#nodejs)
+  - [Python](#python)
 
 Unless otherwise stated under the language example, it is assumed that
 gRPC is already already installed.  The gRPC installation procedure
@@ -52,15 +53,15 @@ import (
 	"fmt"
 	"path/filepath"
 
-	pb "github.com/btcsuite/btcwallet/rpc/walletrpc"
+	pb "github.com/pearl-research-labs/pearl/wallet/rpc/walletrpc"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/btcsuite/btcd/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
 )
 
-var certificateFile = filepath.Join(btcutil.AppDataDir("btcwallet", false), "rpc.cert")
+var certificateFile = filepath.Join(btcutil.AppDataDir("Oyster", false), "rpc.cert")
 
 func main() {
 	creds, err := credentials.NewClientTLSFromFile(certificateFile, "localhost")
@@ -68,7 +69,7 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	conn, err := grpc.Dial("localhost:18332", grpc.WithTransportCredentials(creds))
+	conn, err := grpc.Dial("localhost:44209", grpc.WithTransportCredentials(creds))
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -103,9 +104,9 @@ example source code) with a source gRPC install in `/usr/local`.
 First, generate the C++ language bindings by compiling the `.proto`:
 
 ```bash
-$ protoc -I/path/to/btcwallet/rpc --cpp_out=. --grpc_out=. \
+$ protoc -I/path/to/pearl/wallet/rpc --cpp_out=. --grpc_out=. \
   --plugin=protoc-gen-grpc=$(which grpc_cpp_plugin) \
-  /path/to/btcwallet/rpc/api.proto
+  /path/to/pearl/wallet/rpc/api.proto
 ```
 
 Once the `.proto` file has been compiled, the example client can be completed.
@@ -145,7 +146,7 @@ auto read_file(std::string const& file_path) -> std::string {
 auto main() -> int {
     // Before the gRPC native library (gRPC Core) is lazily loaded and
     // initialized, an environment variable must be set so BoringSSL is
-    // configured to use ECDSA TLS certificates (required by btcwallet).
+    // configured to use ECDSA TLS certificates (required by Oyster).
     setenv("GRPC_SSL_CIPHER_SUITES", "HIGH+ECDSA", 1);
 
     // Note: This path is operating system-dependent.  This can be created
@@ -156,14 +157,14 @@ auto main() -> int {
         if (pw == nullptr || pw->pw_dir == nullptr) {
             throw NoHomeDirectoryException{};
         }
-        return pw->pw_dir + "/.btcwallet/rpc.cert"s;
+        return pw->pw_dir + "/.oyster/rpc.cert"s;
     }();
 
     grpc::SslCredentialsOptions cred_options{
         .pem_root_certs = read_file(wallet_tls_cert_file),
     };
     auto creds = grpc::SslCredentials(cred_options);
-    auto channel = grpc::CreateChannel("localhost:18332", creds);
+    auto channel = grpc::CreateChannel("localhost:44209", creds);
     auto stub = walletrpc::WalletService::NewStub(channel);
 
     grpc::ClientContext context{};
@@ -177,7 +178,7 @@ auto main() -> int {
     if (!status.ok()) {
         std::cout << status.error_message() << std::endl;
     } else {
-        std::cout << "Spendable balance: " << response.spendable() << " Satoshis" << std::endl;
+        std::cout << "Spendable balance: " << response.spendable() << " Grains" << std::endl;
     }
 }
 ```
@@ -216,9 +217,9 @@ generated.  The following command generates the files `Api.cs` and `ApiGrpc.cs`
 in the `Example` project directory using the `Walletrpc` namespace:
 
 ```PowerShell
-PS> & protoc.exe -I \Path\To\btcwallet\rpc --csharp_out=Example --grpc_out=Example `
+PS> & protoc.exe -I \Path\To\pearl\wallet\rpc --csharp_out=Example --grpc_out=Example `
     --plugin=protoc-gen-grpc=\Path\To\grpc_csharp_plugin.exe `
-    \Path\To\btcwallet\rpc\api.proto
+    \Path\To\pearl\wallet\rpc\api.proto
 ```
 
 Once references have been added to the project for the `Google.Protobuf` and
@@ -245,13 +246,13 @@ namespace Example
         {
             // Before the gRPC native library (gRPC Core) is lazily loaded and initialized,
             // an environment variable must be set so BoringSSL is configured to use ECDSA TLS
-            // certificates (required by btcwallet).
+            // certificates (required by Oyster).
             Environment.SetEnvironmentVariable("GRPC_SSL_CIPHER_SUITES", "HIGH+ECDSA");
 
-            var walletAppData = Portability.LocalAppData(Environment.OSVersion.Platform, "Btcwallet");
+            var walletAppData = Portability.LocalAppData(Environment.OSVersion.Platform, "Oyster");
             var walletTlsCertFile = Path.Combine(walletAppData, "rpc.cert");
             var cert = await FileUtils.ReadFileAsync(walletTlsCertFile);
-            var channel = new Channel("localhost:18332", new SslCredentials(cert));
+            var channel = new Channel("localhost:44209", new SslCredentials(cert));
             try
             {
                 var c = WalletService.NewClient(channel);
@@ -261,7 +262,7 @@ namespace Example
                     RequiredConfirmations = 1,
                 };
                 var balanceResponse = await c.BalanceAsync(balanceRequest);
-                Console.WriteLine($"Spendable balance: {balanceResponse.Spendable} Satoshis");
+                Console.WriteLine($"Spendable balance: {balanceResponse.Spendable} Grains");
             }
             finally
             {
@@ -342,12 +343,12 @@ the wallet's API from the `.proto`.  Instead, a call to `grpc.load`
 with the `.proto` file path dynamically loads the Protobuf descriptor
 and generates bindings for each service.  Either copy the `.proto` to
 the client project directory, or reference the file from the
-`btcwallet` project directory.
+`Oyster` project directory.
 
 ```JavaScript
 // Before the gRPC native library (gRPC Core) is lazily loaded and
 // initialized, an environment variable must be set so BoringSSL is
-// configured to use ECDSA TLS certificates (required by btcwallet).
+// configured to use ECDSA TLS certificates (required by Oyster).
 process.env['GRPC_SSL_CIPHER_SUITES'] = 'HIGH+ECDSA';
 
 var fs = require('fs');
@@ -357,17 +358,17 @@ var grpc = require('grpc');
 var protoDescriptor = grpc.load('./api.proto');
 var walletrpc = protoDescriptor.walletrpc;
 
-var certPath = path.join(process.env.HOME, '.btcwallet', 'rpc.cert');
+var certPath = path.join(process.env.HOME, '.oyster', 'rpc.cert');
 if (os.platform == 'win32') {
-    certPath = path.join(process.env.LOCALAPPDATA, 'Btcwallet', 'rpc.cert');
+    certPath = path.join(process.env.LOCALAPPDATA, 'Oyster', 'rpc.cert');
 } else if (os.platform == 'darwin') {
     certPath = path.join(process.env.HOME, 'Library', 'Application Support',
-        'Btcwallet', 'rpc.cert');
+        'Oyster', 'rpc.cert');
 }
 
 var cert = fs.readFileSync(certPath);
 var creds = grpc.credentials.createSsl(cert);
-var client = new walletrpc.WalletService('localhost:18332', creds);
+var client = new walletrpc.WalletService('localhost:44209', creds);
 
 var request = {
     account_number: 0,
@@ -377,7 +378,7 @@ client.balance(request, function(err, response) {
     if (err) {
         console.error(err);
     } else {
-        console.log('Spendable balance:', response.spendable, 'Satoshis');
+        console.log('Spendable balance:', response.spendable, 'Grains');
     }
 });
 ```
@@ -394,9 +395,9 @@ Full instructions for this procedure can be found
 Generate Python stubs from the `.proto`:
 
 ```bash
-$ protoc -I /path/to/btcsuite/btcwallet/rpc --python_out=. --grpc_out=. \
+$ protoc -I /path/to/pearl-research-labs/pearl/wallet/rpc --python_out=. --grpc_out=. \
   --plugin=protoc-gen-grpc=$(which grpc_python_plugin) \
-  /path/to/btcwallet/rpc/api.proto
+  /path/to/pearl/wallet/rpc/api.proto
 ```
 
 Implement the client:
@@ -413,25 +414,25 @@ timeout = 1 # seconds
 def main():
     # Before the gRPC native library (gRPC Core) is lazily loaded and
     # initialized, an environment variable must be set so BoringSSL is
-    # configured to use ECDSA TLS certificates (required by btcwallet).
+    # configured to use ECDSA TLS certificates (required by Oyster).
     os.environ['GRPC_SSL_CIPHER_SUITES'] = 'HIGH+ECDSA'
 
-    cert_file_path = os.path.join(os.environ['HOME'], '.btcwallet', 'rpc.cert')
+    cert_file_path = os.path.join(os.environ['HOME'], '.oyster', 'rpc.cert')
     if platform.system() == 'Windows':
-        cert_file_path = os.path.join(os.environ['LOCALAPPDATA'], "Btcwallet", "rpc.cert")
+        cert_file_path = os.path.join(os.environ['LOCALAPPDATA'], "Oyster", "rpc.cert")
     elif platform.system() == 'Darwin':
         cert_file_path = os.path.join(os.environ['HOME'], 'Library', 'Application Support',
-                                      'Btcwallet', 'rpc.cert')
+                                      'Oyster', 'rpc.cert')
 
     with open(cert_file_path, 'r') as f:
         cert = f.read()
     creds = implementations.ssl_client_credentials(cert, None, None)
-    channel = implementations.secure_channel('localhost', 18332, creds)
+    channel = implementations.secure_channel('localhost', 44209, creds)
     stub = walletrpc.beta_create_WalletService_stub(channel)
 
     request = walletrpc.BalanceRequest(account_number = 0, required_confirmations = 1)
     response = stub.Balance(request, timeout)
-    print 'Spendable balance: %d Satoshis' % response.spendable
+    print 'Spendable balance: %d Grains' % response.spendable
 
 if __name__ == '__main__':
     main()

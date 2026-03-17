@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"net"
 	"net/http"
@@ -27,10 +26,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/go-socks/socks"
 	"github.com/btcsuite/websocket"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
 )
 
 var (
@@ -111,8 +110,8 @@ type jsonRequest struct {
 	responseChan   chan *Response
 }
 
-// Client represents a Bitcoin RPC client which allows easy access to the
-// various RPC methods available on a Bitcoin RPC server.  Each of the wrapper
+// Client represents an RPC client which allows easy access to the
+// various RPC methods available on an RPC server.  Each of the wrapper
 // functions handle the details of converting the passed and return types to and
 // from the underlying JSON types which are required for the JSON-RPC
 // invocations
@@ -852,7 +851,7 @@ func (c *Client) handleSendPostMessage(jReq *jsonRequest) {
 	}
 
 	// Read the raw bytes and close the response.
-	respBytes, err := ioutil.ReadAll(httpResponse.Body)
+	respBytes, err := io.ReadAll(httpResponse.Body)
 	httpResponse.Body.Close()
 	if err != nil {
 		err = fmt.Errorf("error reading json reply: %v", err)
@@ -1357,10 +1356,11 @@ func newHTTPClient(config *ConnConfig) (*http.Client, error) {
 		Transport: &http.Transport{
 			Proxy:           proxyFunc,
 			TLSClientConfig: tlsConfig,
-			DialContext: func(_ context.Context, _,
+			DialContext: func(ctx context.Context, _,
 				_ string) (net.Conn, error) {
-
-				return net.Dial(
+				d := &net.Dialer{}
+				return d.DialContext(
+					ctx,
 					parsedDialAddr.Network(),
 					parsedDialAddr.String(),
 				)
@@ -1528,8 +1528,8 @@ func New(config *ConnConfig, ntfnHandlers *NotificationHandlers) (*Client, error
 		fallthrough
 	case chaincfg.MainNetParams.Name:
 		client.chainParams = &chaincfg.MainNetParams
-	case chaincfg.TestNet3Params.Name:
-		client.chainParams = &chaincfg.TestNet3Params
+	case chaincfg.TestNetParams.Name:
+		client.chainParams = &chaincfg.TestNetParams
 	case chaincfg.RegressionNetParams.Name:
 		client.chainParams = &chaincfg.RegressionNetParams
 	case chaincfg.SigNetParams.Name:
@@ -1557,7 +1557,7 @@ func New(config *ConnConfig, ntfnHandlers *NotificationHandlers) (*Client, error
 // Batch is a factory that creates a client able to interact with the server using
 // JSON-RPC 2.0. The client is capable of accepting an arbitrary number of requests
 // and having the server process the all at the same time. It's compatible with both
-// btcd and bitcoind
+// pearld and compatible forks
 func NewBatch(config *ConnConfig) (*Client, error) {
 	if !config.HTTPPostMode {
 		return nil, errors.New("http post mode is required to use batch client")
@@ -1640,43 +1640,42 @@ func (c *Client) BackendVersion() (BackendVersion, error) {
 	}
 
 	// We'll start by calling GetInfo. This method doesn't exist for
-	// bitcoind nodes as of v0.16.0, so we'll assume the client is connected
-	// to a btcd backend if it does exist.
+	// compatible fork backends as of v0.16.0, so we'll assume the client is
+	// connected to a pearld backend if it does exist.
 	info, err := c.GetInfo()
 
 	switch err := err.(type) {
-	// Parse the btcd version and cache it.
+	// Detected pearld backend.
 	case nil:
-		log.Debugf("Detected btcd version: %v", info.Version)
-		version := parseBtcdVersion(info.Version)
-		c.backendVersion = version
+		log.Debugf("Detected pearld backend (version %v)", info.Version)
+		c.backendVersion = PearldVersion(info.Version)
 		return c.backendVersion, nil
 
 	// Inspect the RPC error to ensure the method was not found, otherwise
 	// we actually ran into an error.
 	case *btcjson.RPCError:
 		if err.Code != btcjson.ErrRPCMethodNotFound.Code {
-			return nil, fmt.Errorf("unable to detect btcd version: "+
+			return nil, fmt.Errorf("unable to detect pearld version: "+
 				"%v", err)
 		}
 
 	default:
-		return nil, fmt.Errorf("unable to detect btcd version: %v", err)
+		return nil, fmt.Errorf("unable to detect pearld version: %v", err)
 	}
 
 	// Since the GetInfo method was not found, we assume the client is
-	// connected to a bitcoind backend, which exposes its version through
+	// connected to a compatible fork backend (Bitcoin Core-based fork
+	// implementing the Pearl protocol), which exposes its version through
 	// GetNetworkInfo.
 	networkInfo, err := c.GetNetworkInfo()
 	if err != nil {
-		return nil, fmt.Errorf("unable to detect bitcoind version: %v",
+		return nil, fmt.Errorf("unable to detect backend version: %v",
 			err)
 	}
 
-	// Parse the bitcoind version and cache it.
-	log.Debugf("Detected bitcoind version: %v", networkInfo.SubVersion)
-	version := parseBitcoindVersion(networkInfo.SubVersion)
-	c.backendVersion = &version
+	log.Debugf("Detected compatible fork backend: %v", networkInfo.SubVersion)
+	version := CompatForkVersion{}
+	c.backendVersion = version
 
 	return c.backendVersion, nil
 }
@@ -1782,7 +1781,7 @@ func cutPrefix(s, prefix string) (after string, found bool) {
 }
 
 // ParseAddressString converts an address in string format to a net.Addr that is
-// compatible with btcd. UDP is not supported because btcd needs reliable
+// compatible with pearld. UDP is not supported because the node needs reliable
 // connections.
 func ParseAddressString(strAddress string) (net.Addr, error) {
 	// Addresses can either be in unix://address, unixpacket://address URL
@@ -1800,8 +1799,15 @@ func ParseAddressString(strAddress string) (net.Addr, error) {
 			strAddress)
 	}
 
+	// Bracket bare IPv6 addresses (e.g. "::1") so url.Parse handles them
+	// correctly. Already-bracketed or host:port forms are left as-is.
+	addr := strAddress
+	if ip := net.ParseIP(addr); ip != nil && ip.To4() == nil {
+		addr = "[" + addr + "]"
+	}
+
 	// Parse it as a dummy URL to get the host and port.
-	u, err := url.Parse("dummy://" + strAddress)
+	u, err := url.Parse("dummy://" + addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1822,14 +1828,14 @@ func verifyPort(address string) string {
 		}
 
 		// Otherwise, we'll assume that the address just failed to
-		// attach its own port, so we'll leave it as is. In the
-		// case of IPv6 addresses, if the host is already surrounded by
-		// brackets, then we'll avoid using the JoinHostPort function,
-		// since it will always add a pair of brackets.
-		if strings.HasPrefix(address, "[") {
-			return address
+		// attach its own port, so we'll use JoinHostPort with an
+		// empty port. For bracketed IPv6 addresses, strip the
+		// brackets first so JoinHostPort doesn't double-bracket.
+		host := address
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			host = host[1 : len(host)-1]
 		}
-		return net.JoinHostPort(address, "")
+		return net.JoinHostPort(host, "")
 	}
 
 	// In the case that both the host and port are empty, we'll use an empty

@@ -1,10 +1,11 @@
-// Copyright (c) 2013-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package main
 
 import (
+	"context"
 	"net"
 	"net/http"
 	_ "net/http/pprof" // nolint:gosec
@@ -13,11 +14,12 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/btcsuite/btcwallet/chain"
-	"github.com/btcsuite/btcwallet/rpc/legacyrpc"
-	"github.com/btcsuite/btcwallet/wallet"
-	"github.com/btcsuite/btcwallet/walletdb"
-	"github.com/lightninglabs/neutrino"
+	neutrino "github.com/pearl-research-labs/pearl/spv"
+	"github.com/pearl-research-labs/pearl/wallet/chain"
+	"github.com/pearl-research-labs/pearl/wallet/rpc/legacyrpc"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 var (
@@ -52,6 +54,11 @@ func walletMain() error {
 			logRotator.Close()
 		}
 	}()
+
+	// Initialise key scopes to match the active network's coin type.
+	// This ensures the BIP-86 derivation path,
+	// m/86'/1'/0'/0/0 on testnet, m/86'/808276'/0'/0/0 on mainnet.
+	waddrmgr.InitKeyScopes(activeNet.Params.HDCoinType)
 
 	// Show version at startup.
 	log.Infof("Version %s", version())
@@ -163,7 +170,7 @@ func rpcClientConnectLoop(legacyRPCServer *legacyrpc.Server, loader *wallet.Load
 			netDir := networkDir(cfg.AppDataDir.Value, activeNet.Params)
 			spvdb, err = walletdb.Create(
 				"bdb", filepath.Join(netDir, "neutrino.db"),
-				true, cfg.DBTimeout,
+				true, cfg.DBTimeout, false,
 			)
 			if err != nil {
 				log.Errorf("Unable to create Neutrino DB: %s", err)
@@ -183,7 +190,7 @@ func rpcClientConnectLoop(legacyRPCServer *legacyrpc.Server, loader *wallet.Load
 				continue
 			}
 			chainClient = chain.NewNeutrinoClient(activeNet.Params, chainService)
-			err = chainClient.Start()
+			err = chainClient.Start(context.Background())
 			if err != nil {
 				log.Errorf("Couldn't start Neutrino client: %s", err)
 			}
@@ -261,17 +268,17 @@ func readCAFile() []byte {
 	return certs
 }
 
-// startChainRPC opens a RPC client connection to a btcd server for blockchain
+// startChainRPC opens a RPC client connection to a pearld server for blockchain
 // services.  This function uses the RPC options from the global config and
 // there is no recovery in case the server is not available or if there is an
 // authentication error.  Instead, all requests to the client will simply error.
 func startChainRPC(certs []byte) (*chain.RPCClient, error) {
 	log.Infof("Attempting RPC client connection to %v", cfg.RPCConnect)
 	rpcc, err := chain.NewRPCClient(activeNet.Params, cfg.RPCConnect,
-		cfg.BtcdUsername, cfg.BtcdPassword, certs, cfg.DisableClientTLS, 0)
+		cfg.PearldUsername, cfg.PearldPassword, certs, cfg.DisableClientTLS, 0)
 	if err != nil {
 		return nil, err
 	}
-	err = rpcc.Start()
+	err = rpcc.Start(context.Background())
 	return rpcc, err
 }

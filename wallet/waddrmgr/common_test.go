@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
+	_ "github.com/pearl-research-labs/pearl/wallet/walletdb/bdb"
 )
 
 var (
@@ -41,17 +41,17 @@ var (
 	waddrmgrNamespaceKey = []byte("waddrmgrNamespace")
 
 	// expectedAddrs is the list of all expected addresses generated from the
-	// seed.
+	// seed. Addresses use BIP-86 key-only Taproot commitment.
 	expectedAddrs = []expectedAddr{
 		{
-			address:     "14wtcepMNiEazuN7YosWY8bwD9tcCtxXRB",
-			addressHash: hexToBytes("2b49ecd0cf72006173e6e95acf416b6735b5f889"),
+			address:     "prl1psayn40fkp3f3szxztahxwszhyjfxe3u9tqxycujd6q2zcw4uc99sm7r4na",
+			addressHash: hexToBytes("87493abd360c531808c25f6e67405724926cc785580c4c724dd0142c3abcc14b"),
 			internal:    false,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("02d8f88468c5a2e8e1815faf555f59cbd1979e3dbdf823f80c271b6fb70d2d519b"),
-			privKey:     hexToBytes("c27d6581b92785834b381fa697c4b0ffc4574b495743722e0acb7601b1b68b99"),
-			privKeyWIF:  "L3jmpy54Pc7MLXTN2mL8Xas7BJziwKaUGmgnXXzgGbVRdiAniXZk",
+			pubKey:      hexToBytes("02af08f3d1bb1ccaed1659e88b5a8d73f412628e44ddcbcbdc54b6b81f20c31375"),
+			privKey:     hexToBytes("006499105900d03c7ef9cf27b87521b83848cd6836b1ddd75aa498329aaaf717"),
+			privKeyWIF:  "KwEUVJA1MzXt8yaTzZSWbEsD5wwTtMcdiTNUxJH8MnnJmpz7Ufnd",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -60,14 +60,14 @@ var (
 			},
 		},
 		{
-			address:     "1N3D8jy2aQuUsKBsDgZ6ZPTVR9VhHgJYpE",
-			addressHash: hexToBytes("e6c59a1542138d1bf08f45cd18899557cf56b356"),
+			address:     "prl1pvdtcl546a64kk9p06nc75vrwlqfrl3m9myhl07wd69zvfma6fq3q9aduze",
+			addressHash: hexToBytes("63578fd2baeeab6b142fd4f1ea306ef8123fc765d92ff7f9cdd144c4efba4822"),
 			internal:    false,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("02b9c175b908624f8a8eaac227d0e8c77c0eec327b8c512ad1b8b7a4b5b676971f"),
-			privKey:     hexToBytes("18f3b191019e83878a81557abebb2afda199e31d22e150d8bf4df4561671be6c"),
-			privKeyWIF:  "Kx4DNid19W8sjNFN3uPqQE7UYnCqyEp7unCvdkf2LrVUFpnDtwpB",
+			pubKey:      hexToBytes("039879f3954272490ec03cc90377f77b8dd2df107cb011398f9d5b0b459f0a0978"),
+			privKey:     hexToBytes("040c90c18fcfb63c5fbcf05c5bcaa03d7e9a3c196eb895517583f893d2b9ff8a"),
+			privKeyWIF:  "KwMahLB6nVaRQoUqcfERGYP1id1NTUJtZ2zXoXyTfZNTRnVjt3AF",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -76,14 +76,14 @@ var (
 			},
 		},
 		{
-			address:     "1VTfwD4iHre2bMrR9qGiJMwoiZGQZ8e6s",
-			addressHash: hexToBytes("0561e9373986965b647a57a09718e9c050215cfe"),
+			address:     "prl1penz3j6q2rvnh02axv4ysxp6z789qtteezuq0jnm2nr5w562uaywqp6a2pw",
+			addressHash: hexToBytes("ccc519680a1b2777aba66549030742f1ca05af391700f94f6a98e8ea695ce91c"),
 			internal:    false,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("0329faddf1254d490d6add49e2b08cf52b561038c72baec0edb3cfacff71ff1021"),
-			privKey:     hexToBytes("ccb8f6305b73136b363644b647f6efc0fd27b6b7d9c11c7e560662ed38db7b34"),
-			privKeyWIF:  "L45fWF6Yd736fDohuB97vwRRLdQQJr3ZGvbokk9ubiT7aNrg7tTn",
+			pubKey:      hexToBytes("031dd01b86d496f37ed2b2daffb79adac90c13dd972733822bff8d15d0c2834a28"),
+			privKey:     hexToBytes("f49ce36c93e23026f55d7498efd4691b06ad5d46f93a70206f55c41734567059"),
+			privKeyWIF:  "L5RCvCshozHm5tha3e1k4gSVBrZKjvHiJptyc5bgR5aAmQ7Y6pnE",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -92,14 +92,14 @@ var (
 			},
 		},
 		{
-			address:     "13TdEj4ehUuYFiSaB47eLVBwM2XhAhrK2J",
-			addressHash: hexToBytes("1af950be02584ca230b7078cec0cfd38dd71b468"),
+			address:     "prl1pdl6palz9pxn5zdufcx9wguuz95wruwwu2awmdkpjf5p2lvdk2snsq5kd62",
+			addressHash: hexToBytes("6ff41efc4509a7413789c18ae473822d1c3e39dc575db6d8324d02afb1b65427"),
 			internal:    false,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("03d738324e2f0ce42e46975d7f8c7117c1670e3d7912b0291aea452add99674774"),
-			privKey:     hexToBytes("d6bc8ff768814fede2adcdb74826bd846924341b3862e3b6e31cdc084e992940"),
-			privKeyWIF:  "L4R8XyxYQyPSpTwj8w96tM86a6j3QA9jbRPj3RA7DVTVWk71ndeP",
+			pubKey:      hexToBytes("03d2443e73ae88abf7980408cc5a8a0855a1b1ef491ad780f844b058e8ab64a768"),
+			privKey:     hexToBytes("ba3b3fc97e1806b4e1aad94854d457bebe24e481b06920b003f851468f604bdb"),
+			privKeyWIF:  "L3TijuoQs3wnewRDV6E2nLuMk5VhtycCivpTcnJHNJrdvo3oPN2g",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -108,14 +108,14 @@ var (
 			},
 		},
 		{
-			address:     "1LTjSghkBecT59VjEKke331HxVdqcFwUDa",
-			addressHash: hexToBytes("d578a267a7174c6ba7f76b0ab2397ce0ba0c5c3c"),
+			address:     "prl1p0qmn60e5r5y55ztcna3p7vnwdq5c2pp4xa69a0e7gxt5vvr5mspq9rv6jt",
+			addressHash: hexToBytes("78373d3f341d094a09789f621f326e682985043537745ebf3e4197463074dc02"),
 			internal:    false,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("03a917acd5cd5b6f544b43f1921a35677e4d5320e5d2add2056039b4b44fdf905e"),
-			privKey:     hexToBytes("8563ade061110e03aee50695ffc5cb1c06c8310bde0a3674257c853c966968c0"),
-			privKeyWIF:  "L1h16Hunxomww4FrpyQP2iFmWNgG7U1u3awp6Vd3s2uGf7v5VU8c",
+			pubKey:      hexToBytes("0273e4a9dfd8f7c68e99c5c912634e76f27a80960d07e906caf7b1bf91faea0bd0"),
+			privKey:     hexToBytes("569510b9bacee90b32dbdb8848228bbd15cafc01c587f830cfa144f5654e0b4f"),
+			privKeyWIF:  "Kz81rW9iGh9xG19HBrgzdWo5oR5aA9UVJNA65GEiDpKrpaYUPsoM",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -124,14 +124,14 @@ var (
 			},
 		},
 		{
-			address:     "15HNivzKhsLaMs1qRdQN1ifoJYUnJ2xW9z",
-			addressHash: hexToBytes("2ef94abb9ee8f785d087c3ec8d6ee467e92d0d0a"),
+			address:     "prl1pya7e4s6kl2tpf5awz34687j6cngw0lgrqd3qq927w2qzusxmgcgs4yad5m",
+			addressHash: hexToBytes("277d9ac356fa9614d3ae146ba3fa5ac4d0e7fd03036200155e72802e40db4611"),
 			internal:    true,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("020a1290b997c0a234a95213962e7edcb761c7360f0230f698a1a3e71c37047bb0"),
-			privKey:     hexToBytes("fe4f855fcf059ec6ddf7b25f63b19aa49c771d1fcb9850b68ae3d65e20657a60"),
-			privKeyWIF:  "L5k4HivqXvohxBMpuwD38iUgi6uewffwZny91ZNYfM39RXH2x3QR",
+			pubKey:      hexToBytes("03efe292b974eca9507b2fe823c256c4a2fb820d0ba3106bc68a16e871852e5503"),
+			privKey:     hexToBytes("c690dbef68034da9065f0105e8206592ab72f0d51b50c68fac48a90a15e6f19d"),
+			privKeyWIF:  "L3shNpUwT6TSxnwoqHJyLvWg1LBwtV4s6ARFXr2uNfoMKcaUeetD",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -140,14 +140,14 @@ var (
 			},
 		},
 		{
-			address:     "1LJpGrAP1vWHuvfHqmUutQqFVYca2qwxhy",
-			addressHash: hexToBytes("d3c8ec46891f599bfeaa4c25918bfb3d46ea334c"),
+			address:     "prl1pen8y8ph9jtqzn885qv4tlczmf5kg6k9cc53kkevu3wxenaq6zy0qs6rdc5",
+			addressHash: hexToBytes("ccce4386e592c0299cf4032abfe05b4d2c8d58b8c5236b659c8b8d99f41a111e"),
 			internal:    true,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("03f79bbde32af42dde98195f011d95982602fcd0dab657fe4a1f49f9d5ada1e02d"),
-			privKey:     hexToBytes("bfef521317c65b018ae7e6d7ecc3aa700d5d0f7ea84d567be9270382d0b5e3e6"),
-			privKeyWIF:  "L3eomUajnTDM3Pc8GU47qqXUFuCjvpqY7NYN9mH3x1ZFjDgiY4BU",
+			pubKey:      hexToBytes("03894250e82aa208eb5660744374c9510704a1d559c92c85b9b33ee753db4a2e21"),
+			privKey:     hexToBytes("4dffd85a035b89b0985044720704521ad827d7a1a8fbfb08e17dd3a231b77045"),
+			privKeyWIF:  "KyqLBTknsGeTKM77xUsWan47ddXTyCg7CxSRtSUXxXnNYEFejwnc",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -156,14 +156,14 @@ var (
 			},
 		},
 		{
-			address:     "13NhXy2nCLMwNug1TZ6uwaWnxp3uTqdDQq",
-			addressHash: hexToBytes("1a0ad2a04fde3b2afe068057591e1871c289c4b8"),
+			address:     "prl1pqz2jravv8q56wx2rpu8u84sdug5rah7rkt8dzqdvdndpclza0ysserpyel",
+			addressHash: hexToBytes("009521f58c3829a719430f0fc3d60de2283edfc3b2ced101ac6cda1c7c5d7921"),
 			internal:    true,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("023ded84afe4fe91b52b45c3deb26fd263f749cbc27747dc964dae9e0739cbc579"),
-			privKey:     hexToBytes("f506dffd4494c24006df7a35f3291f7ca0297a1a431557a1339bfed6f48738ca"),
-			privKeyWIF:  "L5S1bVQUPqQb1Su82fLoSpnGCjcPfdAQE1pJxWRopJSBdYNDHESv",
+			pubKey:      hexToBytes("023a16a31e71313a2ec965dab8bbe054481dcb878d6c33bbacd918ef3547911f95"),
+			privKey:     hexToBytes("3c14dec5cab4f78a294b044b6bec19c4417c1ff5c8cb6c5af086d8a2a79b0b8d"),
+			privKeyWIF:  "KyEW3Lv9oG7b4qzXjrGmSftsHjRpjEsrAm1UbZLBRbdEmm2WLPhT",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -172,14 +172,14 @@ var (
 			},
 		},
 		{
-			address:     "1AY6yAHvojvpFcevAichLMnJfxgE8eSe4N",
-			addressHash: hexToBytes("689b0249c628265215fd1de6142d5d5594eb8dc2"),
+			address:     "prl1pdcl4mszx3c44ywv75ff4nhk6mnvnt9gu298reyqk70p6murvvagsyt898x",
+			addressHash: hexToBytes("6e3f5dc0468e2b52399ea25359dedadcd935951c514e3c9016f3c3adf06c6751"),
 			internal:    true,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("030f1e79f06824e10a259914ec310528bb2d5b8d6356341fe9dff55498591af6af"),
-			privKey:     hexToBytes("b3629de8ef6a275b4ffae41aa2bbbc2952eb92282ea6402435abbb010ecc1fb8"),
-			privKeyWIF:  "L3EQsGeEnyXmKaux54cG4DQeCSQDvGuvEuy3W2ss4geum7AtWaHw",
+			pubKey:      hexToBytes("0308ece0db6932bf9102577f492c6f1037f3fc7f25d66580a544c2abeddff3fb26"),
+			privKey:     hexToBytes("4fc4cd687802340fad2f55370b09c1c66bc29773b02b22b720d5faabc4adde62"),
+			privKeyWIF:  "KytmfeVMGDESoUGZpFy2qaqDtzp489iv4rbVk9U8WELXBjxzvzX5",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -188,14 +188,14 @@ var (
 			},
 		},
 		{
-			address:     "1Jc7An3JqjzRQULVr6Wh3iYR7miB6WPJCD",
-			addressHash: hexToBytes("c11dd8a3577978807a0453febedee2994a6144d4"),
+			address:     "prl1plv3kmy9z60d7etcmwapjjfk0g0ahy8m9llt35pucs3zjdpkvffmqcgrxkq",
+			addressHash: hexToBytes("fb236d90a2d3dbecaf1b77432926cf43fb721f65ffd71a079884452686cc4a76"),
 			internal:    true,
 			compressed:  true,
 			imported:    false,
-			pubKey:      hexToBytes("0317d7182e26b6ca3e0f3db531c474b9cab7a763a75eabff2e14ac92f62a793238"),
-			privKey:     hexToBytes("ca747a7ef815ea0dbe68655272cecbfbd65f2a109019a9ed28e0d3dcaffe05c3"),
-			privKeyWIF:  "L41Frac75RPbTELKzw1EGC2qCkdveiVumpmsyX4daAvyyCMxit1W",
+			pubKey:      hexToBytes("02cc2b418df288e09fa03018b0fee6ef9296834a9ddab04836ff707bc4bc4962f7"),
+			privKey:     hexToBytes("cfcc43bb92fff0a6c370b6fb3deff52cd4f9f04316c6cf823cba38fbcd9f5fec"),
+			privKeyWIF:  "L4BeEqff3kXjn6Egs9EddjjD7tXhYKKtcSmEg2X322rp8h8gRSeD",
 			derivationInfo: DerivationPath{
 				InternalAccount: 0,
 				Account:         hdkeychain.HardenedKeyStart,
@@ -251,7 +251,9 @@ func hexToBytes(origHex string) []byte {
 func emptyDB(t *testing.T) (tearDownFunc func(), db walletdb.DB) {
 	dirName := t.TempDir()
 	dbPath := filepath.Join(dirName, "mgrtest.db")
-	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create(
+		"bdb", dbPath, true, defaultDBTimeout, false,
+	)
 	if err != nil {
 		_ = os.RemoveAll(dirName)
 		t.Fatalf("createDbNamespace: unexpected error: %v", err)
@@ -269,7 +271,7 @@ func setupManager(t *testing.T) (tearDownFunc func(), db walletdb.DB, mgr *Manag
 	dirName := t.TempDir()
 
 	dbPath := filepath.Join(dirName, "mgrtest.db")
-	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout)
+	db, err := walletdb.Create("bdb", dbPath, true, defaultDBTimeout, false)
 	if err != nil {
 		_ = os.RemoveAll(dirName)
 		t.Fatalf("createDbNamespace: unexpected error: %v", err)

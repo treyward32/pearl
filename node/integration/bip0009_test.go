@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
 )
 
 const (
@@ -39,15 +39,15 @@ func assertVersionBit(r *rpctest.Harness, t *testing.T, hash *chainhash.Hash, bi
 		t.Fatalf("failed to retrieve block %v: %v", hash, err)
 	}
 	switch {
-	case set && block.Header.Version&(1<<bit) == 0:
+	case set && block.BlockHeader().Version&(1<<bit) == 0:
 		_, _, line, _ := runtime.Caller(1)
 		t.Fatalf("assertion failed at line %d: block %s, version 0x%x "+
 			"does not have bit %d set", line, hash,
-			block.Header.Version, bit)
-	case !set && block.Header.Version&(1<<bit) != 0:
+			block.BlockHeader().Version, bit)
+	case !set && block.BlockHeader().Version&(1<<bit) != 0:
 		_, _, line, _ := runtime.Caller(1)
 		t.Fatalf("assertion failed at line %d: block %s, version 0x%x "+
-			"has bit %d set", line, hash, block.Header.Version, bit)
+			"has bit %d set", line, hash, block.BlockHeader().Version, bit)
 	}
 }
 
@@ -130,7 +130,7 @@ func assertSoftForkStatus(r *rpctest.Harness, t *testing.T, forkKey string, stat
 // specific soft fork deployment to test.
 func testBIP0009(t *testing.T, forkKey string, deploymentID uint32) {
 	// Initialize the primary mining node with only the genesis block.
-	r, err := rpctest.New(&chaincfg.RegressionNetParams, nil, nil, "")
+	r, err := rpctest.New(&chaincfg.SimNetParams, nil, nil, "")
 	if err != nil {
 		t.Fatalf("unable to create primary harness: %v", err)
 	}
@@ -138,6 +138,14 @@ func testBIP0009(t *testing.T, forkKey string, deploymentID uint32) {
 		t.Fatalf("unable to setup test chain: %v", err)
 	}
 	defer r.TearDown()
+
+	// If the deployment is meant to be always active, then it should be
+	// active from the very first block.
+	if deploymentID == chaincfg.DeploymentTestDummyAlwaysActive {
+		assertChainHeight(r, t, 0)
+		assertSoftForkStatus(r, t, forkKey, blockchain.ThresholdActive)
+		return
+	}
 
 	// *** ThresholdDefined ***
 	//
@@ -283,11 +291,11 @@ func testBIP0009(t *testing.T, forkKey string, deploymentID uint32) {
 	}
 
 	// Otherwise, we'll need to mine additional blocks to pass the min
-	// activation height and ensure the rule set applies. For regtest the
+	// activation height and ensure the rule set applies. For simnet the
 	// deployment can only activate after height 600, and at this point
-	// we've mined 4*144 blocks, so another confirmation window will put us
-	// over.
-	numBlocksLeft := confirmationWindow
+	// we've mined 4*100 blocks, so two more confirmation windows will
+	// put us over.
+	numBlocksLeft := 2 * confirmationWindow
 	for i := uint32(0); i < numBlocksLeft; i++ {
 		// Ensure that we're always in the locked in state right up
 		// until after we mine the very last block.
@@ -306,7 +314,7 @@ func testBIP0009(t *testing.T, forkKey string, deploymentID uint32) {
 	}
 
 	// At this point, the soft fork should now be shown as active.
-	expectedChainHeight = (confirmationWindow * 5) - 1
+	expectedChainHeight = (confirmationWindow * 6) - 1
 	assertChainHeight(r, t, expectedChainHeight)
 	assertSoftForkStatus(r, t, forkKey, blockchain.ThresholdActive)
 }
@@ -338,12 +346,14 @@ func testBIP0009(t *testing.T, forkKey string, deploymentID uint32) {
 func TestBIP0009(t *testing.T) {
 	t.Parallel()
 
+	// Test BIP-9 mechanism with test deployments only.
+	// Legacy softforks (CSV, SegWit, Taproot) are now permanently active.
 	testBIP0009(t, "dummy", chaincfg.DeploymentTestDummy)
 	testBIP0009(t, "dummy-min-activation", chaincfg.DeploymentTestDummyMinActivation)
-	testBIP0009(t, "segwit", chaincfg.DeploymentSegwit)
+	testBIP0009(t, "dummy-always-active", chaincfg.DeploymentTestDummyAlwaysActive)
 }
 
-// TestBIP0009Mining ensures blocks built via btcd's CPU miner follow the rules
+// TestBIP0009Mining ensures blocks built via pearld's CPU miner follow the rules
 // set forth by BIP0009 by using the test dummy deployment.
 //
 // Overview:
@@ -398,7 +408,7 @@ func TestBIP0009Mining(t *testing.T) {
 	// in the version.
 	//
 	// The last generated block should now have the test bit set in the
-	// version since the btcd mining code will have recognized the test
+	// version since the pearld mining code will have recognized the test
 	// dummy deployment as started.
 	confirmationWindow := r.ActiveNet.MinerConfirmationWindow
 	numNeeded := confirmationWindow - 1
@@ -415,7 +425,7 @@ func TestBIP0009Mining(t *testing.T) {
 	// Generate enough blocks to reach the next state transition.
 	//
 	// The last generated block should still have the test bit set in the
-	// version since the btcd mining code will have recognized the test
+	// version since the pearld mining code will have recognized the test
 	// dummy deployment as locked in.
 	hashes, err = r.Client.Generate(confirmationWindow)
 	if err != nil {
@@ -433,7 +443,7 @@ func TestBIP0009Mining(t *testing.T) {
 	// in the version since it is still locked in.
 	//
 	// The last generated block should NOT have the test bit set in the
-	// version since the btcd mining code will have recognized the test
+	// version since the pearld mining code will have recognized the test
 	// dummy deployment as activated and thus there is no longer any need
 	// to set the bit.
 	hashes, err = r.Client.Generate(confirmationWindow)

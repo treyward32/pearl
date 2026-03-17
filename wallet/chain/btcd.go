@@ -1,28 +1,29 @@
-// Copyright (c) 2013-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package chain
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/gcs"
-	"github.com/btcsuite/btcd/btcutil/gcs/builder"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs"
+	"github.com/pearl-research-labs/pearl/node/btcutil/gcs/builder"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
-// RPCClient represents a persistent client connection to a bitcoin RPC server
+// RPCClient represents a persistent client connection to a pearld RPC server
 // for information regarding the current best block chain.
 type RPCClient struct {
 	*rpcclient.Client
@@ -48,7 +49,7 @@ var _ Interface = (*RPCClient)(nil)
 // connect string.  If disableTLS is false, the remote RPC certificate must be
 // provided in the certs slice.  The connection is not established immediately,
 // but must be done using the Start method.  If the remote server does not
-// operate on the same bitcoin network as described by the passed chain
+// operate on the same network as described by the passed chain
 // parameters, the connection will be disconnected.
 //
 // TODO(yy): deprecate it in favor of NewRPCClientWithConfig.
@@ -101,7 +102,7 @@ type RPCClientConfig struct {
 	// client.
 	Conn *rpcclient.ConnConfig
 
-	// Params defines a Bitcoin network by its parameters.
+	// Params defines a Pearl network by its parameters.
 	Chain *chaincfg.Params
 
 	// NotificationHandlers defines callback function pointers to invoke
@@ -148,7 +149,7 @@ func (r *RPCClientConfig) validate() error {
 // the config options supplised.
 //
 // The connection is not established immediately, but must be done using the
-// Start method.  If the remote server does not operate on the same bitcoin
+// Start method.  If the remote server does not operate on the same
 // network as described by the passed chain parameters, the connection will be
 // disconnected.
 func NewRPCClientWithConfig(cfg *RPCClientConfig) (*RPCClient, error) {
@@ -199,7 +200,12 @@ func NewRPCClientWithConfig(cfg *RPCClientConfig) (*RPCClient, error) {
 
 // BackEnd returns the name of the driver.
 func (c *RPCClient) BackEnd() string {
-	return "btcd"
+	return "pearld"
+}
+
+// SyncProgress is only available in SPV mode.
+func (c *RPCClient) SyncProgress() (*SyncProgress, error) {
+	return nil, errors.New("sync progress tracking is only available in SPV mode")
 }
 
 // Start attempts to establish a client connection with the remote server.
@@ -207,7 +213,7 @@ func (c *RPCClient) BackEnd() string {
 // sent by the server.  After a limited number of connection attempts, this
 // function gives up, and therefore will not block forever waiting for the
 // connection to be established to a server that may not exist.
-func (c *RPCClient) Start() error {
+func (c *RPCClient) Start(_ context.Context) error {
 	err := c.Connect(c.reconnectAttempts)
 	if err != nil {
 		return err
@@ -290,7 +296,7 @@ func (c *RPCClient) WaitForShutdown() {
 }
 
 // Notifications returns a channel of parsed notifications sent by the remote
-// bitcoin RPC server.  This channel must be continually read or the process
+// pearld RPC server.  This channel must be continually read or the process
 // may abort for running out memory, as unread notifications are queued for
 // later reads.
 func (c *RPCClient) Notifications() <-chan interface{} {
@@ -573,6 +579,38 @@ func (c *RPCClient) POSTClient() (*rpcclient.Client, error) {
 	return rpcclient.New(&configCopy, nil)
 }
 
+// getTxSpendingPrevOut makes an RPC call to `gettxspendingprevout` and returns
+// the result.
+func getTxSpendingPrevOut(op wire.OutPoint,
+	client *rpcclient.Client) (chainhash.Hash, bool) {
+
+	prevoutResps, err := client.GetTxSpendingPrevOut([]wire.OutPoint{op})
+	if err != nil {
+		return chainhash.Hash{}, false
+	}
+
+	// We should only get a single item back since we only requested with a
+	// single item.
+	if len(prevoutResps) != 1 {
+		return chainhash.Hash{}, false
+	}
+
+	result := prevoutResps[0]
+
+	// If the "spendingtxid" field is empty, then the utxo has no spend in
+	// the mempool at the moment.
+	if result.SpendingTxid == "" {
+		return chainhash.Hash{}, false
+	}
+
+	spendHash, err := chainhash.NewHashFromStr(result.SpendingTxid)
+	if err != nil {
+		return chainhash.Hash{}, false
+	}
+
+	return *spendHash, true
+}
+
 // LookupInputMempoolSpend returns the transaction hash and true if the given
 // input is found being spent in mempool, otherwise it returns nil and false.
 func (c *RPCClient) LookupInputMempoolSpend(op wire.OutPoint) (
@@ -583,19 +621,19 @@ func (c *RPCClient) LookupInputMempoolSpend(op wire.OutPoint) (
 
 // MapRPCErr takes an error returned from calling RPC methods from various
 // chain backends and maps it to an defined error here. It uses the
-// `BtcdErrMap`, whose keys are btcd error strings and values are errors made
-// from bitcoind error strings.
+// `PearldErrMap`, whose keys are pearld error strings and values are errors made
+// from compatible fork error strings.
 func (c *RPCClient) MapRPCErr(rpcErr error) error {
 	// Iterate the map and find the matching error.
-	for btcdErr, matchedErr := range BtcdErrMap {
-		// Match it against btcd's error.
-		if matchErrStr(rpcErr, btcdErr) {
+	for pearldErr, matchedErr := range PearldErrMap {
+		// Match it against pearld's error.
+		if matchErrStr(rpcErr, pearldErr) {
 			return matchedErr
 		}
 	}
 
 	// If no matching error is found, we try to match it to an older
-	// version of `btcd`.
+	// version of `pearld`.
 	//
 	// Get the backend's version.
 	backend, bErr := c.BackendVersion()
@@ -615,10 +653,10 @@ func (c *RPCClient) MapRPCErr(rpcErr error) error {
 	// supported.
 	if !backend.SupportTestMempoolAccept() {
 		// If the backend is older than v0.24.2, we will try to match
-		// the error to the older version of `btcd`.
-		for btcdErr, matchedErr := range BtcdErrMapPre2402 {
-			// Match it against btcd's error.
-			if matchErrStr(rpcErr, btcdErr) {
+		// the error to the older version of `pearld`.
+		for pearldErr, matchedErr := range PearldErrMapPre2402 {
+			// Match it against pearld's error.
+			if matchErrStr(rpcErr, pearldErr) {
 				return matchedErr
 			}
 		}
@@ -628,7 +666,7 @@ func (c *RPCClient) MapRPCErr(rpcErr error) error {
 	return fmt.Errorf("%w: %v", ErrUndefined, rpcErr)
 }
 
-// SendRawTransaction sends a raw transaction via btcd.
+// SendRawTransaction sends a raw transaction via pearld.
 func (c *RPCClient) SendRawTransaction(tx *wire.MsgTx,
 	allowHighFees bool) (*chainhash.Hash, error) {
 

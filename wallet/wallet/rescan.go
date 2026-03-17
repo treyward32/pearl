@@ -1,16 +1,16 @@
-// Copyright (c) 2013-2017 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 package wallet
 
 import (
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/chain"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wtxmgr"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/chain"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wtxmgr"
 )
 
 // RescanProgressMsg reports the current progress made by a rescan for a
@@ -250,15 +250,17 @@ out:
 		case batch := <-w.rescanBatch:
 			// Log the newly-started rescan.
 			numAddrs := len(batch.addrs)
-			noun := pickNoun(numAddrs, "address", "addresses")
-			log.Infof("Started rescan from block %v (height %d) for %d %s",
-				batch.bs.Hash, batch.bs.Height, numAddrs, noun)
+			numOps := len(batch.outpoints)
+
+			log.Infof("Started rescan from block %v (height %d) "+
+				"for %d addrs, %d outpoints", batch.bs.Hash,
+				batch.bs.Height, numAddrs, numOps)
 
 			err := chainClient.Rescan(&batch.bs.Hash, batch.addrs,
 				batch.outpoints)
 			if err != nil {
-				log.Errorf("Rescan for %d %s failed: %v", numAddrs,
-					noun, err)
+				log.Errorf("Rescan for %d addrs, %d outpoints "+
+					"failed: %v", numAddrs, numOps, err)
 			}
 			batch.done(err)
 		case <-quit:

@@ -3,8 +3,8 @@ package pushtx_test
 import (
 	"testing"
 
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/pushtx"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/pushtx"
 )
 
 // TestParseBroadcastErrorCode ensures that we properly construct a
@@ -72,7 +72,7 @@ func TestParseBroadcastErrorCode(t *testing.T) {
 			code: pushtx.Confirmed,
 		},
 		{
-			name: "btcd mempool double spend",
+			name: "pearld mempool double spend",
 			msg: &wire.MsgReject{
 				Code:   wire.RejectDuplicate,
 				Reason: "already spent",
@@ -80,7 +80,7 @@ func TestParseBroadcastErrorCode(t *testing.T) {
 			code: pushtx.Invalid,
 		},
 		{
-			name: "btcd transaction in mempool",
+			name: "pearld transaction in mempool",
 			msg: &wire.MsgReject{
 				Code:   wire.RejectDuplicate,
 				Reason: "already have transaction",
@@ -88,7 +88,7 @@ func TestParseBroadcastErrorCode(t *testing.T) {
 			code: pushtx.Mempool,
 		},
 		{
-			name: "btcd transaction in chain",
+			name: "pearld transaction in chain",
 			msg: &wire.MsgReject{
 				Code:   wire.RejectDuplicate,
 				Reason: "transaction already exists",

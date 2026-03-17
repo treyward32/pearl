@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -113,6 +113,15 @@ func NewWalletIsLockedCmd() *WalletIsLockedCmd {
 	return &WalletIsLockedCmd{}
 }
 
+// ChainSyncedCmd defines the chainsynced JSON-RPC command.
+type ChainSyncedCmd struct{}
+
+// NewChainSyncedCmd returns a new instance which can be used to issue a
+// chainsynced JSON-RPC command.
+func NewChainSyncedCmd() *ChainSyncedCmd {
+	return &ChainSyncedCmd{}
+}
+
 func init() {
 	// The commands in this file are only usable with a wallet server via
 	// websockets.
@@ -125,4 +134,5 @@ func init() {
 	MustRegisterCmd("listalltransactions", (*ListAllTransactionsCmd)(nil), flags)
 	MustRegisterCmd("recoveraddresses", (*RecoverAddressesCmd)(nil), flags)
 	MustRegisterCmd("walletislocked", (*WalletIsLockedCmd)(nil), flags)
+	MustRegisterCmd("chainsynced", (*ChainSyncedCmd)(nil), flags)
 }

@@ -4,16 +4,15 @@
 package integration
 
 import (
-	"encoding/hex"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/integration/rpctest"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/integration/rpctest"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,8 +26,8 @@ func TestTestMempoolAccept(t *testing.T) {
 	t.Parallel()
 
 	// Boilerplate codetestDir to make a pruned node.
-	btcdCfg := []string{"--rejectnonstd", "--debuglevel=debug"}
-	r, err := rpctest.New(&chaincfg.SimNetParams, nil, btcdCfg, "")
+	pearldCfg := []string{"--rejectnonstd", "--debuglevel=debug"}
+	r, err := rpctest.New(&chaincfg.SimNetParams, nil, pearldCfg, "")
 	require.NoError(t, err)
 
 	// Setup the node.
@@ -38,11 +37,11 @@ func TestTestMempoolAccept(t *testing.T) {
 	})
 
 	// Create testing txns.
-	invalidTx := decodeHex(t, missingParentsHex)
+	invalidTx := createInvalidTestTx(t)
 	validTx := createTestTx(t, r)
 
 	// Create testing constants.
-	const feeRate = 10
+	const feeRate = 100
 
 	testCases := []struct {
 		name           string
@@ -87,7 +86,7 @@ func TestTestMempoolAccept(t *testing.T) {
 			maxFeeRate: 0,
 			expectedResult: []*btcjson.TestMempoolAcceptResult{{
 				Txid:         invalidTx.TxHash().String(),
-				Wtxid:        invalidTx.TxHash().String(),
+				Wtxid:        invalidTx.WitnessHash().String(),
 				Allowed:      false,
 				RejectReason: "missing-inputs",
 			}},
@@ -101,7 +100,7 @@ func TestTestMempoolAccept(t *testing.T) {
 			maxFeeRate: 1e-5,
 			expectedResult: []*btcjson.TestMempoolAcceptResult{{
 				Txid:         validTx.TxHash().String(),
-				Wtxid:        validTx.TxHash().String(),
+				Wtxid:        validTx.WitnessHash().String(),
 				Allowed:      false,
 				RejectReason: "max-fee-exceeded",
 			}},
@@ -114,7 +113,7 @@ func TestTestMempoolAccept(t *testing.T) {
 			txns: []*wire.MsgTx{validTx},
 			expectedResult: []*btcjson.TestMempoolAcceptResult{{
 				Txid:    validTx.TxHash().String(),
-				Wtxid:   validTx.TxHash().String(),
+				Wtxid:   validTx.WitnessHash().String(),
 				Allowed: true,
 				// TODO(yy): need to calculate the fees, atm
 				// there's no easy way.
@@ -128,12 +127,12 @@ func TestTestMempoolAccept(t *testing.T) {
 			txns: []*wire.MsgTx{invalidTx, validTx},
 			expectedResult: []*btcjson.TestMempoolAcceptResult{{
 				Txid:         invalidTx.TxHash().String(),
-				Wtxid:        invalidTx.TxHash().String(),
+				Wtxid:        invalidTx.WitnessHash().String(),
 				Allowed:      false,
 				RejectReason: "missing-inputs",
 			}, {
 				Txid:    validTx.TxHash().String(),
-				Wtxid:   validTx.TxHash().String(),
+				Wtxid:   validTx.WitnessHash().String(),
 				Allowed: true,
 			}},
 		},
@@ -166,11 +165,6 @@ func TestTestMempoolAccept(t *testing.T) {
 	}
 }
 
-var (
-	//nolint:lll
-	missingParentsHex = "0100000003bcb2054607a921b3c6df992a9486776863b28485e731a805931b6feb14221acff2000000001c75619cdff9d694a434b13abfbbd618e2ece4460f24b4821cf47d5afc481a386c59565c4900000000cff75994dceb5f5568f8ada45d428630f512fb8efacd46682b4367b4edaf1985c5e4af4b07010000003c029216047236f3000000000017a9141d5a2c690c3e2dacb3cead240f0ce4a273b9d0e48758020000000000001600149d38710eb90e420b159c7a9263994c88e6810bc758020000000000001976a91490770ceff2b1c32e9dbf952fbe65b04a54d1949388ac580200000000000017a914f017945d4d088c7d42ab3bcbc1adce51d74fbd9f8784d7ee4b"
-)
-
 // createTestTx creates a `wire.MsgTx` and asserts its creation.
 func createTestTx(t *testing.T, h *rpctest.Harness) *wire.MsgTx {
 	addr, err := h.NewAddress()
@@ -184,20 +178,56 @@ func createTestTx(t *testing.T, h *rpctest.Harness) *wire.MsgTx {
 		Value:    1e6,
 	}
 
-	tx, err := h.CreateTransaction([]*wire.TxOut{output}, 10, true)
+	tx, err := h.CreateTransaction([]*wire.TxOut{output}, 100, true)
 	require.NoError(t, err)
 
 	return tx
 }
 
-// decodeHex takes a tx hexstring and asserts it can be decoded into a
-// `wire.MsgTx`.
-func decodeHex(t *testing.T, txHex string) *wire.MsgTx {
-	serializedTx, err := hex.DecodeString(txHex)
+// createInvalidTestTx creates a transaction that references
+// non-existent outputs (missing parents) and includes witness data.
+// This transaction will be rejected by TestMempoolAccept due to missing inputs.
+func createInvalidTestTx(t *testing.T) *wire.MsgTx {
+	// Create a new transaction with version 2 (witness transaction)
+	tx := wire.NewMsgTx(2)
+
+	// Create an input that references a non-existent output (missing parent)
+	// Use a random hash that doesn't exist in the blockchain
+	nonExistentHash, err := chainhash.NewHashFromStr(
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	)
 	require.NoError(t, err)
 
-	tx, err := btcutil.NewTxFromBytes(serializedTx)
+	// Add input referencing non-existent UTXO
+	prevOut := wire.NewOutPoint(nonExistentHash, 0)
+	txIn := wire.NewTxIn(prevOut, nil, nil)
+
+	// Add witness data to make it a witness transaction
+	// Use a dummy 64-byte signature (typical Taproot signature size)
+	dummySignature := make([]byte, 64)
+	for i := range dummySignature {
+		dummySignature[i] = byte(i)
+	}
+	txIn.Witness = wire.TxWitness{dummySignature}
+
+	tx.AddTxIn(txIn)
+
+	// Add a simple output to make it a complete transaction
+	// Create a dummy P2TR output
+	dummyTaprootKey := make([]byte, 32)
+	for i := range dummyTaprootKey {
+		dummyTaprootKey[i] = byte(i + 32)
+	}
+
+	// Create a P2TR script: OP_1 <32-byte-key>
+	pkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_1).
+		AddData(dummyTaprootKey).
+		Script()
 	require.NoError(t, err)
 
-	return tx.MsgTx()
+	txOut := wire.NewTxOut(1000000, pkScript)
+	tx.AddTxOut(txOut)
+
+	return tx
 }

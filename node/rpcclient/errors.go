@@ -7,9 +7,8 @@ import (
 )
 
 var (
-	// ErrBackendVersion is returned when running against a bitcoind or
-	// btcd that is older than the minimum version supported by the
-	// rpcclient.
+	// ErrBackendVersion is returned when the connected backend does not
+	// support a required RPC.
 	ErrBackendVersion = errors.New("backend version too low")
 
 	// ErrInvalidParam is returned when the caller provides an invalid
@@ -22,15 +21,16 @@ var (
 	ErrUndefined = errors.New("undefined")
 )
 
-// BitcoindRPCErr represents an error returned by bitcoind's RPC server.
-type BitcoindRPCErr uint32
+// CompatRPCErr represents an error returned by a compatible fork's RPC server.
+// Compatible forks refer to Bitcoin Core-based forks that implement the Pearl protocol.
+type CompatRPCErr uint32
 
 // This section defines all possible errors or reject reasons returned from
-// bitcoind's `sendrawtransaction` or `testmempoolaccept` RPC.
+// compatible fork's `sendrawtransaction` or `testmempoolaccept` RPC.
 const (
 	// ErrMissingInputsOrSpent is returned when calling
 	// `sendrawtransaction` with missing inputs.
-	ErrMissingInputsOrSpent BitcoindRPCErr = iota
+	ErrMissingInputsOrSpent CompatRPCErr = iota
 
 	// ErrMaxBurnExceeded is returned when calling `sendrawtransaction`
 	// with exceeding, falling short of, and equaling maxburnamount.
@@ -69,7 +69,7 @@ const (
 
 	// ErrTooManyReplacements is returned when a transaction causes too
 	// many transactions being replaced. This is set by
-	// `MAX_REPLACEMENT_CANDIDATES` in `bitcoind` and defaults to 100.
+	// `MAX_REPLACEMENT_CANDIDATES` and defaults to 100.
 	//
 	// NOTE: RBF rule 5.
 	ErrTooManyReplacements
@@ -92,7 +92,7 @@ const (
 	// non-witness bytes) that is disallowed.
 	//
 	// NOTE: ErrTxTooLarge must be put after ErrTxTooSmall because it's a
-	// subset of ErrTxTooSmall. Otherwise, if bitcoind returns
+	// subset of ErrTxTooSmall. Otherwise, if the compatible fork returns
 	// `tx-size-small`, it will be matched to ErrTxTooLarge.
 	ErrTxTooSmall
 
@@ -123,9 +123,6 @@ const (
 	// ErrScriptVerifyFlag is returned when there is invalid OP_IF
 	// construction.
 	ErrScriptVerifyFlag
-
-	// ErrTooManySigOps is returned when a transaction has too many sigops.
-	ErrTooManySigOps
 
 	// ErrInvalidOpcode is returned when a transaction has invalid OP
 	// codes.
@@ -201,7 +198,7 @@ const (
 )
 
 // Error implements the error interface. It returns the error message defined
-// in `bitcoind`.
+// in a compatible fork's RPC.
 
 // Some of the dashes used in the original error string is removed, e.g.
 // "missing-inputs" is now "missing inputs". This is ok since we will normalize
@@ -215,7 +212,7 @@ const (
 // - https://github.com/bitcoin/bitcoin/blob/master/test/functional/mempool_dust.py
 // - https://github.com/bitcoin/bitcoin/blob/master/test/functional/mempool_limit.py
 // - https://github.com/bitcoin/bitcoin/blob/master/src/validation.cpp
-func (r BitcoindRPCErr) Error() string {
+func (r CompatRPCErr) Error() string {
 	switch r {
 	case ErrMissingInputsOrSpent:
 		return "bad-txns-inputs-missingorspent"
@@ -280,9 +277,6 @@ func (r BitcoindRPCErr) Error() string {
 	case ErrScriptVerifyFlag:
 		return "mandatory script verify flag failed"
 
-	case ErrTooManySigOps:
-		return "bad txns too many sigops"
-
 	case ErrInvalidOpcode:
 		return "disabled opcode"
 
@@ -338,13 +332,12 @@ func (r BitcoindRPCErr) Error() string {
 	return "unknown error"
 }
 
-// BtcdErrMap takes the errors returned from btcd's `testmempoolaccept` and
+// PearldErrMap takes the errors returned from pearld's `testmempoolaccept` and
 // `sendrawtransaction` RPCs and map them to the errors defined above, which
 // are results from calling either `testmempoolaccept` or `sendrawtransaction`
-// in `bitcoind`.
+// in a compatible fork.
 //
-// Errors not mapped in `btcd`:
-//   - deployment error from `validateSegWitDeployment`.
+// Errors not mapped in `pearld`:
 //   - the error when total inputs is higher than max allowed value from
 //     `CheckTransactionInputs`.
 //   - the error when total outputs is higher than total inputs from
@@ -355,7 +348,7 @@ func (r BitcoindRPCErr) Error() string {
 // usage case of LND.
 //
 //nolint:lll
-var BtcdErrMap = map[string]error{
+var PearldErrMap = map[string]error{
 	// BIP125 related errors.
 	//
 	// When fee rate used or fees paid doesn't meet the requirements.
@@ -363,8 +356,7 @@ var BtcdErrMap = map[string]error{
 	"replacement transaction has an insufficient absolute fee": ErrInsufficientFee,
 
 	// When a transaction causes too many transactions being replaced. This
-	// is set by `MAX_REPLACEMENT_CANDIDATES` in `bitcoind` and defaults to
-	// 100.
+	// is set by `MAX_REPLACEMENT_CANDIDATES` and defaults to 100.
 	"replacement transaction evicts more transactions than permitted": ErrTooManyReplacements,
 
 	// When a transaction adds new unconfirmed inputs.
@@ -403,16 +395,13 @@ var BtcdErrMap = map[string]error{
 	// A transaction with too large sum of output values.
 	"total value of all transaction outputs exceeds max allowed value": ErrLargeTotalOutput,
 
-	// A transaction with too many sigops.
-	"sigop cost is too hight": ErrTooManySigOps,
-
 	// A transaction already in the blockchain.
 	"database contains entry for spent tx output": ErrTxAlreadyKnown,
 	"transaction already exists in blockchain":    ErrTxAlreadyConfirmed,
 
 	// A transaction in the mempool.
 	//
-	// NOTE: For btcd v0.24.2 and beyond, the error message is "already
+	// NOTE: For pearld v0.24.2 and beyond, the error message is "already
 	// have transaction in mempool".
 	"already have transaction": ErrTxAlreadyInMempool,
 
@@ -446,7 +435,7 @@ var BtcdErrMap = map[string]error{
 	"signature script size is larger than max allowed": ErrScriptSigSize,
 
 	// Some nonstandard transactions - too large tx size.
-	"weight of transaction is larger than max allowed": ErrTxTooLarge,
+	"vsize of transaction is larger than max allowed": ErrTxTooLarge,
 
 	// Some nonstandard transactions - output too small.
 	"payment is dust": ErrDust,
@@ -461,36 +450,35 @@ var BtcdErrMap = map[string]error{
 	// A transaction that is locked by BIP68 sequence logic.
 	"transaction's sequence locks on inputs not met": ErrNonBIP68Final,
 
-	// TODO(yy): find/return the following errors in `btcd`.
+	// TODO(yy): find/return the following errors in `pearld`.
 	//
 	// A tiny transaction(in non-witness bytes) that is disallowed.
-	// "unmatched btcd error 1": ErrTxTooSmall,
-	// "unmatched btcd error 2": ErrScriptVerifyFlag,
+	// "unmatched pearld error 1": ErrTxTooSmall,
+	// "unmatched pearld error 2": ErrScriptVerifyFlag,
 	// // A transaction with invalid OP codes.
-	// "unmatched btcd error 3": ErrInvalidOpcode,
+	// "unmatched pearld error 3": ErrInvalidOpcode,
 	// // Minimally-small transaction(in non-witness bytes) that is
 	// // allowed.
-	// "unmatched btcd error 4": ErrSameNonWitnessData,
+	// "unmatched pearld error 4": ErrSameNonWitnessData,
 }
 
 // MapRPCErr takes an error returned from calling RPC methods from various
-// chain backend and map it to an defined error here. It uses the `BtcdErrMap`
-// defined above, whose keys are btcd error strings and values are errors made
-// from bitcoind error strings.
+// chain backend and map it to an defined error here. It uses the `PearldErrMap`
+// defined above, whose keys are pearld error strings and values are errors made
+// from compatible fork error strings.
 //
-// NOTE: we assume neutrino shares the same error strings as btcd.
+// NOTE: we assume neutrino shares the same error strings as pearld.
 func MapRPCErr(rpcErr error) error {
-	// Iterate the map and find the matching error.
-	for btcdErr, err := range BtcdErrMap {
-		// Match it against btcd's error first.
-		if matchErrStr(rpcErr, btcdErr) {
+	// Iterate the error map and find the matching error.
+	for pearldErr, err := range PearldErrMap {
+		if matchErrStr(rpcErr, pearldErr) {
 			return err
 		}
 	}
 
-	// If not found, try to match it against bitcoind's error.
+	// If not found, try to match it against compatible fork's error.
 	for i := uint32(0); i < uint32(errSentinel); i++ {
-		err := BitcoindRPCErr(i)
+		err := CompatRPCErr(i)
 		if matchErrStr(rpcErr, err.Error()) {
 			return err
 		}

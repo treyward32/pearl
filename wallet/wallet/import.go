@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/btcsuite/btcd/btcec/v2"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/netparams"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 const (
@@ -30,122 +28,19 @@ const (
 func keyScopeFromPubKey(pubKey *hdkeychain.ExtendedKey,
 	addrType *waddrmgr.AddressType) (waddrmgr.KeyScope,
 	*waddrmgr.ScopeAddrSchema, error) {
-
-	switch waddrmgr.HDVersion(binary.BigEndian.Uint32(pubKey.Version())) {
-	// For BIP-0044 keys, an address type must be specified as we intend to
-	// not support importing BIP-0044 keys into the wallet using the legacy
-	// pay-to-pubkey-hash (P2PKH) scheme. A nested witness address type will
-	// force the standard BIP-0049 derivation scheme (nested witness pubkeys
-	// everywhere), while a witness address type will force the standard
-	// BIP-0084 derivation scheme.
-	case waddrmgr.HDVersionMainNetBIP0044, waddrmgr.HDVersionTestNetBIP0044,
-		waddrmgr.HDVersionSimNetBIP0044:
-
-		if addrType == nil {
-			return waddrmgr.KeyScope{}, nil, errors.New("address " +
-				"type must be specified for account public " +
-				"key with legacy version")
-		}
-
-		switch *addrType {
-		case waddrmgr.NestedWitnessPubKey:
-			return waddrmgr.KeyScopeBIP0049Plus,
-				&waddrmgr.KeyScopeBIP0049AddrSchema, nil
-
-		case waddrmgr.WitnessPubKey:
-			return waddrmgr.KeyScopeBIP0084, nil, nil
-
-		case waddrmgr.TaprootPubKey:
-			return waddrmgr.KeyScopeBIP0086, nil, nil
-
-		default:
-			return waddrmgr.KeyScope{}, nil,
-				fmt.Errorf("unsupported address type %v",
-					*addrType)
-		}
-
-	// For BIP-0049 keys, we'll need to make a distinction between the
-	// traditional BIP-0049 address schema (nested witness pubkeys
-	// everywhere) and our own BIP-0049Plus address schema (nested
-	// externally, witness internally).
-	case waddrmgr.HDVersionMainNetBIP0049, waddrmgr.HDVersionTestNetBIP0049:
-		if addrType == nil {
-			return waddrmgr.KeyScope{}, nil, errors.New("address " +
-				"type must be specified for account public " +
-				"key with BIP-0049 version")
-		}
-
-		switch *addrType {
-		case waddrmgr.NestedWitnessPubKey:
-			return waddrmgr.KeyScopeBIP0049Plus,
-				&waddrmgr.KeyScopeBIP0049AddrSchema, nil
-
-		case waddrmgr.WitnessPubKey:
-			return waddrmgr.KeyScopeBIP0049Plus, nil, nil
-
-		default:
-			return waddrmgr.KeyScope{}, nil,
-				fmt.Errorf("unsupported address type %v",
-					*addrType)
-		}
-
-	// BIP-0086 does not have its own SLIP-0132 HD version byte set (yet?).
-	// So we either expect a user to import it with a BIP-0084 or BIP-0044
-	// encoding.
-	case waddrmgr.HDVersionMainNetBIP0084, waddrmgr.HDVersionTestNetBIP0084:
-		if addrType == nil {
-			return waddrmgr.KeyScope{}, nil, errors.New("address " +
-				"type must be specified for account public " +
-				"key with BIP-0084 version")
-		}
-
-		switch *addrType {
-		case waddrmgr.WitnessPubKey:
-			return waddrmgr.KeyScopeBIP0084, nil, nil
-
-		case waddrmgr.TaprootPubKey:
-			return waddrmgr.KeyScopeBIP0086, nil, nil
-
-		default:
-			return waddrmgr.KeyScope{}, nil,
-				errors.New("address type mismatch")
-		}
-
-	default:
-		return waddrmgr.KeyScope{}, nil, fmt.Errorf("unknown version %x",
-			pubKey.Version())
+	if addrType == nil || *addrType != waddrmgr.TaprootPubKey {
+		return waddrmgr.KeyScope{}, nil, fmt.Errorf("unsupported address type: %v", *addrType)
 	}
-}
-
-// isPubKeyForNet determines if the given public key is for the current network
-// the wallet is operating under.
-func (w *Wallet) isPubKeyForNet(pubKey *hdkeychain.ExtendedKey) bool {
 	version := waddrmgr.HDVersion(binary.BigEndian.Uint32(pubKey.Version()))
-	switch w.chainParams.Net {
-	case wire.MainNet:
-		return version == waddrmgr.HDVersionMainNetBIP0044 ||
-			version == waddrmgr.HDVersionMainNetBIP0049 ||
-			version == waddrmgr.HDVersionMainNetBIP0084
-
-	case wire.TestNet, wire.TestNet3, wire.TestNet4,
-		netparams.SigNetWire(w.chainParams):
-
-		return version == waddrmgr.HDVersionTestNetBIP0044 ||
-			version == waddrmgr.HDVersionTestNetBIP0049 ||
-			version == waddrmgr.HDVersionTestNetBIP0084
-
-	// For simnet, we'll also allow the mainnet versions since simnet
-	// doesn't have defined versions for some of our key scopes, and the
-	// mainnet versions are usually used as the default regardless of the
-	// network/key scope.
-	case wire.SimNet:
-		return version == waddrmgr.HDVersionSimNetBIP0044 ||
-			version == waddrmgr.HDVersionMainNetBIP0049 ||
-			version == waddrmgr.HDVersionMainNetBIP0084
-
+	switch version {
+	case waddrmgr.HDVersionMainNetBIP0086, waddrmgr.HDVersionTestNetBIP0086:
+		// Only BIP-0086 (Taproot) keys are supported for now,
+		// which do not have their own SLIP-0132 HD version byte.
+		return waddrmgr.KeyScopeBIP0086, nil, nil
 	default:
-		return false
+		return waddrmgr.KeyScope{}, nil, fmt.Errorf("unsupported version: %d", version)
 	}
+
 }
 
 // validateExtendedPubKey ensures a sane derived public key is provided.
@@ -155,13 +50,6 @@ func (w *Wallet) validateExtendedPubKey(pubKey *hdkeychain.ExtendedKey,
 	// Private keys are not allowed.
 	if pubKey.IsPrivate() {
 		return errors.New("private keys cannot be imported")
-	}
-
-	// The public key must have a version corresponding to the current
-	// chain.
-	if !w.isPubKeyForNet(pubKey) {
-		return fmt.Errorf("expected extended public key for current "+
-			"network %v", w.chainParams.Name)
 	}
 
 	// Verify the extended public key's depth and child index based on
@@ -353,14 +241,16 @@ func (w *Wallet) ImportAccountDryRun(name string,
 		// attempt, we'll want to invalidate the cache for it.
 		defer manager.InvalidateAccountCache(accountProps.AccountNumber)
 
+		// includePQTapscript=false for imported accounts because we only have the
+		// Schnorr public key and can't know if it has PQ tapscript
 		externalAddrs, err = manager.NextExternalAddresses(
-			ns, accountProps.AccountNumber, numAddrs,
+			ns, accountProps.AccountNumber, numAddrs, false,
 		)
 		if err != nil {
 			return err
 		}
 		internalAddrs, err = manager.NextInternalAddresses(
-			ns, accountProps.AccountNumber, numAddrs,
+			ns, accountProps.AccountNumber, numAddrs, false,
 		)
 		if err != nil {
 			return err
@@ -387,29 +277,11 @@ func (w *Wallet) ImportAccountDryRun(name string,
 }
 
 // ImportPublicKey imports a single derived public key into the address manager.
-// The address type can usually be inferred from the key's version, but in the
-// case of legacy versions (xpub, tpub), an address type must be specified as we
-// intend to not support importing BIP-44 keys into the wallet using the legacy
-// pay-to-pubkey-hash (P2PKH) scheme.
 func (w *Wallet) ImportPublicKey(pubKey *btcec.PublicKey,
 	addrType waddrmgr.AddressType) error {
 
-	// Determine what key scope the public key should belong to and import
-	// it into the key scope's default imported account.
-	var keyScope waddrmgr.KeyScope
-	switch addrType {
-	case waddrmgr.NestedWitnessPubKey:
-		keyScope = waddrmgr.KeyScopeBIP0049Plus
-
-	case waddrmgr.WitnessPubKey:
-		keyScope = waddrmgr.KeyScopeBIP0084
-
-	case waddrmgr.TaprootPubKey:
-		keyScope = waddrmgr.KeyScopeBIP0086
-
-	default:
-		return fmt.Errorf("address type %v is not supported", addrType)
-	}
+	// Only BIP-0086 (Taproot) keys are supported for now,
+	keyScope := waddrmgr.KeyScopeBIP0086
 
 	scopedKeyManager, err := w.Manager.FetchScopedKeyManager(keyScope)
 	if err != nil {
@@ -456,7 +328,7 @@ func (w *Wallet) ImportTaprootScript(scope waddrmgr.KeyScope,
 		bs = &waddrmgr.BlockStamp{
 			Hash:      *w.chainParams.GenesisHash,
 			Height:    0,
-			Timestamp: w.chainParams.GenesisBlock.Header.Timestamp,
+			Timestamp: w.chainParams.GenesisBlock.BlockHeader().Timestamp,
 		}
 	} else if bs.Timestamp.IsZero() {
 		// Only update the new birthday time from default value if we
@@ -510,7 +382,7 @@ func (w *Wallet) ImportPrivateKey(scope waddrmgr.KeyScope, wif *btcutil.WIF,
 		bs = &waddrmgr.BlockStamp{
 			Hash:      *w.chainParams.GenesisHash,
 			Height:    0,
-			Timestamp: w.chainParams.GenesisBlock.Header.Timestamp,
+			Timestamp: w.chainParams.GenesisBlock.BlockHeader().Timestamp,
 		}
 	} else if bs.Timestamp.IsZero() {
 		// Only update the new birthday time from default value if we

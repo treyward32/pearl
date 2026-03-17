@@ -1,4 +1,4 @@
-PKG := github.com/btcsuite/btcwallet
+PKG := github.com/pearl-research-labs/pearl/wallet
 
 LINT_PKG := github.com/golangci/golangci-lint/cmd/golangci-lint
 GOACC_PKG := github.com/ory/go-acc
@@ -67,14 +67,14 @@ goimports:
 # INSTALLATION
 # ============
 
-#? build: Compile and build btcwallet
+#? build: Compile and build oyster
 build:
-	@$(call print, "Compiling btcwallet.")
+	@$(call print, "Compiling oyster.")
 	$(GOBUILD) $(PKG)/...
 
-#? install: Install btcwallet, dropwtxmgr and sweepaccount, place them in $GOPATH/bin
+#? install: Install oyster, dropwtxmgr and sweepaccount, place them in $GOPATH/bin
 install:
-	@$(call print, "Installing btcwallet.")
+	@$(call print, "Installing oyster.")
 	$(GOINSTALL) $(PKG)
 	$(GOINSTALL) $(PKG)/cmd/dropwtxmgr
 	$(GOINSTALL) $(PKG)/cmd/sweepaccount
@@ -144,7 +144,7 @@ tidy-module-check: tidy-module
 
 #? help: Get more info on make commands
 help: Makefile
-	@echo " Choose a command run in btcwallet:"
+	@echo " Choose a command run in oyster:"
 	@sed -n 's/^#?//p' $< | column -t -s ':' |  sort | sed -e 's/^/ /'
 
 .PHONY: help

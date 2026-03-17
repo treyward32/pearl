@@ -1,4 +1,4 @@
-// Copyright (c) 2013-2015 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -10,19 +10,11 @@ import (
 	"time"
 )
 
-// maxNetAddressPayload returns the max payload size for a bitcoin NetAddress
+// maxNetAddressPayload returns the max payload size for a NetAddress
 // based on the protocol version.
 func maxNetAddressPayload(pver uint32) uint32 {
-	// Services 8 bytes + ip 16 bytes + port 2 bytes.
-	plen := uint32(26)
-
-	// NetAddressTimeVersion added a timestamp field.
-	if pver >= NetAddressTimeVersion {
-		// Timestamp 4 bytes.
-		plen += 4
-	}
-
-	return plen
+	// Services 8 bytes + ip 16 bytes + port 2 bytes + timestamp 4 bytes.
+	return 30
 }
 
 // NetAddress defines information about a peer on the network including the time
@@ -30,7 +22,7 @@ func maxNetAddressPayload(pver uint32) uint32 {
 type NetAddress struct {
 	// Last time the address was seen.  This is, unfortunately, encoded as a
 	// uint32 on the wire and therefore is limited to 2106.  This field is
-	// not present in the bitcoin version message (MsgVersion) nor was it
+	// not present in the version message (MsgVersion) nor was it
 	// added until protocol version >= NetAddressTimeVersion.
 	Timestamp time.Time
 
@@ -114,10 +106,9 @@ func readNetAddressBuf(r io.Reader, pver uint32, na *NetAddress, ts bool,
 		port      uint16
 	)
 
-	// NOTE: The bitcoin protocol uses a uint32 for the timestamp so it will
-	// stop working somewhere around 2106.  Also timestamp wasn't added until
-	// protocol version >= NetAddressTimeVersion
-	if ts && pver >= NetAddressTimeVersion {
+	// NOTE: The wire protocol uses a uint32 for the timestamp so it will
+	// stop working somewhere around 2106.
+	if ts {
 		if _, err := io.ReadFull(r, buf[:4]); err != nil {
 			return err
 		}
@@ -133,7 +124,7 @@ func readNetAddressBuf(r io.Reader, pver uint32, na *NetAddress, ts bool,
 		return err
 	}
 
-	// Sigh.  Bitcoin protocol mixes little and big endian.
+	// Sigh.  Pearl protocol mixes little and big endian.
 	if _, err := io.ReadFull(r, buf[:2]); err != nil {
 		return err
 	}
@@ -169,10 +160,9 @@ func writeNetAddress(w io.Writer, pver uint32, na *NetAddress, ts bool) error {
 //
 // NOTE: b MUST either be nil or at least an 8-byte slice.
 func writeNetAddressBuf(w io.Writer, pver uint32, na *NetAddress, ts bool, buf []byte) error {
-	// NOTE: The bitcoin protocol uses a uint32 for the timestamp so it will
-	// stop working somewhere around 2106.  Also timestamp wasn't added until
-	// until protocol version >= NetAddressTimeVersion.
-	if ts && pver >= NetAddressTimeVersion {
+	// NOTE: The wire protocol uses a uint32 for the timestamp so it will
+	// stop working somewhere around 2106.
+	if ts {
 		littleEndian.PutUint32(buf[:4], uint32(na.Timestamp.Unix()))
 		if _, err := w.Write(buf[:4]); err != nil {
 			return err
@@ -193,7 +183,7 @@ func writeNetAddressBuf(w io.Writer, pver uint32, na *NetAddress, ts bool, buf [
 		return err
 	}
 
-	// Sigh.  Bitcoin protocol mixes little and big endian.
+	// Sigh.  Pearl protocol mixes little and big endian.
 	bigEndian.PutUint16(buf[:2], na.Port)
 	_, err := w.Write(buf[:2])
 

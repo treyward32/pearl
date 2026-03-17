@@ -13,11 +13,25 @@ represent real money and introducing bugs and security vulnerabilities can have
 far more dire consequences than in typical projects where having a small bug is
 minimal by comparison.  In the world of cryptocurrencies, even the smallest bug
 in the wrong area can cost people a significant amount of money.  For this
-reason, the btcd suite has a formalized and rigorous development process which
+reason, the Pearl suite has a formalized and rigorous development process which
 is outlined on this page.
 
 We highly encourage code contributions, however it is imperative that you adhere
 to the guidelines established on this page.
+
+## Substantial contributions only
+
+Due to the prevalence of automated analysis and pull request authoring tools
+and online competitions that incentivize creating commits in popular
+repositories, the maintainers of this project are flooded with trivial pull
+requests that only change some typos or other insubstantial content (e.g. the
+year in the license file).
+If you are an honest user that wants to contribute to this project, please
+consider that every pull request takes precious time from the maintainers to
+review and consider the impact of changes. Time that could be spent writing
+features or fixing bugs.
+If you really want to contribute, consider reviewing and testing other users'
+pull requests instead. Or add value to the project by writing unit tests.
 
 ## Minimum Recommended Skillset
 
@@ -28,7 +42,7 @@ they follow the guidelines set forth on this page.  That said, if you don't have
 the following basic qualifications you will likely find it quite difficult to
 contribute.
 
-- A reasonable understanding of bitcoin at a high level (see the
+- A reasonable understanding of Pearl at a high level (see the
   [Required Reading](#ReqReading) section for the original white paper)
 - Experience in some type of C-like language
 - An understanding of data structures and their performance implications
@@ -45,7 +59,7 @@ security and performance implications.
 
 ## Required Reading
 
-- [Effective Go](http://golang.org/doc/effective_go.html) - The entire btcd
+- [Effective Go](http://golang.org/doc/effective_go.html) - The entire pearld
   suite follows the guidelines in this document.  For your code to be accepted,
   it must follow the guidelines therein.
 - [Original Satoshi Whitepaper](http://www.google.com/url?sa=t&rct=j&q=&esrc=s&source=web&cd=1&cad=rja&ved=0CCkQFjAA&url=http%3A%2F%2Fbitcoin.org%2Fbitcoin.pdf&ei=os3VUuH8G4SlsASV74GoAg&usg=AFQjCNEipPLigou_1MfB7DQjXCNdlylrBg&sig2=FaHDuT5z36GMWDEnybDJLg&bvm=bv.59378465,d.b2I) - This is the white paper that started it all.  Having a solid
@@ -80,7 +94,7 @@ This approach has several benefits:
 
 ## Testing
 
-One of the major design goals of all core btcd packages is to aim for complete
+One of the major design goals of all core Pearl packages is to aim for complete
 test coverage.  This is financial software so bugs and regressions can cost
 people real money.  For this reason every effort must be taken to ensure the
 code is as accurate and bug-free as possible.  Thorough testing is a good way to
@@ -149,9 +163,9 @@ func CompactToBig(compact uint32) *big.Int {
 // The formula to calculate N is:
 //         N = (-1^sign) * mantissa * 256^(exponent-3)
 //
-// This compact form is only used in bitcoin to encode unsigned 256-bit numbers
+// This compact form is only used in Pearl to encode unsigned 256-bit numbers
 // which represent difficulty targets, thus there really is not a need for a
-// sign bit, but it is implemented here to stay consistent with bitcoind.
+// sign bit, but it is implemented here for compatibility with other Pearl implementations.
 func CompactToBig(compact uint32) *big.Int {
 ```
 
@@ -181,6 +195,11 @@ if amt < 5460 {
 **NOTE:** The above should really use a constant as opposed to a magic number,
 but it was left as a magic number to show how much of a difference a good
 comment can make.
+
+**Please refer to the [code formatting rules
+document](./code_formatting_rules.md)** to see the list of additional style
+rules we enforce.
+
 
 ## Model Git Commit Messages
 
@@ -217,7 +236,7 @@ Further paragraphs come after blank lines.
 Prefix the summary with the subsystem/package when possible. Many other
 projects make use of the code and this makes it easier for them to tell when
 something they're using has changed. Have a look at [past
-commits](https://github.com/btcsuite/btcd/commits/master) for examples of
+commits](https://github.com/pearl-research-labs/pearl/node/commits/master) for examples of
 commit messages.
 
 Here are some of the reasons why wrapping your commit messages to 72 columns is
@@ -236,7 +255,7 @@ a good thing.
 ## Code Approval Process
 
 This section describes the code approval process that is used for code
-contributions.  This is how to get your changes into btcd.
+contributions.  This is how to get your changes into pearld.
 
 ## Code Review
 
@@ -291,13 +310,13 @@ keep a clean commit history over a tangled weave of merge commits.  However,
 regardless of the specific merge method used, the code will be integrated with
 the master branch and the pull request will be closed.
 
-Rejoice as you will now be listed as a [contributor](https://github.com/btcsuite/btcd/graphs/contributors)!
+Rejoice as you will now be listed as a [contributor](https://github.com/pearl-research-labs/pearl/node/graphs/contributors)!
 
 ## Contribution Standards
 
 ## Contribution Checklist
 
-- [&nbsp;&nbsp;] All changes are Go version 1.17 compliant
+- [&nbsp;&nbsp;] All changes are Go version 1.22 compliant
 - [&nbsp;&nbsp;] The code being submitted is commented according to the
   [Code Documentation and Commenting](#CodeDocumentation) section
 - [&nbsp;&nbsp;] For new code: Code is accompanied by tests which exercise both
@@ -315,5 +334,5 @@ Rejoice as you will now be listed as a [contributor](https://github.com/btcsuite
 ## Licensing of Contributions
 
 All contributions must be licensed with the
-[ISC license](https://github.com/btcsuite/btcd/blob/master/LICENSE).  This is
-the same license as all of the code in the btcd suite.
+[ISC license](https://github.com/pearl-research-labs/pearl/node/blob/master/LICENSE).  This is
+the same license as all of the code in the Pearl suite.

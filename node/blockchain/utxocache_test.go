@@ -1,4 +1,4 @@
-// Copyright (c) 2023 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 package blockchain
@@ -13,12 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/database"
-	"github.com/btcsuite/btcd/database/ffldb"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/database"
+	"github.com/pearl-research-labs/pearl/node/database/ffldb"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMapSlice(t *testing.T) {
@@ -384,10 +385,10 @@ func assertNbEntriesOnDisk(chain *BlockChain, expectedNumber int) error {
 }
 
 // utxoCacheTestChain creates a test BlockChain to be used for utxo cache tests.
-// It uses the regression test parameters, a coin matutiry of 1 block and sets
-// the cache size limit to 10 MiB.
+// It uses SimNet (lightweight dummy certs, no PoW check) with a coin maturity
+// of 1 block and sets the cache size limit to 10 MiB.
 func utxoCacheTestChain(testName string) (*BlockChain, *chaincfg.Params, func()) {
-	params := chaincfg.RegressionNetParams
+	params := chaincfg.SimNetParams
 	chain, tearDown, err := chainSetup(testName, &params)
 	if err != nil {
 		panic(fmt.Sprintf("error loading blockchain with database: %v", err))
@@ -405,9 +406,9 @@ func TestUtxoCacheFlush(t *testing.T) {
 	defer tearDown()
 	cache := chain.utxoCache
 	tip := btcutil.NewBlock(params.GenesisBlock)
-
+	genesisHash := params.GenesisBlock.BlockHash() // TODO Or: change to constant value after deciding on a pow struct and genesis block
 	// The chainSetup init triggers the consistency status write.
-	err := assertConsistencyState(chain, params.GenesisHash)
+	err := assertConsistencyState(chain, &genesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ func TestUtxoCacheFlush(t *testing.T) {
 	}
 
 	// LastFlushHash starts with genesis.
-	if cache.lastFlushHash != *params.GenesisHash {
+	if cache.lastFlushHash != genesisHash {
 		t.Fatalf("lastFlushHash before first flush expected to be "+
 			"genesis block hash, instead was %v", cache.lastFlushHash)
 	}
@@ -464,7 +465,7 @@ func TestUtxoCacheFlush(t *testing.T) {
 	}
 
 	// Not flushed yet.
-	err = assertConsistencyState(chain, params.GenesisHash)
+	err = assertConsistencyState(chain, &genesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,13 +615,16 @@ func TestFlushNeededAfterPrune(t *testing.T) {
 	// Construct a synthetic block chain with a block index consisting of
 	// the following structure.
 	// 	genesis -> 1 -> 2 -> ... -> 15 -> 16  -> 17  -> 18
+	require := require.New(t)
 	tip := tstTip
-	chain := newFakeChain(&chaincfg.MainNetParams)
+	chain, tearDown, err := chainSetup("TestFlushNeededAfterPrune", &chaincfg.MainNetParams)
+	require.NoError(err)
+	defer tearDown()
+
 	chain.utxoCache = newUtxoCache(nil, 0)
-	branchNodes := chainedNodes(chain.bestChain.Genesis(), 18)
+	branchNodes := addNodes(t, chain, chain.bestChain.Genesis(), 18)
 	for _, node := range branchNodes {
 		chain.index.SetStatusFlags(node, statusValid)
-		chain.index.AddNode(node)
 	}
 	chain.bestChain.SetTip(tip(branchNodes))
 
@@ -716,18 +720,13 @@ func TestFlushNeededAfterPrune(t *testing.T) {
 	for _, test := range tests {
 		chain.utxoCache.lastFlushHash = test.lastFlushHash
 		got, err := chain.flushNeededAfterPrune(test.delHashes)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if got != test.expected {
-			t.Fatalf("for test %s, expected need flush to return %v but got %v",
-				test.name, test.expected, got)
-		}
+		require.NoError(err)
+		require.Equal(test.expected, got)
 	}
 }
 
 func TestFlushOnPrune(t *testing.T) {
+	t.Skip("Test files rely on Bitcoin block format, which is no longer supported") // TODO Or: re-enable with Pearl-format test fixtures
 	chain, tearDown, err := chainSetup("TestFlushOnPrune", &chaincfg.MainNetParams)
 	if err != nil {
 		panic(fmt.Sprintf("error loading blockchain with database: %v", err))
@@ -752,7 +751,7 @@ func TestFlushOnPrune(t *testing.T) {
 		// Modify block 1 to be a different hash.  This is to artificially
 		// create a stale branch in the chain.
 		staleMsgBlock := blocks[1].MsgBlock().Copy()
-		staleMsgBlock.Header.Nonce = 0
+		staleMsgBlock.BlockHeader().Timestamp = staleMsgBlock.BlockHeader().Timestamp.Add(time.Second)
 		staleBlock := btcutil.NewBlock(staleMsgBlock)
 
 		// Add the stale block here to create a chain view like so. The
@@ -848,6 +847,7 @@ func TestFlushOnPrune(t *testing.T) {
 }
 
 func TestInitConsistentState(t *testing.T) {
+	t.Skip("Test files rely on Bitcoin block format, which is no longer supported") // TODO Or: re-enable with Pearl-format test fixtures
 	//  Boilerplate for creating a chain.
 	dbName := "TestFlushOnPrune"
 	chain, tearDown, err := chainSetup(dbName, &chaincfg.MainNetParams)

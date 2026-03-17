@@ -6,10 +6,10 @@ implementing the `name_show` command from Namecoin Core.
 
 ## Running the Example
 
-The first step is to use `go get` to download and install the rpcclient package:
+The first step is to ensure the module is available. From the project root:
 
 ```bash
-$ go get github.com/btcsuite/btcd/rpcclient
+$ go mod download
 ```
 
 Next, modify the `main.go` source to specify the correct RPC username and
@@ -23,8 +23,8 @@ password for the RPC server of your Namecoin Core node:
 Finally, navigate to the example's directory and run it with:
 
 ```bash
-$ cd $GOPATH/src/github.com/btcsuite/btcd/rpcclient/examples/customcommand
-$ go run *.go
+$ cd node/rpcclient/examples/customcommand
+$ go run .
 ```
 
 ## License

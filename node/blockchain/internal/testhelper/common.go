@@ -2,46 +2,72 @@ package testhelper
 
 import (
 	"encoding/binary"
-	"math"
-	"runtime"
 
-	"github.com/btcsuite/btcd/blockchain/internal/workmath"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
+	"github.com/pearl-research-labs/pearl/node/btcec"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
 )
 
 var (
-	// OpTrueScript is simply a public key script that contains the OP_TRUE
-	// opcode.  It is defined here to reduce garbage creation.
-	OpTrueScript = []byte{txscript.OP_TRUE}
+	// TestPrivKey is a deterministic private key used for Taproot signing
+	// in tests.
+	TestPrivKey, _ = btcec.PrivKeyFromBytes([]byte{0x01})
 
-	// LowFee is a single satoshi and exists to make the test code more
+	testTaprootKey = txscript.ComputeTaprootKeyNoScript(TestPrivKey.PubKey())
+
+	// TestP2TRScript is a P2TR pkScript paying to TestPrivKey's tweaked
+	// Taproot key. Outputs with this script can be spent via
+	// SignTaprootInput.
+	TestP2TRScript, _ = txscript.PayToTaprootScript(testTaprootKey)
+
+	// LowFee is a single grain and exists to make the test code more
 	// readable.
 	LowFee = btcutil.Amount(1)
 )
 
+// SignTaprootInput signs input idx of tx as a Taproot key-path spend using
+// TestPrivKey. The caller must provide the value and pkScript of the output
+// being spent.
+func SignTaprootInput(tx *wire.MsgTx, idx int, amt btcutil.Amount, pkScript []byte) {
+	prevOuts := map[wire.OutPoint]*wire.TxOut{
+		tx.TxIn[idx].PreviousOutPoint: {
+			Value:    int64(amt),
+			PkScript: pkScript,
+		},
+	}
+	fetcher := txscript.NewMultiPrevOutFetcher(prevOuts)
+	sigHashes := txscript.NewTxSigHashes(tx, fetcher)
+	witness, err := txscript.TaprootWitnessSignature(
+		tx, sigHashes, idx, int64(amt), pkScript,
+		txscript.SigHashDefault, TestPrivKey,
+	)
+	if err != nil {
+		panic(err)
+	}
+	tx.TxIn[idx].Witness = witness
+}
+
 // CreateSpendTx creates a transaction that spends from the provided spendable
 // output and includes an additional unique OP_RETURN output to ensure the
-// transaction ends up with a unique hash.  The script is a simple OP_TRUE
-// script which avoids the need to track addresses and signature scripts in the
-// tests.
+// transaction ends up with a unique hash. The primary output pays to
+// TestP2TRScript (P2TR) and the input is signed with TestPrivKey.
 func CreateSpendTx(spend *SpendableOut, fee btcutil.Amount) *wire.MsgTx {
 	spendTx := wire.NewMsgTx(1)
 	spendTx.AddTxIn(&wire.TxIn{
 		PreviousOutPoint: spend.PrevOut,
 		Sequence:         wire.MaxTxInSequenceNum,
-		SignatureScript:  nil,
 	})
 	spendTx.AddTxOut(wire.NewTxOut(int64(spend.Amount-fee),
-		OpTrueScript))
+		TestP2TRScript))
 	opRetScript, err := UniqueOpReturnScript()
 	if err != nil {
 		panic(err)
 	}
 	spendTx.AddTxOut(wire.NewTxOut(0, opRetScript))
 
+	SignTaprootInput(spendTx, 0, spend.Amount, TestP2TRScript)
 	return spendTx
 }
 
@@ -66,7 +92,7 @@ func CreateCoinbaseTx(blockHeight int32, blockSubsidy int64) *wire.MsgTx {
 	})
 	tx.AddTxOut(&wire.TxOut{
 		Value:    blockSubsidy,
-		PkScript: OpTrueScript,
+		PkScript: TestP2TRScript,
 	})
 	return tx
 }
@@ -126,69 +152,4 @@ func MakeSpendableOutForTx(tx *wire.MsgTx, txOutIndex uint32) SpendableOut {
 // index within the block, and transaction output index within the transaction.
 func MakeSpendableOut(block *wire.MsgBlock, txIndex, txOutIndex uint32) SpendableOut {
 	return MakeSpendableOutForTx(block.Transactions[txIndex], txOutIndex)
-}
-
-// SolveBlock attempts to find a nonce which makes the passed block header hash
-// to a value less than the target difficulty.  When a successful solution is
-// found true is returned and the nonce field of the passed header is updated
-// with the solution.  False is returned if no solution exists.
-//
-// NOTE: This function will never solve blocks with a nonce of 0.  This is done
-// so the 'nextBlock' function can properly detect when a nonce was modified by
-// a munge function.
-func SolveBlock(header *wire.BlockHeader) bool {
-	// sbResult is used by the solver goroutines to send results.
-	type sbResult struct {
-		found bool
-		nonce uint32
-	}
-
-	// solver accepts a block header and a nonce range to test. It is
-	// intended to be run as a goroutine.
-	targetDifficulty := workmath.CompactToBig(header.Bits)
-	quit := make(chan bool)
-	results := make(chan sbResult)
-	solver := func(hdr wire.BlockHeader, startNonce, stopNonce uint32) {
-		// We need to modify the nonce field of the header, so make sure
-		// we work with a copy of the original header.
-		for i := startNonce; i >= startNonce && i <= stopNonce; i++ {
-			select {
-			case <-quit:
-				return
-			default:
-				hdr.Nonce = i
-				hash := hdr.BlockHash()
-				if workmath.HashToBig(&hash).Cmp(
-					targetDifficulty) <= 0 {
-
-					results <- sbResult{true, i}
-					return
-				}
-			}
-		}
-		results <- sbResult{false, 0}
-	}
-
-	startNonce := uint32(1)
-	stopNonce := uint32(math.MaxUint32)
-	numCores := uint32(runtime.NumCPU())
-	noncesPerCore := (stopNonce - startNonce) / numCores
-	for i := uint32(0); i < numCores; i++ {
-		rangeStart := startNonce + (noncesPerCore * i)
-		rangeStop := startNonce + (noncesPerCore * (i + 1)) - 1
-		if i == numCores-1 {
-			rangeStop = stopNonce
-		}
-		go solver(*header, rangeStart, rangeStop)
-	}
-	for i := uint32(0); i < numCores; i++ {
-		result := <-results
-		if result.found {
-			close(quit)
-			header.Nonce = result.nonce
-			return true
-		}
-	}
-
-	return false
 }

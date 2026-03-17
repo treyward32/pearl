@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 package database
 
 import (
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
 )
 
 // Cursor represents a cursor over key/value pairs and nested buckets of a
@@ -249,56 +249,6 @@ type Tx interface {
 	// Other errors are possible depending on the implementation.
 	HasBlocks(hashes []chainhash.Hash) ([]bool, error)
 
-	// FetchBlockHeader returns the raw serialized bytes for the block
-	// header identified by the given hash.  The raw bytes are in the format
-	// returned by Serialize on a wire.BlockHeader.
-	//
-	// It is highly recommended to use this function (or FetchBlockHeaders)
-	// to obtain block headers over the FetchBlockRegion(s) functions since
-	// it provides the backend drivers the freedom to perform very specific
-	// optimizations which can result in significant speed advantages when
-	// working with headers.
-	//
-	// The interface contract guarantees at least the following errors will
-	// be returned (other implementation-specific errors are possible):
-	//   - ErrBlockNotFound if the requested block hash does not exist
-	//   - ErrTxClosed if the transaction has already been closed
-	//   - ErrCorruption if the database has somehow become corrupted
-	//
-	// NOTE: The data returned by this function is only valid during a
-	// database transaction.  Attempting to access it after a transaction
-	// has ended results in undefined behavior.  This constraint prevents
-	// additional data copies and allows support for memory-mapped database
-	// implementations.
-	FetchBlockHeader(hash *chainhash.Hash) ([]byte, error)
-
-	// FetchBlockHeaders returns the raw serialized bytes for the block
-	// headers identified by the given hashes.  The raw bytes are in the
-	// format returned by Serialize on a wire.BlockHeader.
-	//
-	// It is highly recommended to use this function (or FetchBlockHeader)
-	// to obtain block headers over the FetchBlockRegion(s) functions since
-	// it provides the backend drivers the freedom to perform very specific
-	// optimizations which can result in significant speed advantages when
-	// working with headers.
-	//
-	// Furthermore, depending on the specific implementation, this function
-	// can be more efficient for bulk loading multiple block headers than
-	// loading them one-by-one with FetchBlockHeader.
-	//
-	// The interface contract guarantees at least the following errors will
-	// be returned (other implementation-specific errors are possible):
-	//   - ErrBlockNotFound if any of the request block hashes do not exist
-	//   - ErrTxClosed if the transaction has already been closed
-	//   - ErrCorruption if the database has somehow become corrupted
-	//
-	// NOTE: The data returned by this function is only valid during a
-	// database transaction.  Attempting to access it after a transaction
-	// has ended results in undefined behavior.  This constraint prevents
-	// additional data copies and allows support for memory-mapped database
-	// implementations.
-	FetchBlockHeaders(hashes []chainhash.Hash) ([][]byte, error)
-
 	// FetchBlock returns the raw serialized bytes for the block identified
 	// by the given hash.  The raw bytes are in the format returned by
 	// Serialize on a wire.MsgBlock.
@@ -337,7 +287,7 @@ type Tx interface {
 	// FetchBlockRegion returns the raw serialized bytes for the given
 	// block region.
 	//
-	// For example, it is possible to directly extract Bitcoin transactions
+	// For example, it is possible to directly extract transactions
 	// and/or scripts from a block with this function.  Depending on the
 	// backend implementation, this can provide significant savings by
 	// avoiding the need to load entire blocks.
@@ -364,7 +314,7 @@ type Tx interface {
 	// FetchBlockRegions returns the raw serialized bytes for the given
 	// block regions.
 	//
-	// For example, it is possible to directly extract Bitcoin transactions
+	// For example, it is possible to directly extract transactions
 	// and/or scripts from various blocks with this function.  Depending on
 	// the backend implementation, this can provide significant savings by
 	// avoiding the need to load entire blocks.
@@ -428,7 +378,7 @@ type Tx interface {
 	Rollback() error
 }
 
-// DB provides a generic interface that is used to store bitcoin blocks and
+// DB provides a generic interface that is used to store blocks and
 // related metadata.  This interface is intended to be agnostic to the actual
 // mechanism used for backend data storage.  The RegisterDriver function can be
 // used to add a new backend data storage method.

@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2016 The btcsuite developers
+// Copyright (c) 2025-2026 The Pearl Research Labs
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -8,11 +8,11 @@
 // Full documentation of the API implemented by this package is maintained in a
 // language-agnostic document:
 //
-//   https://github.com/btcsuite/btcwallet/blob/master/rpc/documentation/api.md
+//	https://github.com/pearl-research-labs/pearl/wallet/blob/master/rpc/documentation/api.md
 //
 // Any API changes must be performed according to the steps listed here:
 //
-//   https://github.com/btcsuite/btcwallet/blob/master/rpc/documentation/serverchanges.md
+//	https://github.com/pearl-research-labs/pearl/wallet/blob/master/rpc/documentation/serverchanges.md
 package rpcserver
 
 import (
@@ -26,20 +26,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcwallet/chain"
-	"github.com/btcsuite/btcwallet/internal/cfgutil"
-	"github.com/btcsuite/btcwallet/internal/zero"
-	"github.com/btcsuite/btcwallet/netparams"
-	pb "github.com/btcsuite/btcwallet/rpc/walletrpc"
-	"github.com/btcsuite/btcwallet/waddrmgr"
-	"github.com/btcsuite/btcwallet/wallet"
-	"github.com/btcsuite/btcwallet/walletdb"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/btcutil/hdkeychain"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/rpcclient"
+	"github.com/pearl-research-labs/pearl/node/txscript"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/wallet/chain"
+	"github.com/pearl-research-labs/pearl/wallet/internal/cfgutil"
+	"github.com/pearl-research-labs/pearl/wallet/internal/zero"
+	"github.com/pearl-research-labs/pearl/wallet/netparams"
+	pb "github.com/pearl-research-labs/pearl/wallet/rpc/walletrpc"
+	"github.com/pearl-research-labs/pearl/wallet/waddrmgr"
+	"github.com/pearl-research-labs/pearl/wallet/wallet"
+	"github.com/pearl-research-labs/pearl/wallet/walletdb"
 )
 
 // Public API version constants
@@ -109,7 +109,7 @@ type walletServer struct {
 }
 
 // loaderServer provides RPC clients with the ability to load and close wallets,
-// as well as establishing a RPC connection to a btcd consensus server.
+// as well as establishing a RPC connection to a pearld consensus server.
 type loaderServer struct {
 	loader    *wallet.Loader
 	activeNet *netparams.Params
@@ -152,7 +152,7 @@ func (s *walletServer) Network(ctx context.Context, req *pb.NetworkRequest) (
 func (s *walletServer) AccountNumber(ctx context.Context, req *pb.AccountNumberRequest) (
 	*pb.AccountNumberResponse, error) {
 
-	accountNum, err := s.wallet.AccountNumber(waddrmgr.KeyScopeBIP0044, req.AccountName)
+	accountNum, err := s.wallet.AccountNumber(waddrmgr.KeyScopeBIP0086, req.AccountName)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -163,7 +163,7 @@ func (s *walletServer) AccountNumber(ctx context.Context, req *pb.AccountNumberR
 func (s *walletServer) Accounts(ctx context.Context, req *pb.AccountsRequest) (
 	*pb.AccountsResponse, error) {
 
-	resp, err := s.wallet.Accounts(waddrmgr.KeyScopeBIP0044)
+	resp, err := s.wallet.Accounts(waddrmgr.KeyScopeBIP0086)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -189,7 +189,7 @@ func (s *walletServer) Accounts(ctx context.Context, req *pb.AccountsRequest) (
 func (s *walletServer) RenameAccount(ctx context.Context, req *pb.RenameAccountRequest) (
 	*pb.RenameAccountResponse, error) {
 
-	err := s.wallet.RenameAccount(waddrmgr.KeyScopeBIP0044, req.AccountNumber, req.NewName)
+	err := s.wallet.RenameAccount(waddrmgr.KeyScopeBIP0086, req.AccountNumber, req.NewName)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -215,7 +215,7 @@ func (s *walletServer) NextAccount(ctx context.Context, req *pb.NextAccountReque
 		return nil, translateError(err)
 	}
 
-	account, err := s.wallet.NextAccount(waddrmgr.KeyScopeBIP0044, req.AccountName)
+	account, err := s.wallet.NextAccount(waddrmgr.KeyScopeBIP0086, req.AccountName)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -232,9 +232,9 @@ func (s *walletServer) NextAddress(ctx context.Context, req *pb.NextAddressReque
 	)
 	switch req.Kind {
 	case pb.NextAddressRequest_BIP0044_EXTERNAL:
-		addr, err = s.wallet.NewAddress(req.Account, waddrmgr.KeyScopeBIP0044)
+		addr, err = s.wallet.NewAddress(req.Account, waddrmgr.KeyScopeBIP0086, false)
 	case pb.NextAddressRequest_BIP0044_INTERNAL:
-		addr, err = s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0044)
+		addr, err = s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0086, false)
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "kind=%v", req.Kind)
 	}
@@ -272,7 +272,7 @@ func (s *walletServer) ImportPrivateKey(ctx context.Context, req *pb.ImportPriva
 			"Only the imported account accepts private key imports")
 	}
 
-	_, err = s.wallet.ImportPrivateKey(waddrmgr.KeyScopeBIP0044, wif, nil, req.Rescan)
+	_, err = s.wallet.ImportPrivateKey(waddrmgr.KeyScopeBIP0086, wif, nil, req.Rescan)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -332,7 +332,7 @@ func (s *walletServer) FundTransaction(ctx context.Context, req *pb.FundTransact
 
 	var changeScript []byte
 	if req.IncludeChangeScript && totalAmount > btcutil.Amount(req.TargetAmount) {
-		changeAddr, err := s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0044)
+		changeAddr, err := s.wallet.NewChangeAddress(req.Account, waddrmgr.KeyScopeBIP0086, false)
 		if err != nil {
 			return nil, translateError(err)
 		}
@@ -486,12 +486,12 @@ func (s *walletServer) SignTransaction(ctx context.Context, req *pb.SignTransact
 }
 
 // BUGS:
-// - The transaction is not inspected to be relevant before publishing using
-//   sendrawtransaction, so connection errors to btcd could result in the tx
-//   never being added to the wallet database.
-// - Once the above bug is fixed, wallet will require a way to purge invalid
-//   transactions from the database when they are rejected by the network, other
-//   than double spending them.
+//   - The transaction is not inspected to be relevant before publishing using
+//     sendrawtransaction, so connection errors to pearld could result in the tx
+//     never being added to the wallet database.
+//   - Once the above bug is fixed, wallet will require a way to purge invalid
+//     transactions from the database when they are rejected by the network, other
+//     than double spending them.
 func (s *walletServer) PublishTransaction(ctx context.Context, req *pb.PublishTransactionRequest) (
 	*pb.PublishTransactionResponse, error) {
 
@@ -789,7 +789,7 @@ func (s *loaderServer) StartConsensusRpc(ctx context.Context, // nolint:golint
 		return nil, translateError(err)
 	}
 
-	err = rpcClient.Start()
+	err = rpcClient.Start(context.Background())
 	if err != nil {
 		if err == rpcclient.ErrInvalidAuth {
 			return nil, status.Errorf(codes.InvalidArgument,

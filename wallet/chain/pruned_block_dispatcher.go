@@ -11,15 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/blockchain"
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/peer"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/lightninglabs/neutrino/query"
 	"github.com/lightningnetwork/lnd/ticker"
+	"github.com/pearl-research-labs/pearl/node/blockchain"
+	"github.com/pearl-research-labs/pearl/node/btcjson"
+	"github.com/pearl-research-labs/pearl/node/btcutil"
+	"github.com/pearl-research-labs/pearl/node/chaincfg"
+	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
+	"github.com/pearl-research-labs/pearl/node/peer"
+	"github.com/pearl-research-labs/pearl/node/wire"
+	"github.com/pearl-research-labs/pearl/spv/query"
 )
 
 const (
@@ -44,7 +44,7 @@ const (
 	prunedNodeService wire.ServiceFlag = 1 << 10
 )
 
-// queryPeer represents a Bitcoin network peer that we'll query for blocks.
+// queryPeer represents a network peer that we'll query for blocks.
 // The ready channel serves as a signal for us to know when we can be sending
 // queries to the peer. Any messages received from the peer are sent through the
 // msgsRecvd channel.
@@ -65,7 +65,7 @@ func (p *queryPeer) signalUponDisconnect(f func()) {
 	}()
 }
 
-// SubscribeRecvMsg adds a OnRead subscription to the peer. All bitcoin messages
+// SubscribeRecvMsg adds a OnRead subscription to the peer. All wire messages
 // received from this peer will be sent on the returned channel. A closure is
 // also returned, that should be called to cancel the subscription.
 //
@@ -89,11 +89,11 @@ type PrunedBlockDispatcherConfig struct {
 
 	// NumTargetPeer represents the target number of peers we should
 	// maintain connections with. This exists to prevent establishing
-	// connections to all of the bitcoind's peers, which would be
-	// unnecessary and ineffecient.
+	// connections to all of the server's peers, which would be
+	// unnecessary and inefficient.
 	NumTargetPeers int
 
-	// Dial establishes connections to Bitcoin peers. This must support
+	// Dial establishes connections to network peers. This must support
 	// dialing peers running over Tor if the backend also supports it.
 	Dial func(string) (net.Conn, error)
 
@@ -129,7 +129,8 @@ type PrunedBlockDispatcherConfig struct {
 // PrunedBlockDispatcher enables a chain client to request blocks that the
 // server has already pruned. This is done by connecting to the server's full
 // node peers and querying them directly. Ideally, this is a capability
-// supported by the server, though this is not yet possible with bitcoind.
+// supported by the server directly, but pruned nodes cannot serve their
+// pruned blocks over RPC.
 type PrunedBlockDispatcher struct {
 	cfg PrunedBlockDispatcherConfig
 
@@ -654,7 +655,7 @@ func (d *PrunedBlockDispatcher) handleResp(req, resp wire.Message,
 	copy(copyblockChans, blockChans)
 
 	err := blockchain.CheckBlockSanity(
-		btcutil.NewBlock(block), d.cfg.ChainParams.PowLimit,
+		btcutil.NewBlock(block), d.cfg.ChainParams,
 		d.timeSource,
 	)
 	if err != nil {
