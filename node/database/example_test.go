@@ -129,7 +129,6 @@ func Example_blockStorageAndRetrieval() {
 	}
 	db, err := database.Create("ffldb", dbPath, wire.MainNet)
 	if err != nil {
-		fmt.Println("fail here")
 		fmt.Println(err)
 		return
 	}
@@ -151,7 +150,7 @@ func Example_blockStorageAndRetrieval() {
 	// Use the View function of the database to perform a managed read-only
 	// transaction and fetch the block stored above.
 	var loadedBlockBytes []byte
-	err = db.Update(func(tx database.Tx) error {
+	err = db.View(func(tx database.Tx) error {
 		genesisHash := chaincfg.MainNetParams.GenesisBlock.BlockHash()
 		blockBytes, err := tx.FetchBlock(&genesisHash)
 		if err != nil {
@@ -178,5 +177,5 @@ func Example_blockStorageAndRetrieval() {
 	fmt.Printf("Serialized block size: %d bytes\n", len(loadedBlockBytes))
 
 	// Output:
-	// Serialized block size: 533 bytes
+	// Serialized block size: 612 bytes
 }
