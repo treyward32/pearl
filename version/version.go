@@ -18,13 +18,13 @@ const semanticAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 // These constants define the application version and follow the semantic
 // versioning 2.0.0 spec (http://semver.org/).
 const (
-	Major uint = 0
-	Minor uint = 99
-	Patch uint = 1
+	Major uint = 1
+	Minor uint = 0
+	Patch uint = 0
 
 	// PreRelease MUST only contain characters from semanticAlphabet
 	// per the semantic versioning spec.
-	PreRelease = "rc1"
+	PreRelease = ""
 )
 
 // Build may be overridden at link time via
