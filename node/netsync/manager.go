@@ -47,6 +47,10 @@ const (
 	// stallSampleInterval the interval at which we will check to see if our
 	// sync has stalled.
 	stallSampleInterval = 30 * time.Second
+
+	// syncPeerCooldown is how long an address that stalled as syncnode
+	// is excluded from re-selection.
+	syncPeerCooldown = 10 * time.Minute
 )
 
 // zeroHash is the zero value hash (all zeros).  It is defined as a convenience.
@@ -206,6 +210,11 @@ type SyncManager struct {
 
 	// An optional fee estimator.
 	feeEstimator *mempool.FeeEstimator
+
+	// recentlyFailedSync tracks outbound peer addresses that stalled
+	// while serving as syncnode. pickSyncCandidate skips entries
+	// within syncPeerCooldown and lazy-evicts expired ones.
+	recentlyFailedSync map[string]time.Time
 }
 
 // resetHeaderState sets the headers-first mode state to values appropriate for
@@ -252,10 +261,50 @@ func (sm *SyncManager) findNextHeaderCheckpoint(height int32) *chaincfg.Checkpoi
 	return nextCheckpoint
 }
 
+// pickSyncCandidate returns a random sync-peer candidate, filtered by:
+//   - state.syncCandidate (SFNodeNetwork / pruned-with-block-threshold,
+//     set at handshake by isSyncCandidate).
+//   - Outbound only. peer.LastBlock() from the version handshake is
+//     unauthenticated; restricting to outbound peers limits candidates
+//     to addresses we chose to dial (addr.dat / dnsseed).
+//   - recentlyFailedSync cooldown to prevent immediate re-selection of
+//     peers that previously stalled as syncnode.
+//
+// peer.LastBlock() is intentionally not used for ranking. Mirrors Bitcoin
+// Core's CanServeBlocks + fPreferredDownload posture (net_processing.cpp).
+func (sm *SyncManager) pickSyncCandidate() *peerpkg.Peer {
+	now := time.Now()
+	var candidates []*peerpkg.Peer
+	for peer, state := range sm.peerStates {
+		if !state.syncCandidate {
+			continue
+		}
+		if peer.Inbound() {
+			continue
+		}
+		if t, ok := sm.recentlyFailedSync[peer.Addr()]; ok {
+			if now.Sub(t) < syncPeerCooldown {
+				continue
+			}
+			delete(sm.recentlyFailedSync, peer.Addr())
+		}
+		candidates = append(candidates, peer)
+	}
+
+	if len(candidates) == 0 {
+		if sm.chain.IsCurrent() {
+			best := sm.chain.BestSnapshot()
+			log.Infof("Caught up to block %s(%d)",
+				best.Hash.String(), best.Height)
+		}
+		return nil
+	}
+	return candidates[rand.Intn(len(candidates))]
+}
+
 // startSync will choose the best peer among the available candidate peers to
 // download/sync the blockchain from.  When syncing is already running, it
-// simply returns.  It also examines the candidates for any which are no longer
-// candidates and removes them as needed.
+// simply returns.
 func (sm *SyncManager) startSync() {
 	// Return now if we're already syncing.
 	if sm.syncPeer != nil {
@@ -263,56 +312,7 @@ func (sm *SyncManager) startSync() {
 	}
 
 	best := sm.chain.BestSnapshot()
-	var higherPeers, equalPeers []*peerpkg.Peer
-	for peer, state := range sm.peerStates {
-		if !state.syncCandidate {
-			continue
-		}
-
-		// Remove sync candidate peers that are no longer candidates due
-		// to passing their latest known block.  NOTE: The < is
-		// intentional as opposed to <=.  While technically the peer
-		// doesn't have a later block when it's equal, it will likely
-		// have one soon so it is a reasonable choice.  It also allows
-		// the case where both are at 0 such as during regression test.
-		if peer.LastBlock() < best.Height {
-			state.syncCandidate = false
-			continue
-		}
-
-		// If the peer is at the same height as us, we'll add it a set
-		// of backup peers in case we do not find one with a higher
-		// height. If we are synced up with all of our peers, all of
-		// them will be in this set.
-		if peer.LastBlock() == best.Height {
-			equalPeers = append(equalPeers, peer)
-			continue
-		}
-
-		// This peer has a height greater than our own, we'll consider
-		// it in the set of better peers from which we'll randomly
-		// select.
-		higherPeers = append(higherPeers, peer)
-	}
-
-	if sm.chain.IsCurrent() && len(higherPeers) == 0 {
-		log.Infof("Caught up to block %s(%d)", best.Hash.String(), best.Height)
-		return
-	}
-
-	// Pick randomly from the set of peers greater than our block height,
-	// falling back to a random peer of the same height if none are greater.
-	//
-	// TODO(conner): Use a better algorithm to ranking peers based on
-	// observed metrics and/or sync in parallel.
-	var bestPeer *peerpkg.Peer
-	switch {
-	case len(higherPeers) > 0:
-		bestPeer = higherPeers[rand.Intn(len(higherPeers))]
-
-	case len(equalPeers) > 0:
-		bestPeer = equalPeers[rand.Intn(len(equalPeers))]
-	}
+	bestPeer := sm.pickSyncCandidate()
 
 	// Start syncing from the best peer if one was selected.
 	if bestPeer != nil {
@@ -463,8 +463,12 @@ func (sm *SyncManager) handleStallSample() {
 		return
 	}
 
-	// If we don't have an active sync peer, exit early.
+	// No syncpeer — retry selection periodically so cooled-down
+	// candidates get re-evaluated as their entries expire.
 	if sm.syncPeer == nil {
+		if !sm.chain.IsCurrent() {
+			sm.startSync()
+		}
 		return
 	}
 
@@ -480,6 +484,13 @@ func (sm *SyncManager) handleStallSample() {
 	}
 
 	sm.clearRequestedState(state)
+
+	// Temporarily exclude the stalled peer from sync-peer selection.
+	// Inbound peers are skipped (ephemeral source port, already
+	// excluded from candidates).
+	if !sm.syncPeer.Inbound() {
+		sm.recentlyFailedSync[sm.syncPeer.Addr()] = time.Now()
+	}
 
 	disconnectSyncPeer := sm.shouldDCStalledSyncPeer()
 	sm.updateSyncPeer(disconnectSyncPeer)
@@ -1679,19 +1690,20 @@ func (sm *SyncManager) Pause() chan<- struct{} {
 // block, tx, and inv updates.
 func New(config *Config) (*SyncManager, error) {
 	sm := SyncManager{
-		peerNotifier:    config.PeerNotifier,
-		chain:           config.Chain,
-		txMemPool:       config.TxMemPool,
-		chainParams:     config.ChainParams,
-		rejectedTxns:    make(map[chainhash.Hash]struct{}),
-		requestedTxns:   make(map[chainhash.Hash]struct{}),
-		requestedBlocks: make(map[chainhash.Hash]struct{}),
-		peerStates:      make(map[*peerpkg.Peer]*peerSyncState),
-		progressLogger:  newBlockProgressLogger("Processed", log),
-		msgChan:         make(chan interface{}, config.MaxPeers*3),
-		headerList:      list.New(),
-		quit:            make(chan struct{}),
-		feeEstimator:    config.FeeEstimator,
+		peerNotifier:       config.PeerNotifier,
+		chain:              config.Chain,
+		txMemPool:          config.TxMemPool,
+		chainParams:        config.ChainParams,
+		rejectedTxns:       make(map[chainhash.Hash]struct{}),
+		requestedTxns:      make(map[chainhash.Hash]struct{}),
+		requestedBlocks:    make(map[chainhash.Hash]struct{}),
+		peerStates:         make(map[*peerpkg.Peer]*peerSyncState),
+		progressLogger:     newBlockProgressLogger("Processed", log),
+		msgChan:            make(chan interface{}, config.MaxPeers*3),
+		headerList:         list.New(),
+		quit:               make(chan struct{}),
+		feeEstimator:       config.FeeEstimator,
+		recentlyFailedSync: make(map[string]time.Time),
 	}
 
 	best := sm.chain.BestSnapshot()
