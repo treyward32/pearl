@@ -1,7 +1,5 @@
 import torch
-from vllm.model_executor.layers.quantization.kernels.scaled_mm.ScaledMMLinearKernel import (
-    Int8ScaledMMLinearLayerConfig,
-)
+from vllm.model_executor.kernels.linear.scaled_mm import Int8ScaledMMLinearLayerConfig
 
 DEFAULT_QUANT_CONFIG = Int8ScaledMMLinearLayerConfig(
     is_static_input_scheme=False,
