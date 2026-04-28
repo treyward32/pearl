@@ -1164,10 +1164,9 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 		peer.UpdateLastAnnouncedBlock(&invVects[lastBlock].Hash)
 	}
 
-	// Ignore invs from non-syncpeers when not current to prevent
-	// fetching orphans. Allow through when syncPeer is nil so blocks
-	// reachable only via inbound peers can be discovered during IBD.
-	if peer != sm.syncPeer && !sm.current() && sm.syncPeer != nil {
+	// Ignore invs from peers that aren't the sync if we are not current.
+	// Helps prevent fetching a mass of orphans.
+	if peer != sm.syncPeer && !sm.current() {
 		return
 	}
 
