@@ -264,22 +264,23 @@ func (sm *SyncManager) findNextHeaderCheckpoint(height int32) *chaincfg.Checkpoi
 // pickSyncCandidate returns a random sync-peer candidate, filtered by:
 //   - state.syncCandidate (SFNodeNetwork / pruned-with-block-threshold,
 //     set at handshake by isSyncCandidate).
-//   - Outbound only. peer.LastBlock() from the version handshake is
+//   - Outbound preferred. peer.LastBlock() from the version handshake is
 //     unauthenticated; restricting to outbound peers limits candidates
 //     to addresses we chose to dial (addr.dat / dnsseed).
 //   - recentlyFailedSync cooldown to prevent immediate re-selection of
 //     peers that previously stalled as syncnode.
 //
-// peer.LastBlock() is intentionally not used for ranking. Mirrors Bitcoin
-// Core's CanServeBlocks + fPreferredDownload posture (net_processing.cpp).
+// When no outbound candidate is available and the chain is not current,
+// inbound peers are accepted as a fallback so that a node whose only
+// block source is inbound (e.g. a NAT node dialling us) can still sync
+// during IBD.
+//
+// peer.LastBlock() is intentionally not used for ranking.
 func (sm *SyncManager) pickSyncCandidate() *peerpkg.Peer {
 	now := time.Now()
-	var candidates []*peerpkg.Peer
+	var candidates, inbound []*peerpkg.Peer
 	for peer, state := range sm.peerStates {
 		if !state.syncCandidate {
-			continue
-		}
-		if peer.Inbound() {
 			continue
 		}
 		if t, ok := sm.recentlyFailedSync[peer.Addr()]; ok {
@@ -288,7 +289,17 @@ func (sm *SyncManager) pickSyncCandidate() *peerpkg.Peer {
 			}
 			delete(sm.recentlyFailedSync, peer.Addr())
 		}
-		candidates = append(candidates, peer)
+		if peer.Inbound() {
+			inbound = append(inbound, peer)
+		} else {
+			candidates = append(candidates, peer)
+		}
+	}
+
+	// Prefer outbound. Fall back to inbound only when no outbound
+	// candidate is available and we still need to sync.
+	if len(candidates) == 0 && !sm.chain.IsCurrent() {
+		candidates = inbound
 	}
 
 	if len(candidates) == 0 {

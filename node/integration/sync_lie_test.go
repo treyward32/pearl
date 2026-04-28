@@ -85,9 +85,9 @@ func newLiarPeer(t *testing.T, nodeAddr string) *peer.Peer {
 }
 
 // TestSyncPeerLiesAboutHeight asserts an inbound peer claiming a vastly
-// inflated LastBlock never reaches the syncnode role, and the victim still
-// syncs from a legitimate outbound peer despite the liar holding an open
-// connection.
+// inflated LastBlock never reaches the syncnode role when an outbound
+// peer is available, and the victim syncs from the legitimate outbound
+// peer despite the liar holding an open connection.
 func TestSyncPeerLiesAboutHeight(t *testing.T) {
 	victim, err := rpctest.New(&chaincfg.SimNetParams, nil, nil, "")
 	require.NoError(t, err)
@@ -102,21 +102,28 @@ func TestSyncPeerLiesAboutHeight(t *testing.T) {
 	_, err = honest.Client.Generate(honestStartBlocks)
 	require.NoError(t, err)
 
-	// Liar dials in first with the highest claimed height.
+	// Connect honest first (outbound from victim's POV) so the
+	// candidate pool has an outbound entry. Then connect the liar
+	// inbound — with an outbound available, inbound fallback should
+	// NOT activate, and the liar must not become syncnode.
+	require.NoError(t, rpctest.ConnectNode(victim, honest))
+	time.Sleep(1 * time.Second)
+
 	liar := newLiarPeer(t, victim.P2PAddress())
 	defer func() { liar.Disconnect(); liar.WaitForDisconnect() }()
 
-	// Liar must never appear as syncnode.
 	time.Sleep(2 * time.Second)
 	peers, err := victim.Client.GetPeerInfo()
 	require.NoError(t, err)
 	for _, p := range peers {
-		require.Falsef(t, p.SyncNode,
-			"inbound liar at %s was selected as syncnode", p.Addr)
+		if p.Addr == liar.LocalAddr().String() {
+			require.Falsef(t, p.SyncNode,
+				"inbound liar at %s was selected as syncnode "+
+					"despite outbound peer being available", p.Addr)
+		}
 	}
 
-	// Honest is the only valid sync candidate; victim must catch up.
-	require.NoError(t, rpctest.ConnectNode(victim, honest))
+	// Victim must catch up from honest.
 	require.Eventually(t, func() bool {
 		_, h, err := victim.Client.GetBestBlock()
 		return err == nil && h >= int32(honestStartBlocks)
