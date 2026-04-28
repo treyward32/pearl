@@ -465,7 +465,7 @@ func (sp *serverPeer) addBanScore(persistent, transient uint32, reason string) b
 		if score > cfg.BanThreshold {
 			peerLog.Warnf("Misbehaving peer %s -- banning and disconnecting",
 				sp)
-			sp.server.BanPeer(sp)
+			sp.server.banServerPeer(sp)
 			sp.Disconnect()
 			return true
 		}
@@ -619,6 +619,68 @@ func (sp *serverPeer) OnTx(_ *peer.Peer, msg *wire.MsgTx) {
 	<-sp.txProcessed
 }
 
+// punishPeerForRuleError applies the appropriate punishment to sp based on the
+// blockchain.RuleError in rErr. subject appears in log messages to identify
+// what triggered the violation (e.g. "block <hash>" or "headers").
+func punishPeerForRuleError(sp *serverPeer, subject string, rErr blockchain.RuleError) {
+	protected := ""
+	if cfg.DisableBanning || sp.isWhitelisted {
+		protected = " protected"
+	}
+	switch rErr.ErrorCode {
+	case blockchain.ErrBlockTooBig,
+		blockchain.ErrTimeTooOld,
+		blockchain.ErrUnexpectedDifficulty,
+		blockchain.ErrHighHash,
+		blockchain.ErrCertificateTooLarge,
+		blockchain.ErrCertificateMissing,
+		blockchain.ErrBadMerkleRoot,
+		blockchain.ErrNoTransactions,
+		blockchain.ErrNoTxInputs,
+		blockchain.ErrNoTxOutputs,
+		blockchain.ErrTxTooBig,
+		blockchain.ErrBadTxOutValue,
+		blockchain.ErrDuplicateTxInputs,
+		blockchain.ErrBadTxInput,
+		blockchain.ErrMissingTxOut,
+		blockchain.ErrUnfinalizedTx,
+		blockchain.ErrDuplicateTx,
+		blockchain.ErrOverwriteTx,
+		blockchain.ErrImmatureSpend,
+		blockchain.ErrSpendTooHigh,
+		blockchain.ErrBadFees,
+		blockchain.ErrFirstTxNotCoinbase,
+		blockchain.ErrMultipleCoinbases,
+		blockchain.ErrBadCoinbaseScriptLen,
+		blockchain.ErrBadCoinbaseValue,
+		blockchain.ErrScriptMalformed,
+		blockchain.ErrScriptValidation:
+		peerLog.Warnf("Banning%s peer %s for sending invalid %s: %v",
+			protected, sp, subject, rErr)
+		sp.addBanScore(101, 0, rErr.Error())
+
+	case blockchain.ErrDisallowedCertVersion,
+		blockchain.ErrBadCheckpoint,
+		blockchain.ErrCheckpointTimeTooOld,
+		blockchain.ErrMissingCoinbaseHeight,
+		blockchain.ErrForkTooOld,
+		blockchain.ErrBadCoinbaseHeight,
+		blockchain.ErrUnexpectedWitness,
+		blockchain.ErrInvalidWitnessCommitment,
+		blockchain.ErrWitnessCommitmentMismatch,
+		blockchain.ErrDifficultyTooLow:
+		peerLog.Warnf("Disconnecting%s peer %s for sending invalid %s: %v",
+			protected, sp, subject, rErr)
+		if protected == "" {
+			sp.Disconnect()
+		}
+
+	default:
+		peerLog.Warnf("Not punishing%s peer %s for sending invalid %s: %v",
+			protected, sp, subject, rErr)
+	}
+}
+
 // OnBlock is invoked when a peer receives a block wire message.  It
 // blocks until the block has been fully processed.
 func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
@@ -644,62 +706,7 @@ func (sp *serverPeer) OnBlock(_ *peer.Peer, msg *wire.MsgBlock, buf []byte) {
 	sp.server.syncManager.QueueBlock(block, sp.Peer, sp.blockProcessed)
 	if err := <-sp.blockProcessed; err != nil {
 		if rErr, ok := err.(blockchain.RuleError); ok {
-			protected := ""
-			if cfg.DisableBanning || sp.isWhitelisted {
-				protected = " protected"
-			}
-			switch rErr.ErrorCode {
-			case blockchain.ErrBlockTooBig,
-				blockchain.ErrTimeTooOld,
-				blockchain.ErrUnexpectedDifficulty,
-				blockchain.ErrHighHash,
-				blockchain.ErrCertificateTooLarge,
-				blockchain.ErrCertificateMissing,
-				blockchain.ErrBadMerkleRoot,
-				blockchain.ErrNoTransactions,
-				blockchain.ErrNoTxInputs,
-				blockchain.ErrNoTxOutputs,
-				blockchain.ErrTxTooBig,
-				blockchain.ErrBadTxOutValue,
-				blockchain.ErrDuplicateTxInputs,
-				blockchain.ErrBadTxInput,
-				blockchain.ErrMissingTxOut,
-				blockchain.ErrUnfinalizedTx,
-				blockchain.ErrDuplicateTx,
-				blockchain.ErrOverwriteTx,
-				blockchain.ErrImmatureSpend,
-				blockchain.ErrSpendTooHigh,
-				blockchain.ErrBadFees,
-				blockchain.ErrFirstTxNotCoinbase,
-				blockchain.ErrMultipleCoinbases,
-				blockchain.ErrBadCoinbaseScriptLen,
-				blockchain.ErrBadCoinbaseValue,
-				blockchain.ErrScriptMalformed,
-				blockchain.ErrScriptValidation:
-				peerLog.Warnf("Banning%s peer %s for sending invalid block %s: %v",
-					protected, sp, block.Hash(), rErr)
-				sp.addBanScore(101, 0, rErr.Error())
-
-			case blockchain.ErrDisallowedCertVersion,
-				blockchain.ErrBadCheckpoint,
-				blockchain.ErrCheckpointTimeTooOld,
-				blockchain.ErrMissingCoinbaseHeight,
-				blockchain.ErrForkTooOld,
-				blockchain.ErrBadCoinbaseHeight,
-				blockchain.ErrUnexpectedWitness,
-				blockchain.ErrInvalidWitnessCommitment,
-				blockchain.ErrWitnessCommitmentMismatch,
-				blockchain.ErrDifficultyTooLow:
-				peerLog.Warnf("Disconnecting%s peer %s for sending invalid block %s: %v",
-					protected, sp, block.Hash(), rErr)
-				if protected == "" {
-					sp.Disconnect()
-				}
-
-			default:
-				peerLog.Warnf("Not punishing%s peer %s however sending invalid block %s: %v",
-					protected, sp, block.Hash(), rErr)
-			}
+			punishPeerForRuleError(sp, fmt.Sprintf("block %s", block.Hash()), rErr)
 		}
 	}
 }
@@ -923,11 +930,6 @@ func (sp *serverPeer) OnGetBlocks(_ *peer.Peer, msg *wire.MsgGetBlocks) {
 // OnGetHeaders is invoked when a peer receives a getheaders wire
 // message.
 func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
-	// Ignore getheaders requests if not in sync.
-	if !sp.server.syncManager.IsCurrent() {
-		return
-	}
-
 	// Find the most recent known block in the best chain based on the block
 	// locator and fetch all of the headers after it until either
 	// wire.MaxBlockHeadersPerMsg have been fetched or the provided stop
@@ -1991,7 +1993,10 @@ func (s *server) handleRelayInvMsg(state *peerState, msg relayMsg) {
 				return
 			}
 			msgHeaders := wire.NewMsgHeaders()
-			if err := msgHeaders.AddBlockHeader(msgHeader.BlockHeader, msgHeader.BlockCertificate()); err != nil {
+			// Relay header WITHOUT certificate -- certs are expensive (~60KB).
+			// The receiver will request the full block (which includes the
+			// cert) if the header indicates sufficient work.
+			if err := msgHeaders.AddBlockHeader(msgHeader.BlockHeader, nil); err != nil {
 				peerLog.Errorf("Failed to add block"+
 					" header: %v", err)
 				return
@@ -2392,9 +2397,29 @@ out:
 		case umsg := <-s.peerHeightsUpdate:
 			s.handleUpdatePeerHeights(state, umsg)
 
-		// Peer to ban.
+		// Peer to ban (internal).
 		case p := <-s.banPeers:
 			s.handleBanPeerMsg(state, p)
+
+		// Header validation verdict from the sync manager.
+		case verdict := <-s.syncManager.PeerVerdicts():
+			var sp *serverPeer
+			if p, ok := state.inboundPeers[verdict.PeerID]; ok {
+				sp = p
+			} else if p, ok := state.outboundPeers[verdict.PeerID]; ok {
+				sp = p
+			}
+			if sp != nil {
+				if rErr, ok := verdict.Err.(blockchain.RuleError); ok {
+					punishPeerForRuleError(sp, "headers", rErr)
+				} else if errors.Is(verdict.Err, netsync.ErrInconsistentCerts) {
+					peerLog.Warnf("Banning peer %s: %v", sp, verdict.Err)
+					sp.addBanScore(100, 0, verdict.Err.Error())
+				} else {
+					peerLog.Warnf("Disconnecting peer %s: %v", sp, verdict.Err)
+					sp.Disconnect()
+				}
+			}
 
 		// New inventory to potentially be relayed to other peers.
 		case invMsg := <-s.relayInv:
@@ -2440,8 +2465,8 @@ cleanup:
 	srvrLog.Tracef("Peer handler done")
 }
 
-// BanPeer bans a peer that has already been connected to the server by ip.
-func (s *server) BanPeer(sp *serverPeer) {
+// banServerPeer bans a peer that has already been connected to the server by ip.
+func (s *server) banServerPeer(sp *serverPeer) {
 	s.banPeers <- sp
 }
 

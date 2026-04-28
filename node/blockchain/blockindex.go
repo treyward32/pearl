@@ -6,6 +6,7 @@ package blockchain
 
 import (
 	"math/big"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -374,6 +375,51 @@ func (bi *blockIndex) HaveBlock(hash *chainhash.Hash) bool {
 	return hasBlock
 }
 
+// HaveBlockData returns whether the full block data (not just the header) is
+// available for the block with the given hash.
+//
+// This function is safe for concurrent access.
+func (bi *blockIndex) HaveBlockData(hash *chainhash.Hash) bool {
+	bi.RLock()
+	defer bi.RUnlock()
+
+	node := bi.index[*hash]
+	if node == nil {
+		return false
+	}
+	return node.status.HaveData()
+}
+
+// LocateMissingBlockHashes walks the chain backwards from the given tip hash
+// until it finds a block that has full data (or reaches the genesis block).
+// It returns a slice of block hashes that need to be downloaded, ordered from
+// oldest to newest (the tip).
+//
+// This function is safe for concurrent access.
+func (bi *blockIndex) LocateMissingBlockHashes(tipHash *chainhash.Hash) []*chainhash.Hash {
+	bi.RLock()
+	defer bi.RUnlock()
+
+	node := bi.index[*tipHash]
+	if node == nil {
+		return nil
+	}
+
+	// Walk backwards to find the first block that has data.
+	var missing []*chainhash.Hash
+	for n := node; n != nil; n = n.parent {
+		if n.status.HaveData() {
+			break
+		}
+		missing = append(missing, &n.hash)
+	}
+
+	// Reverse the slice so it's ordered from oldest to newest.
+	slices.Reverse(missing)
+
+	return missing
+}
+
 // LookupNode returns the block node identified by the provided hash.  It will
 // return nil if there is no entry for the hash.
 //
@@ -424,6 +470,18 @@ func (bi *blockIndex) NodeStatus(node *blockNode) blockStatus {
 func (bi *blockIndex) SetStatusFlags(node *blockNode, flags blockStatus) {
 	bi.Lock()
 	node.status |= flags
+	bi.dirty[node] = struct{}{}
+	bi.Unlock()
+}
+
+// PromoteToStored atomically transitions a header-only node to a fully-stored
+// block node by setting statusDataStored and recording its virtual size.
+//
+// This function is safe for concurrent access.
+func (bi *blockIndex) PromoteToStored(node *blockNode, vsize int64) {
+	bi.Lock()
+	node.status |= statusDataStored
+	node.vsize = vsize
 	bi.dirty[node] = struct{}{}
 	bi.Unlock()
 }

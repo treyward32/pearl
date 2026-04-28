@@ -5,8 +5,6 @@
 package blockchain
 
 import (
-	"fmt"
-
 	"github.com/pearl-research-labs/pearl/node/btcutil"
 	"github.com/pearl-research-labs/pearl/node/database"
 )
@@ -24,14 +22,9 @@ import (
 func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags) (bool, error) {
 	// The height of this block is one more than the referenced previous
 	// block.
-	prevHash := &block.MsgBlock().BlockHeader().PrevBlock
-	prevNode := b.index.LookupNode(prevHash)
-	if prevNode == nil {
-		str := fmt.Sprintf("previous block %s is unknown", prevHash)
-		return false, ruleError(ErrPreviousBlockUnknown, str)
-	} else if b.index.NodeStatus(prevNode).KnownInvalid() {
-		str := fmt.Sprintf("previous block %s is known to be invalid", prevHash)
-		return false, ruleError(ErrInvalidAncestorBlock, str)
+	prevNode, err := b.lookupValidPrev(&block.MsgBlock().BlockHeader().PrevBlock)
+	if err != nil {
+		return false, err
 	}
 
 	blockHeight := prevNode.height + 1
@@ -39,7 +32,7 @@ func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags)
 
 	// The block must pass all of the validation rules which depend on the
 	// position of the block within the block chain.
-	err := b.checkBlockContext(block, prevNode, flags)
+	err = b.checkBlockContext(block, prevNode, flags)
 	if err != nil {
 		return false, err
 	}
@@ -62,10 +55,16 @@ func (b *BlockChain) maybeAcceptBlock(block *btcutil.Block, flags BehaviorFlags)
 		return false, err
 	}
 
-	// Create a new block node for the block and add it to the node index. Even
-	// if the block ultimately gets connected to the main chain, it starts out
-	// on a side chain.
-	newNode := b.index.Add(block.MsgBlock().BlockHeader(), prevNode, statusDataStored, blockVsize)
+	// If the node already exists (header-only from AcceptBlockHeader),
+	// update it in place to preserve parent pointers held by child nodes.
+	// Otherwise, create a new node and add it to the index.
+	blockHash := block.Hash()
+	newNode := b.index.LookupNode(blockHash)
+	if newNode != nil {
+		b.index.PromoteToStored(newNode, blockVsize)
+	} else {
+		newNode = b.index.Add(block.MsgBlock().BlockHeader(), prevNode, statusDataStored, blockVsize)
+	}
 
 	// Connect the passed block to the chain while respecting proper chain
 	// selection according to the chain with the most proof of work.  This

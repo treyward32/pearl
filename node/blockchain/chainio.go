@@ -1239,10 +1239,14 @@ func (b *BlockChain) initChainState() error {
 				}
 			}
 
-			// Load vsize from database
-			vsize, err := dbFetchBlockVsize(dbTx, blockHash)
-			if err != nil {
-				return err
+			// Load vsize from database (only for blocks with full data
+			// stored; header-only entries have no vsize record).
+			var vsize int64
+			if status.HaveData() {
+				vsize, err = dbFetchBlockVsize(dbTx, blockHash)
+				if err != nil {
+					return err
+				}
 			}
 
 			// Initialize the block node for the block, connect it,

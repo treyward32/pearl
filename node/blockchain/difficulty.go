@@ -82,25 +82,25 @@ func CalcWork(bits uint32) *big.Int {
 //   - half_life = WTEMA half-life (e.g., 2 days)
 //   - old_target = current difficulty target
 func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.Time,
-	c ChainCtx) (uint32, error) {
+	params *chaincfg.Params) (uint32, error) {
 
 	// Genesis block or no retargeting - use minimum difficulty (maximum target).
-	if lastNode == nil || c.ChainParams().PoWNoRetargeting {
-		return c.ChainParams().PowLimitBits, nil
+	if lastNode == nil || params.PoWNoRetargeting {
+		return params.PowLimitBits, nil
 	}
 
 	// For networks that support it (panics on mainnet), allow special reduction of the
 	// required difficulty once too much time has elapsed without
 	// mining a block.
-	if c.ChainParams().ReduceMinDifficulty {
-		if c.ChainParams().Net == wire.MainNet {
+	if params.ReduceMinDifficulty {
+		if params.Net == wire.MainNet {
 			panic("ReduceMinDifficulty should not be true on mainnet")
 		}
 
-		reductionTime := int64(c.ChainParams().MinDiffReductionTime / time.Second)
+		reductionTime := int64(params.MinDiffReductionTime / time.Second)
 		allowMinTime := lastNode.Timestamp() + reductionTime
 		if newBlockTime.Unix() > allowMinTime {
-			return c.ChainParams().PowLimitBits, nil
+			return params.PowLimitBits, nil
 		}
 	}
 
@@ -116,8 +116,8 @@ func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.T
 	t := lastNode.Timestamp() - parentNode.Timestamp()
 
 	// Get WTEMA parameters.
-	T := int64(c.ChainParams().TargetTimePerBlock / time.Second)   // Target time per block in seconds
-	halfLife := int64(c.ChainParams().WTEMAHalfLife / time.Second) // Half-life in seconds
+	T := int64(params.TargetTimePerBlock / time.Second)   // Target time per block in seconds
+	halfLife := int64(params.WTEMAHalfLife / time.Second) // Half-life in seconds
 
 	// Get current target from the last block.
 	oldTarget := CompactToBig(lastNode.Bits())
@@ -129,9 +129,7 @@ func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.T
 	newTarget := new(big.Int).Add(oldTarget, adjustment)
 
 	// Ensure the new target doesn't exceed the proof of work limit.
-	if newTarget.Cmp(c.ChainParams().PowLimit) > 0 {
-		newTarget.Set(c.ChainParams().PowLimit)
-	}
+	newTarget = MinBigInt(newTarget, params.PowLimit)
 
 	// Ensure target doesn't go below 1 (would cause divide by zero in work calc).
 	if newTarget.Sign() <= 0 {
@@ -166,20 +164,24 @@ func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.T
 // difficulty adjustment. Here the period is WTEMAHalfLife and the multiplier
 // is 87/32 instead.
 func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) uint32 {
+	return CalcEasiestDifficulty(b.chainParams, bits, duration)
+}
+
+func CalcEasiestDifficulty(params *chaincfg.Params, bits uint32, duration time.Duration) uint32 {
 	durationVal := int64(duration / time.Second)
 
 	// Test networks allow minimum-difficulty blocks after a prolonged gap.
 	// If the elapsed time exceeds that threshold, any difficulty is
 	// reachable so return the easiest possible value immediately.
-	if b.chainParams.ReduceMinDifficulty {
-		reductionTime := int64(b.chainParams.MinDiffReductionTime /
+	if params.ReduceMinDifficulty {
+		reductionTime := int64(params.MinDiffReductionTime /
 			time.Second)
 		if durationVal > reductionTime {
-			return b.chainParams.PowLimitBits
+			return params.PowLimitBits
 		}
 	}
 
-	halfLifeSec := int64(b.chainParams.WTEMAHalfLife / time.Second)
+	halfLifeSec := int64(params.WTEMAHalfLife / time.Second)
 	newTarget := CompactToBig(bits)
 
 	if durationVal > 0 {
@@ -190,7 +192,7 @@ func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) 
 		// (87/32)^178 > e^178 > 2^256, which overflows any target.
 		// Short-circuit to avoid computing a huge exponent for nothing.
 		if periods > 177 {
-			return b.chainParams.PowLimitBits
+			return params.PowLimitBits
 		}
 
 		// newTarget = newTarget * (87/32)^periods.
@@ -204,8 +206,8 @@ func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) 
 		newTarget.Rsh(newTarget, uint(5*periods)) // ÷ 32^periods
 	}
 
-	if newTarget.Cmp(b.chainParams.PowLimit) > 0 {
-		newTarget.Set(b.chainParams.PowLimit)
+	if newTarget.Cmp(params.PowLimit) > 0 {
+		newTarget.Set(params.PowLimit)
 	}
 
 	return BigToCompact(newTarget)
@@ -218,7 +220,60 @@ func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) 
 // This function is safe for concurrent access.
 func (b *BlockChain) CalcNextRequiredDifficulty(timestamp time.Time) (uint32, error) {
 	b.chainLock.Lock()
-	difficulty, err := calcNextRequiredDifficulty(b.bestChain.Tip(), timestamp, b)
+	difficulty, err := calcNextRequiredDifficulty(b.bestChain.Tip(), timestamp, b.chainParams)
 	b.chainLock.Unlock()
 	return difficulty, err
+}
+
+// CalcNextRequiredDifficultyFromValues computes the next required difficulty
+// from raw scalar values (height, bits, timestamps) rather than a full
+// HeaderCtx. This is a convenience wrapper for callers that maintain only
+// lightweight state (e.g. the headers presync state machine).
+//
+// prevTs should be -1 when no parent timestamp is available (e.g. genesis).
+func CalcNextRequiredDifficultyFromValues(params *chaincfg.Params, height int32,
+	bits uint32, ts, prevTs int64) (uint32, error) {
+
+	ctx := &valuesHeaderCtx{
+		height:    height,
+		bits:      bits,
+		timestamp: ts,
+	}
+	if prevTs >= 0 {
+		ctx.parent = &valuesHeaderCtx{
+			height:    height - 1,
+			timestamp: prevTs,
+		}
+	}
+	return calcNextRequiredDifficulty(ctx, time.Unix(ts, 0), params)
+}
+
+// valuesHeaderCtx is a minimal HeaderCtx backed by scalar values, used by
+// CalcNextRequiredDifficultyFromValues.
+type valuesHeaderCtx struct {
+	height    int32
+	bits      uint32
+	timestamp int64
+	parent    *valuesHeaderCtx
+}
+
+func (c *valuesHeaderCtx) Hash() chainhash.Hash { return chainhash.Hash{} }
+func (c *valuesHeaderCtx) Height() int32        { return c.height }
+func (c *valuesHeaderCtx) Bits() uint32         { return c.bits }
+func (c *valuesHeaderCtx) Timestamp() int64     { return c.timestamp }
+func (c *valuesHeaderCtx) Parent() chaincfg.HeaderCtx {
+	if c.parent == nil {
+		return nil
+	}
+	return c.parent
+}
+func (c *valuesHeaderCtx) RelativeAncestorCtx(distance int32) chaincfg.HeaderCtx {
+	cur := c
+	for i := int32(0); i < distance; i++ {
+		if cur.parent == nil {
+			return nil
+		}
+		cur = cur.parent
+	}
+	return cur
 }

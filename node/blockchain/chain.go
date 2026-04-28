@@ -70,6 +70,7 @@ type BestState struct {
 	TotalTxns  uint64         // The total number of txns in the chain.
 	MedianTime time.Time      // Median time as per CalcPastMedianTime.
 	BlockTime  time.Time      // Timestamp of the block (for WTEMA monotonicity).
+	WorkSum    *big.Int       // Cumulative work of the best chain.
 }
 
 // newBestState returns a new best stats instance for the given parameters.
@@ -86,6 +87,7 @@ func newBestState(node *blockNode, blockSize, blockVsize, numTxns,
 		TotalTxns:  totalTxns,
 		MedianTime: medianTime,
 		BlockTime:  blockTime,
+		WorkSum:    new(big.Int).Set(node.workSum),
 	}
 }
 
@@ -186,25 +188,30 @@ type BlockChain struct {
 	notifications     []NotificationCallback
 }
 
-// HaveBlock returns whether or not the chain instance has the block represented
-// by the passed hash.  This includes checking the various places a block can
-// be like part of the main chain, on a side chain, or in the orphan pool.
-//
-// This function is safe for concurrent access.
-func (b *BlockChain) HaveBlock(hash *chainhash.Hash) (bool, error) {
-	exists, err := b.blockExists(hash)
-	if err != nil {
-		return false, err
-	}
-	return exists || b.IsKnownOrphan(hash), nil
-}
-
 // BlockInIndex returns whether the block with the given hash exists in the
 // in-memory block index. Unlike BlockExists, this does not check the database.
 //
 // This function is safe for concurrent access.
 func (b *BlockChain) BlockInIndex(hash *chainhash.Hash) bool {
 	return b.index.HaveBlock(hash)
+}
+
+// HaveBlockData returns whether the full block data (not just the header) is
+// available for the block with the given hash.
+//
+// This function is safe for concurrent access.
+func (b *BlockChain) HaveBlockData(hash *chainhash.Hash) bool {
+	return b.index.HaveBlockData(hash)
+}
+
+// LocateMissingBlockHashes walks the chain backwards from the given tip hash
+// until it finds a block that has full data (or reaches the genesis block).
+// It returns a slice of block hashes that need to be downloaded, ordered from
+// oldest to newest (the tip).
+//
+// This function is safe for concurrent access.
+func (b *BlockChain) LocateMissingBlockHashes(tipHash *chainhash.Hash) []*chainhash.Hash {
+	return b.index.LocateMissingBlockHashes(tipHash)
 }
 
 // IsKnownOrphan returns whether the passed hash is currently a known orphan.
@@ -1146,11 +1153,7 @@ func ShouldChangeTip(currentWork, proposedWork, currentTipBlockWork, proposedTip
 
 	diff := new(big.Int).Sub(proposedWork, currentWork)
 
-	minBlockWork := currentTipBlockWork
-	if proposedTipBlockWork.Cmp(currentTipBlockWork) < 0 {
-		minBlockWork = proposedTipBlockWork
-	}
-	threshold := new(big.Int).Rsh(minBlockWork, 2)
+	threshold := new(big.Int).Rsh(MinBigInt(currentTipBlockWork, proposedTipBlockWork), 2)
 
 	return diff.Cmp(threshold) >= 0
 }
@@ -2292,6 +2295,124 @@ func New(config *Config) (*BlockChain, error) {
 		bestNode.workSum)
 
 	return &b, nil
+}
+
+// ChainStartInfo captures the publicly visible state of a block index entry
+// for use as a fork point in the headers presync protocol.
+type ChainStartInfo struct {
+	Hash          chainhash.Hash
+	Height        int32
+	Bits          uint32
+	Timestamp     int64
+	WorkSum       *big.Int
+	PrevTimestamp int64 // parent's timestamp, or -1 if genesis
+}
+
+// LookupChainStartInfo returns chain-start information for the block at the
+// given hash, or nil if not found. This is used by the presync state machine
+// to initialise from a fork point in the block index.
+//
+// This function is safe for concurrent access.
+func (b *BlockChain) LookupChainStartInfo(hash *chainhash.Hash) *ChainStartInfo {
+	b.chainLock.RLock()
+	defer b.chainLock.RUnlock()
+
+	node := b.index.LookupNode(hash)
+	if node == nil {
+		return nil
+	}
+	var prevTs int64 = -1
+	if node.parent != nil {
+		prevTs = node.parent.timestamp
+	}
+	return &ChainStartInfo{
+		Hash:          node.hash,
+		Height:        node.height,
+		Bits:          node.bits,
+		Timestamp:     node.timestamp,
+		WorkSum:       new(big.Int).Set(node.workSum),
+		PrevTimestamp: prevTs,
+	}
+}
+
+// AcceptedHeader holds the publicly visible fields of a header that was
+// accepted into the block index.
+type AcceptedHeader struct {
+	Hash   chainhash.Hash
+	Height int32
+}
+
+// lookupValidPrev returns the block index node for prevHash, or a rule error
+// if the block is unknown or known-invalid.
+// Must be called with chainLock held.
+func (b *BlockChain) lookupValidPrev(prevHash *chainhash.Hash) (*blockNode, error) {
+	prevNode := b.index.LookupNode(prevHash)
+	if prevNode == nil {
+		str := fmt.Sprintf("previous block %s is unknown", prevHash)
+		return nil, ruleError(ErrPreviousBlockUnknown, str)
+	}
+	if b.index.NodeStatus(prevNode).KnownInvalid() {
+		str := fmt.Sprintf("previous block %s is known to be invalid", prevHash)
+		return nil, ruleError(ErrInvalidAncestorBlock, str)
+	}
+	return prevNode, nil
+}
+
+// AcceptBlockHeader validates a block header and its certificate, then adds
+// it to the in-memory block index as a header-only entry. No disk write
+// occurs here; persistence happens when the full block arrives via ProcessBlock.
+//
+// Returns info about the accepted header and a bool indicating whether the
+// header was newly added (false if already known).
+//
+// This function is safe for concurrent access.
+func (b *BlockChain) AcceptBlockHeader(header *wire.BlockHeader,
+	cert wire.BlockCertificate) (*AcceptedHeader, bool, error) {
+
+	b.chainLock.Lock()
+	defer b.chainLock.Unlock()
+
+	blockHash := header.BlockHash()
+
+	// If we already know this block, return it immediately.
+	if node := b.index.LookupNode(&blockHash); node != nil {
+		return &AcceptedHeader{
+			Hash:   node.hash,
+			Height: node.height,
+		}, false, nil
+	}
+
+	// Find the parent.
+	prevNode, err := b.lookupValidPrev(&header.PrevBlock)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Perform context-dependent header checks (difficulty, timestamp).
+	err = CheckBlockHeaderContext(header, prevNode, BFNone, b, false)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Sanity-check and verify the certificate (rejects nil cert).
+	flags := BFNone
+	if b.chainParams.Net == wire.SimNet {
+		flags |= BFNoPoWCheck
+	}
+	err = CheckBlockHeaderSanity(
+		header, cert, b.chainParams.PowLimit,
+		b.timeSource, b.chainParams.MaxTimeOffsetMinutes, flags,
+	)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Add to the in-memory index (header-only: statusNone, vsize 0).
+	node := b.index.Add(header, prevNode, statusNone, 0)
+	return &AcceptedHeader{
+		Hash:   node.hash,
+		Height: node.height,
+	}, true, nil
 }
 
 // CachedStateSize returns the total size of the cached state of the blockchain

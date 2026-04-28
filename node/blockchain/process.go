@@ -10,7 +10,6 @@ import (
 
 	"github.com/pearl-research-labs/pearl/node/btcutil"
 	"github.com/pearl-research-labs/pearl/node/chaincfg/chainhash"
-	"github.com/pearl-research-labs/pearl/node/database"
 )
 
 // BehaviorFlags is a bitmask defining tweaks to the normal behavior when
@@ -32,44 +31,6 @@ const (
 	// BFNone is a convenience value to specifically indicate no flags.
 	BFNone BehaviorFlags = 0
 )
-
-// blockExists determines whether a block with the given hash exists either in
-// the main chain or any side chains.
-//
-// This function is safe for concurrent access.
-func (b *BlockChain) blockExists(hash *chainhash.Hash) (bool, error) {
-	// Check block index first (could be main chain or side chain blocks).
-	if b.index.HaveBlock(hash) {
-		return true, nil
-	}
-
-	// Check in the database.
-	var exists bool
-	err := b.db.View(func(dbTx database.Tx) error {
-		var err error
-		exists, err = dbTx.HasBlock(hash)
-		if err != nil || !exists {
-			return err
-		}
-
-		// Ignore side chain blocks in the database.  This is necessary
-		// because there is not currently any record of the associated
-		// block index data such as its block height, so it's not yet
-		// possible to efficiently load the block and do anything useful
-		// with it.
-		//
-		// Ultimately the entire block index should be serialized
-		// instead of only the current main chain so it can be consulted
-		// directly.
-		_, err = dbFetchHeightByHash(dbTx, hash)
-		if isNotInMainChainErr(err) {
-			exists = false
-			return nil
-		}
-		return err
-	})
-	return exists, err
-}
 
 // processOrphans determines if there are any orphans which depend on the passed
 // block hash (they are no longer orphans if true) and potentially accepts them.
@@ -148,14 +109,19 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 	blockHash := block.Hash()
 	log.Tracef("Processing block %v", blockHash)
 
-	// The block must not already exist in the main chain or side chains.
-	exists, err := b.blockExists(blockHash)
-	if err != nil {
-		return false, false, err
-	}
-	if exists {
-		str := fmt.Sprintf("already have block %v", blockHash)
-		return false, false, ruleError(ErrDuplicateBlock, str)
+	// Handle blocks already known to the index.
+	node := b.index.LookupNode(blockHash)
+	if node != nil {
+		if node.status.HaveData() {
+			// Full block already stored — reject duplicate.
+			str := fmt.Sprintf("already have block %v", blockHash)
+			return false, false, ruleError(ErrDuplicateBlock, str)
+		}
+		// Header-only entry from AcceptBlockHeader. Ensure parent has full
+		// data before proceeding to prevent storing blocks out of order.
+		if node.parent != nil && !node.parent.status.HaveData() {
+			return false, true, nil
+		}
 	}
 
 	// The block must not already exist as an orphan.
@@ -165,7 +131,7 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 	}
 
 	// Perform preliminary sanity checks on the block and its transactions.
-	err = checkBlockSanity(block, b.chainParams, b.timeSource, flags)
+	err := checkBlockSanity(block, b.chainParams, b.timeSource, flags)
 	if err != nil {
 		return false, false, err
 	}
@@ -213,11 +179,7 @@ func (b *BlockChain) ProcessBlock(block *btcutil.Block, flags BehaviorFlags) (bo
 
 	// Handle orphan blocks.
 	prevHash := &blockHeader.PrevBlock
-	prevHashExists, err := b.blockExists(prevHash)
-	if err != nil {
-		return false, false, err
-	}
-	if !prevHashExists {
+	if !b.BlockInIndex(prevHash) {
 		log.Infof("Adding orphan block %v with parent %v", blockHash, prevHash)
 		b.addOrphanBlock(block)
 

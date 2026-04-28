@@ -5,6 +5,8 @@
 package netsync
 
 import (
+	"errors"
+
 	"github.com/pearl-research-labs/pearl/node/blockchain"
 	"github.com/pearl-research-labs/pearl/node/btcutil"
 	"github.com/pearl-research-labs/pearl/node/chaincfg"
@@ -13,6 +15,14 @@ import (
 	"github.com/pearl-research-labs/pearl/node/peer"
 	"github.com/pearl-research-labs/pearl/node/wire"
 )
+
+// ErrInconsistentCerts is returned when a HEADERS message mixes headers with
+// and without certificates within a single batch.
+var ErrInconsistentCerts = errors.New("inconsistent certificate inclusion in headers batch")
+
+// ErrPeerViolation is a sentinel wrapped by netsync-layer errors that indicate
+// the peer should be disconnected (but not banned).
+var ErrPeerViolation = errors.New("peer protocol violation")
 
 // PeerNotifier exposes methods to notify peers of status changes to
 // transactions, blocks, etc. Currently server (in the main package) implements

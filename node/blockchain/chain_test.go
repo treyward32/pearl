@@ -83,8 +83,7 @@ func TestHaveBlock(t *testing.T) {
 		hash, err := chainhash.NewHashFromStr(test.hash)
 		require.NoError(err, "NewHashFromStr")
 
-		result, err := chain.HaveBlock(hash)
-		require.NoError(err, "HaveBlock #%d unexpected error", i)
+		result := chain.BlockInIndex(hash) || chain.IsKnownOrphan(hash)
 		require.Equal(test.want, result, "HaveBlock #%d got %v want %v", i, result, test.want)
 	}
 }

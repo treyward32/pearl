@@ -59,27 +59,8 @@ func (m *mockHeaderCtx) RelativeAncestorCtx(distance int32) chaincfg.HeaderCtx {
 	return node
 }
 
-// mockChainCtx implements ChainCtx for testing.
-type mockChainCtx struct {
-	params *chaincfg.Params
-}
-
-func (m *mockChainCtx) ChainParams() *chaincfg.Params {
-	return m.params
-}
-
-func (m *mockChainCtx) VerifyCheckpoint(height int32, hash *chainhash.Hash) bool {
-	return true
-}
-
-func (m *mockChainCtx) FindPreviousCheckpoint() (chaincfg.HeaderCtx, error) {
-	return nil, nil
-}
-
-// newTestChainCtx creates a mock chain context for testing.
-func newTestChainCtx() *mockChainCtx {
-	// Use simnet params for testing (easy PoW limit).
-	params := &chaincfg.Params{
+func newTestParams() *chaincfg.Params {
+	return &chaincfg.Params{
 		PowLimit:             new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(1)),
 		PowLimitBits:         0x207fffff,
 		PoWNoRetargeting:     false,
@@ -88,39 +69,36 @@ func newTestChainCtx() *mockChainCtx {
 		WTEMAHalfLife:        time.Hour * 48,                         // 2 days
 		MinDiffReductionTime: (time.Minute * 6) + (time.Second * 28), // TargetTimePerBlock * 2
 	}
-	return &mockChainCtx{
-		params: params,
-	}
 }
 
 // TestWTEMADifficultyGenesis tests that the genesis block returns PowLimitBits.
 func TestWTEMADifficultyGenesis(t *testing.T) {
-	ctx := newTestChainCtx()
+	params := newTestParams()
 
 	// Genesis block case - no previous node.
-	bits, err := calcNextRequiredDifficulty(nil, time.Now(), ctx)
+	bits, err := calcNextRequiredDifficulty(nil, time.Now(), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if bits != ctx.params.PowLimitBits {
-		t.Errorf("genesis block bits = %d, want %d", bits, ctx.params.PowLimitBits)
+	if bits != params.PowLimitBits {
+		t.Errorf("genesis block bits = %d, want %d", bits, params.PowLimitBits)
 	}
 }
 
 // TestWTEMADifficultyFirstBlock tests the first block after genesis.
 func TestWTEMADifficultyFirstBlock(t *testing.T) {
-	ctx := newTestChainCtx()
+	params := newTestParams()
 
 	// Create genesis block (no parent).
 	genesis := &mockHeaderCtx{
 		height:    0,
-		bits:      ctx.params.PowLimitBits,
+		bits:      params.PowLimitBits,
 		timestamp: time.Now().Unix(),
 		parent:    nil,
 	}
 
 	// First block after genesis should return genesis difficulty.
-	bits, err := calcNextRequiredDifficulty(genesis, time.Now(), ctx)
+	bits, err := calcNextRequiredDifficulty(genesis, time.Now(), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,12 +109,12 @@ func TestWTEMADifficultyFirstBlock(t *testing.T) {
 
 // TestWTEMADifficultyExactTarget tests when block time equals target time.
 func TestWTEMADifficultyExactTarget(t *testing.T) {
-	ctx := newTestChainCtx()
-	T := int64(ctx.params.TargetTimePerBlock / time.Second) // 600 seconds
+	params := newTestParams()
+	T := int64(params.TargetTimePerBlock / time.Second)
 
 	genesis := &mockHeaderCtx{
 		height:    0,
-		bits:      0x1d00ffff, // Some difficulty
+		bits:      0x1d00ffff,
 		timestamp: 1000000,
 		parent:    nil,
 	}
@@ -144,13 +122,13 @@ func TestWTEMADifficultyExactTarget(t *testing.T) {
 	block1 := &mockHeaderCtx{
 		height:    1,
 		bits:      0x1d00ffff,
-		timestamp: genesis.timestamp + T, // Exactly target time
+		timestamp: genesis.timestamp + T,
 		parent:    genesis,
 	}
 
 	// When t = T, the formula gives: new_target = ((1-C) + C*1) * target = target
 	// So difficulty should remain roughly the same.
-	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,8 +148,8 @@ func TestWTEMADifficultyExactTarget(t *testing.T) {
 
 // TestWTEMADifficultySlowBlock tests when block time is longer than target.
 func TestWTEMADifficultySlowBlock(t *testing.T) {
-	ctx := newTestChainCtx()
-	T := int64(ctx.params.TargetTimePerBlock / time.Second) // 600 seconds
+	params := newTestParams()
+	T := int64(params.TargetTimePerBlock / time.Second)
 
 	genesis := &mockHeaderCtx{
 		height:    0,
@@ -183,11 +161,11 @@ func TestWTEMADifficultySlowBlock(t *testing.T) {
 	block1 := &mockHeaderCtx{
 		height:    1,
 		bits:      0x1d00ffff,
-		timestamp: genesis.timestamp + 2*T, // Double target time (slow block)
+		timestamp: genesis.timestamp + 2*T,
 		parent:    genesis,
 	}
 
-	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -203,8 +181,8 @@ func TestWTEMADifficultySlowBlock(t *testing.T) {
 
 // TestWTEMADifficultyFastBlock tests when block time is shorter than target.
 func TestWTEMADifficultyFastBlock(t *testing.T) {
-	ctx := newTestChainCtx()
-	T := int64(ctx.params.TargetTimePerBlock / time.Second) // 600 seconds
+	params := newTestParams()
+	T := int64(params.TargetTimePerBlock / time.Second)
 
 	genesis := &mockHeaderCtx{
 		height:    0,
@@ -216,11 +194,11 @@ func TestWTEMADifficultyFastBlock(t *testing.T) {
 	block1 := &mockHeaderCtx{
 		height:    1,
 		bits:      0x1d00ffff,
-		timestamp: genesis.timestamp + T/2, // Half target time (fast block)
+		timestamp: genesis.timestamp + T/2,
 		parent:    genesis,
 	}
 
-	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,39 +214,39 @@ func TestWTEMADifficultyFastBlock(t *testing.T) {
 
 // TestWTEMADifficultyPowLimit tests that difficulty never exceeds PowLimit.
 func TestWTEMADifficultyPowLimit(t *testing.T) {
-	ctx := newTestChainCtx()
-	T := int64(ctx.params.TargetTimePerBlock / time.Second)
+	params := newTestParams()
+	T := int64(params.TargetTimePerBlock / time.Second)
 
 	genesis := &mockHeaderCtx{
 		height:    0,
-		bits:      ctx.params.PowLimitBits, // Already at minimum difficulty
+		bits:      params.PowLimitBits,
 		timestamp: 1000000,
 		parent:    nil,
 	}
 
 	block1 := &mockHeaderCtx{
 		height:    1,
-		bits:      ctx.params.PowLimitBits,
-		timestamp: genesis.timestamp + 100*T, // Very slow block
+		bits:      params.PowLimitBits,
+		timestamp: genesis.timestamp + 100*T,
 		parent:    genesis,
 	}
 
-	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Unix(block1.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Target should not exceed PowLimit.
 	newTarget := CompactToBig(bits)
-	if newTarget.Cmp(ctx.params.PowLimit) > 0 {
-		t.Errorf("target exceeds PowLimit: got=%x, limit=%x", newTarget, ctx.params.PowLimit)
+	if newTarget.Cmp(params.PowLimit) > 0 {
+		t.Errorf("target exceeds PowLimit: got=%x, limit=%x", newTarget, params.PowLimit)
 	}
 }
 
 // TestWTEMADifficultyNoRetargeting tests regtest behavior.
 func TestWTEMADifficultyNoRetargeting(t *testing.T) {
-	ctx := newTestChainCtx()
-	ctx.params.PoWNoRetargeting = true
+	params := newTestParams()
+	params.PoWNoRetargeting = true
 
 	genesis := &mockHeaderCtx{
 		height:    0,
@@ -280,24 +258,24 @@ func TestWTEMADifficultyNoRetargeting(t *testing.T) {
 	block1 := &mockHeaderCtx{
 		height:    1,
 		bits:      0x1d00ffff,
-		timestamp: genesis.timestamp + 1, // Very fast block
+		timestamp: genesis.timestamp + 1,
 		parent:    genesis,
 	}
 
-	bits, err := calcNextRequiredDifficulty(block1, time.Now(), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Now(), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// With no retargeting, should return PowLimitBits.
-	if bits != ctx.params.PowLimitBits {
-		t.Errorf("no retarget bits = %d, want %d", bits, ctx.params.PowLimitBits)
+	if bits != params.PowLimitBits {
+		t.Errorf("no retarget bits = %d, want %d", bits, params.PowLimitBits)
 	}
 }
 
 // TestWTEMADifficultyMinTimestamp tests minimum timestamp enforcement.
 func TestWTEMADifficultyMinTimestamp(t *testing.T) {
-	ctx := newTestChainCtx()
+	params := newTestParams()
 
 	genesis := &mockHeaderCtx{
 		height:    0,
@@ -310,12 +288,12 @@ func TestWTEMADifficultyMinTimestamp(t *testing.T) {
 	block1 := &mockHeaderCtx{
 		height:    1,
 		bits:      0x1d00ffff,
-		timestamp: genesis.timestamp, // Same timestamp
+		timestamp: genesis.timestamp,
 		parent:    genesis,
 	}
 
 	// Should not panic or error.
-	bits, err := calcNextRequiredDifficulty(block1, time.Now(), ctx)
+	bits, err := calcNextRequiredDifficulty(block1, time.Now(), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -333,12 +311,12 @@ func TestWTEMADifficultyMinTimestamp(t *testing.T) {
 // Note: WTEMA is inherently asymmetric - doubling block time doesn't produce the
 // same magnitude change as halving it. This is expected behavior for exponential filters.
 func TestWTEMADifficultyAdjustment(t *testing.T) {
-	ctx := newTestChainCtx()
-	T := int64(ctx.params.TargetTimePerBlock / time.Second)
+	params := newTestParams()
+	T := int64(params.TargetTimePerBlock / time.Second)
 
 	genesis := &mockHeaderCtx{
 		height:    0,
-		bits:      0x1c00ffff, // Higher difficulty than PowLimit
+		bits:      0x1c00ffff,
 		timestamp: 1000000,
 		parent:    nil,
 	}
@@ -351,7 +329,7 @@ func TestWTEMADifficultyAdjustment(t *testing.T) {
 		parent:    genesis,
 	}
 
-	slowBits, err := calcNextRequiredDifficulty(slowBlock, time.Unix(slowBlock.timestamp+T, 0), ctx)
+	slowBits, err := calcNextRequiredDifficulty(slowBlock, time.Unix(slowBlock.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +342,7 @@ func TestWTEMADifficultyAdjustment(t *testing.T) {
 		parent:    genesis,
 	}
 
-	fastBits, err := calcNextRequiredDifficulty(fastBlock, time.Unix(fastBlock.timestamp+T, 0), ctx)
+	fastBits, err := calcNextRequiredDifficulty(fastBlock, time.Unix(fastBlock.timestamp+T, 0), params)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -392,7 +370,7 @@ func newTestBlockChain(t *testing.T, params *chaincfg.Params) *BlockChain {
 // simulateWTEMAChain builds a chain of blocks using calcNextRequiredDifficulty,
 // each separated by blockTimeSec seconds, starting from startBits. Returns the
 // final difficulty bits and total elapsed seconds.
-func simulateWTEMAChain(t *testing.T, ctx *mockChainCtx, startBits uint32, blockTimeSec int64, numBlocks int) (uint32, int64) {
+func simulateWTEMAChain(t *testing.T, params *chaincfg.Params, startBits uint32, blockTimeSec int64, numBlocks int) (uint32, int64) {
 	t.Helper()
 
 	parentOfPrev := &mockHeaderCtx{
@@ -412,7 +390,7 @@ func simulateWTEMAChain(t *testing.T, ctx *mockChainCtx, startBits uint32, block
 	for i := 1; i < numBlocks; i++ {
 		nextTime := time.Unix(prev.timestamp+blockTimeSec, 0)
 		var err error
-		bits, err = calcNextRequiredDifficulty(prev, nextTime, ctx)
+		bits, err = calcNextRequiredDifficulty(prev, nextTime, params)
 		require.NoError(t, err)
 		prev = &mockHeaderCtx{
 			height:    prev.height + 1,
@@ -427,18 +405,18 @@ func simulateWTEMAChain(t *testing.T, ctx *mockChainCtx, startBits uint32, block
 }
 
 func TestCalcEasiestDifficulty(t *testing.T) {
-	ctx := newTestChainCtx()
-	bc := newTestBlockChain(t, ctx.params)
+	params := newTestParams()
+	bc := newTestBlockChain(t, params)
 	startBits := uint32(0x1c00ffff)
 
 	t.Run("monotonicity", func(t *testing.T) {
 		durations := []time.Duration{
 			0,
-			ctx.params.WTEMAHalfLife / 4,
-			ctx.params.WTEMAHalfLife / 2,
-			ctx.params.WTEMAHalfLife,
-			2 * ctx.params.WTEMAHalfLife,
-			5 * ctx.params.WTEMAHalfLife,
+			params.WTEMAHalfLife / 4,
+			params.WTEMAHalfLife / 2,
+			params.WTEMAHalfLife,
+			2 * params.WTEMAHalfLife,
+			5 * params.WTEMAHalfLife,
 		}
 		prevTarget := new(big.Int)
 		for _, d := range durations {
@@ -457,12 +435,12 @@ func TestCalcEasiestDifficulty(t *testing.T) {
 	})
 
 	t.Run("caps at PowLimit", func(t *testing.T) {
-		got := bc.calcEasiestDifficulty(startBits, 100*ctx.params.WTEMAHalfLife)
-		assert.Equal(t, ctx.params.PowLimitBits, got)
+		got := bc.calcEasiestDifficulty(startBits, 100*params.WTEMAHalfLife)
+		assert.Equal(t, params.PowLimitBits, got)
 	})
 
 	t.Run("ReduceMinDifficulty above threshold", func(t *testing.T) {
-		p := *ctx.params
+		p := *params
 		p.ReduceMinDifficulty = true
 		bc := newTestBlockChain(t, &p)
 		got := bc.calcEasiestDifficulty(startBits, p.MinDiffReductionTime+time.Second)
@@ -470,7 +448,7 @@ func TestCalcEasiestDifficulty(t *testing.T) {
 	})
 
 	t.Run("ReduceMinDifficulty below threshold still grows", func(t *testing.T) {
-		p := *ctx.params
+		p := *params
 		p.ReduceMinDifficulty = true
 		bc := newTestBlockChain(t, &p)
 		got := bc.calcEasiestDifficulty(startBits, p.MinDiffReductionTime-time.Second)
@@ -487,10 +465,10 @@ func TestCalcEasiestDifficulty(t *testing.T) {
 // the same elapsed time. Everything is derived from chain params, so changing
 // WTEMAHalfLife or TargetTimePerBlock will break this if the bound is invalid.
 func TestCalcEasiestDifficulty_BoundsWTEMAChains(t *testing.T) {
-	ctx := newTestChainCtx()
-	bc := newTestBlockChain(t, ctx.params)
-	T := int64(ctx.params.TargetTimePerBlock / time.Second)
-	HL := int64(ctx.params.WTEMAHalfLife / time.Second)
+	params := newTestParams()
+	bc := newTestBlockChain(t, params)
+	T := int64(params.TargetTimePerBlock / time.Second)
+	HL := int64(params.WTEMAHalfLife / time.Second)
 
 	startBits := uint32(0x1b00ffff)
 
@@ -510,7 +488,7 @@ func TestCalcEasiestDifficulty_BoundsWTEMAChains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bits, elapsed := simulateWTEMAChain(t, ctx, startBits, tt.blockTime, tt.numBlocks)
+			bits, elapsed := simulateWTEMAChain(t, params, startBits, tt.blockTime, tt.numBlocks)
 			require.Greater(t, elapsed, int64(0))
 
 			chainTarget := CompactToBig(bits)
@@ -530,11 +508,11 @@ func TestCalcEasiestDifficulty_BoundsWTEMAChains(t *testing.T) {
 // from the configured TargetTimePerBlock and WTEMAHalfLife, so any change
 // to those params re-validates the bound automatically.
 func TestCalcEasiestDifficulty_Consistency(t *testing.T) {
-	ctx := newTestChainCtx()
-	bc := newTestBlockChain(t, ctx.params)
+	params := newTestParams()
+	bc := newTestBlockChain(t, params)
 
-	T := int64(ctx.params.TargetTimePerBlock / time.Second)
-	HL := int64(ctx.params.WTEMAHalfLife / time.Second)
+	T := int64(params.TargetTimePerBlock / time.Second)
+	HL := int64(params.WTEMAHalfLife / time.Second)
 
 	// Numerically find the worst-case discrete growth over one half-life:
 	//   max over N of (1 + (HL/N - T)/HL)^N
@@ -556,7 +534,7 @@ func TestCalcEasiestDifficulty_Consistency(t *testing.T) {
 	startBits := uint32(0x1a00ffff)
 	startTarget := new(big.Float).SetInt(CompactToBig(startBits))
 	resultTarget := new(big.Float).SetInt(CompactToBig(
-		bc.calcEasiestDifficulty(startBits, ctx.params.WTEMAHalfLife),
+		bc.calcEasiestDifficulty(startBits, params.WTEMAHalfLife),
 	))
 	effectiveMultiplier, _ := new(big.Float).Quo(resultTarget, startTarget).Float64()
 
