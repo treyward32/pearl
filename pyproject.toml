@@ -9,6 +9,11 @@ name = "pytorch-cu129"
 url = "https://download.pytorch.org/whl/cu129"
 explicit = true
 
+# vLLM 0.20.0+cu129 allows transformers 5.x (see wheel requires-dist); default resolution
+# stayed on 4.57.x. Gemma 4 checkpoints need transformers>=5.5 with model_type gemma4.
+[tool.uv]
+override-dependencies = ["transformers>=5.5.1,<6"]
+
 # Workspace sources - these apply globally to all members
 [tool.uv.sources]
 miner-utils = {workspace = true}
