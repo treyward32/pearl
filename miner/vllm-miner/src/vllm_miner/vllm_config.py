@@ -128,6 +128,4 @@ class PearlConfig(CompressedTensorsConfig):
             )
 
         # Fall back to parent's implementation for all other schemes
-        return super()._get_scheme_from_parts(
-            weight_quant, input_quant, format, layer_name
-        )
+        return super()._get_scheme_from_parts(weight_quant, input_quant, format, layer_name)
