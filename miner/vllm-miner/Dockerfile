@@ -1,5 +1,6 @@
 # Version pins for reproducible builds (override with docker build --build-arg)
-ARG CUDA_VERSION=12.8.1
+# CUDA 12.9 user-space + PyTorch cu129 + vLLM 0.20.0+cu129 (see miner/vllm-miner/pyproject.toml).
+ARG CUDA_VERSION=12.9.1
 
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
 
@@ -90,7 +91,7 @@ COPY miner/vllm-miner/entrypoint.sh /app/entrypoint.sh
 # Venv bin/ contains python symlink and installed scripts (pearl-gateway, etc.)
 ENV PATH="/usr/local/venv/bin:${PATH}"
 
-# PyTorch libs (libc10.so, etc.) are inside the torch package directory
-ENV LD_LIBRARY_PATH=/usr/local/venv/lib/python3.12/site-packages/torch/lib:$LD_LIBRARY_PATH
+# vLLM native libs need libcudart from the NVIDIA CUDA image; PyTorch ships its own libs under torch/lib.
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 
 ENTRYPOINT ["./entrypoint.sh"]

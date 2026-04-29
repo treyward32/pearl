@@ -12,7 +12,7 @@ from typing import override
 
 import torch
 from miner_utils import get_logger
-from vllm.model_executor.layers.quantization.kernels.scaled_mm.ScaledMMLinearKernel import (
+from vllm.model_executor.kernels.linear.scaled_mm import (
     Int8ScaledMMLinearKernel,
     Int8ScaledMMLinearLayerConfig,
 )

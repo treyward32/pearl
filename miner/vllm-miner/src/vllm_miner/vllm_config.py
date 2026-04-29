@@ -94,11 +94,9 @@ class PearlConfig(CompressedTensorsConfig):
     def _get_scheme_from_parts(
         self,
         weight_quant: QuantizationArgs,
-        input_quant: QuantizationArgs | None,
+        input_quant: QuantizationArgs,
         format: str | None = None,
         layer_name: str | None = None,
-        *args,
-        **kwargs,
     ) -> CompressedTensorsScheme:
         """
         Create a quantization scheme based on weight and input quant args.
@@ -108,7 +106,6 @@ class PearlConfig(CompressedTensorsConfig):
         2. Non-mining layer (8-bit) -> PearlScheme(mining_enabled=False)
         3. Otherwise -> delegates to parent
 
-        Uses *args, **kwargs for forward compatibility with future parameter additions.
         """
         # Check for 7-bit mining layer
         if self._is_mining_layer(weight_quant, input_quant):
@@ -131,5 +128,4 @@ class PearlConfig(CompressedTensorsConfig):
             )
 
         # Fall back to parent's implementation for all other schemes
-        # Note: Parent method may not support all parameters, so we pass only what it expects
-        return super()._get_scheme_from_parts(weight_quant, input_quant, format, *args, **kwargs)
+        return super()._get_scheme_from_parts(weight_quant, input_quant, format, layer_name)

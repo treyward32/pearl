@@ -15,7 +15,7 @@
 /plonky2/               @o-k-d @LindaGuiga
 
 # ── Miner (Python / CUDA) ───────────────────────────
-/miner/                 @raskin1 
+/miner/                 @raskin1 @netanell-pearl
 /py-pearl-mining/       @raskin1 @o-k-d
 # ── Frontend / Desktop ──────────────────────────────
 /apps/                  @liad-madmon @naorye @roiefink

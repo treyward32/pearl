@@ -14,11 +14,9 @@ from typing import override
 import torch
 from compressed_tensors.quantization import QuantizationStrategy
 from miner_utils import get_logger
+from vllm.model_executor.kernels.linear.scaled_mm import Int8ScaledMMLinearLayerConfig
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
     CompressedTensorsScheme,
-)
-from vllm.model_executor.layers.quantization.kernels.scaled_mm.ScaledMMLinearKernel import (
-    Int8ScaledMMLinearLayerConfig,
 )
 from vllm.model_executor.parameter import (
     BasevLLMParameter,
