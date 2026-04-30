@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -21,9 +20,11 @@ jobs:
       zk_pow: ${{ steps.filter.outputs.common == 'true' || steps.filter.outputs.pearl_blake3_src == 'true' || steps.filter.outputs.zk_pow_src == 'true' }}
       py_pearl_mining: ${{ steps.filter.outputs.common == 'true' || steps.filter.outputs.pearl_blake3_src == 'true' || steps.filter.outputs.zk_pow_src == 'true' || steps.filter.outputs.py_pearl_mining_src == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         with:
           filters: |
             common:
@@ -42,11 +43,13 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.pearl_blake3 == 'true' }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: "pearl-blake3 -> target"
           cache-on-failure: true
@@ -65,15 +68,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.zk_pow == 'true' }}
+    env:
+      RUSTFLAGS: -Copt-level=3 -Cdebug-assertions -Coverflow-checks=y -Cdebuginfo=0
     defaults:
       run:
         working-directory: zk-pow
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: "zk-pow -> target"
           cache-on-failure: true
@@ -94,13 +101,9 @@ jobs:
           cargo build --release
           cargo run --release --bin build_cache src/circuit/cache.bin
           cargo build --release --features embedded_cache
-        env:
-          RUSTFLAGS: -Copt-level=3 -Cdebug-assertions -Coverflow-checks=y -Cdebuginfo=0
 
       - name: Run tests
         run: cargo test --release --features embedded_cache
-        env:
-          RUSTFLAGS: -Copt-level=3 -Cdebug-assertions -Coverflow-checks=y -Cdebuginfo=0
 
       - name: Test binaries
         run: cargo test --bins --release --features embedded_cache
@@ -121,15 +124,12 @@ jobs:
         run: cargo run --release --bin prove_verify -- performance
 
       # Go FFI Build
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: '1.26.1'
 
       - name: Regenerate verifier circuit cache for Go FFI
-        run: |
-          cargo run --release --bin build_cache src/circuit/cache.bin
-        env:
-          RUSTFLAGS: -C target-cpu=native
+        run: cargo run --release --bin build_cache src/circuit/cache.bin
 
       - name: Build zk_pow_ffi library for Go FFI
         run: |
@@ -142,15 +142,16 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.py_pearl_mining == 'true' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: "py-pearl-mining -> target"
           cache-on-failure: true
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Install system dependencies (jemalloc)
         run: |
           sudo apt-get update
