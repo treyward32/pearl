@@ -23,7 +23,6 @@ type HeadersSyncPhase int
 
 const (
 	PhasePresync HeadersSyncPhase = iota
-	PhasePresyncSpotCheck
 	PhaseRedownload
 	PhaseFinal
 )
@@ -32,8 +31,6 @@ func (p HeadersSyncPhase) String() string {
 	switch p {
 	case PhasePresync:
 		return "presync"
-	case PhasePresyncSpotCheck:
-		return "presync spot-check"
 	case PhaseRedownload:
 		return "redownload"
 	case PhaseFinal:
@@ -44,7 +41,18 @@ func (p HeadersSyncPhase) String() string {
 }
 
 const (
-	spotCheckInvProb = 1000
+	// lg2UnauthorisedPresync is the security parameter t: a chain with less
+	// than certifiedWorkProportion of its work backed by certificates is
+	// rejected with probability >= 1 - 2^{-t}.
+	lg2UnauthorisedPresync = 100
+
+	// certifiedWorkProportion is p: the minimum fraction of total work that
+	// must be backed by verified certificates for the presync to be secure.
+	certifiedWorkProportion = 0.5
+
+	// spotCheckMeanGap is the average gap between mandatory periodic spot
+	// checks. Mandatory checks are drawn from U[1, 2*spotCheckMeanGap].
+	spotCheckMeanGap = 1000
 
 	// redownloadApprovedCap is the Tier-1 REDOWNLOAD approved-headers FIFO cap.
 	redownloadApprovedCap = 500
@@ -56,9 +64,8 @@ const (
 
 	// redownloadGetdataDepth is the minimum number of commitment-checked
 	// REDOWNLOAD headers that must exist in Tier-1 on top of an entry before
-	// it is eligible for getdata. This ensures no block is requested until at
-	// least one full batch of commitment-verified headers follows it.
-	redownloadGetdataDepth = wire.MaxBlockHeadersPerMsg
+	// it is eligible for getdata.
+	redownloadGetdataDepth = lg2UnauthorisedPresync
 )
 
 // chainStartInfo captures the immutable state about the fork point for the
@@ -79,6 +86,22 @@ type ApprovedRedownloadEntry struct {
 	Header wire.BlockHeader
 }
 
+// pendingSpotCheck represents a spot-check target that has been issued to the
+// peer but whose cert-bearing response has not yet arrived.
+type pendingSpotCheck struct {
+	height    int32
+	hash      chainhash.Hash
+	prevBlock chainhash.Hash
+}
+
+// SpotCheckRequest is a getheaders request to be sent for a spot-check.
+// The locator's first entry is the target's parent hash; StopHash is the
+// target's own hash, ensuring the response contains exactly that one header.
+type SpotCheckRequest struct {
+	Locator  []*chainhash.Hash
+	StopHash chainhash.Hash
+}
+
 // redownloadCursor tracks the REDOWNLOAD phase tip: the hash, timestamp, and
 // height of the last header successfully appended to Tier-1. It is initialized
 // from chainStart at the PRESYNC→REDOWNLOAD transition and advanced
@@ -94,8 +117,13 @@ type redownloadCursor struct {
 // HeadersSyncResult is the result returned by ProcessNextHeaders.
 type HeadersSyncResult struct {
 	// NewlyApproved lists the cert-less REDOWNLOAD entries just appended to
-	// Tier-1 by this call. Empty in PRESYNC and PRESYNC_SPOT_CHECK phases.
+	// Tier-1 by this call. Empty in PRESYNC phases.
 	NewlyApproved []ApprovedRedownloadEntry
+
+	// SpotCheckRequests lists getheaders requests to send for newly queued
+	// spot checks. Each request uses IncludeCertificates=true and a stop
+	// hash targeting exactly one header.
+	SpotCheckRequests []SpotCheckRequest
 
 	Success      bool
 	RequestMore  bool
@@ -103,7 +131,7 @@ type HeadersSyncResult struct {
 }
 
 // HeadersSyncState implements the two-phase headers presync state machine.
-// See /home/ohadk/workspace/pearl/doc/pearl-headers-block-sync.md for the full specification.
+// See doc/pearl-headers-block-sync.md for the full specification.
 type HeadersSyncState struct {
 	peerID int32
 
@@ -111,10 +139,12 @@ type HeadersSyncState struct {
 
 	chainStart          chainStartInfo
 	minimumRequiredWork *big.Int
-	certThresholdNBits  uint32
 	chainStartNextNBits uint32
 
-	maxCommitments uint64
+	// workNormalization is C = t * ln(2) / ((1-p) * remainingWork), where
+	// remainingWork = minimumRequiredWork - chainStart.WorkSum. Each header
+	// is spot-checked with probability min(C * header_work, 1).
+	workNormalization float64
 
 	// hashSalt is the 128-bit session key for commitment bit computation
 	// (SipHash-2-4). Drawn from crypto/rand once per session.
@@ -130,15 +160,18 @@ type HeadersSyncState struct {
 
 	headerCommitments *BitDeque
 
-	spotCheckHeader *wire.BlockHeader
-
-	// nextSpotCheckHeight is the absolute height of the next header to
-	// spot-check during cert-less PRESYNC. Drawn uniformly such that the
-	// gap since the previous anchor is in [0, 2*spotCheckInvProb), which
-	// bounds the worst-case distance between consecutive spot-checks.
+	// nextSpotCheckHeight is the absolute height of the next mandatory
+	// periodic spot-check during PRESYNC. Drawn uniformly such that the
+	// gap since the previous anchor is in [1, 2*spotCheckMeanGap].
 	nextSpotCheckHeight int32
 
-	// --- REDOWNLOAD Tier-1 state ---
+	// pendingSpotChecks is the queue of spot-check targets for which a
+	// getheaders (with IncludeCertificates=true and stop hash) has been
+	// issued but no response has been received yet. Multiple spot checks
+	// can be in-flight simultaneously. Backpressure prevents headers from
+	// advancing more than spotCheckMeanGap heights ahead of the oldest
+	// pending entry.
+	pendingSpotChecks []pendingSpotCheck
 
 	// redownloadApproved is the Tier-1 FIFO of cert-less headers approved
 	// during the REDOWNLOAD phase, bounded by redownloadApprovedCap.
@@ -159,11 +192,6 @@ type HeadersSyncState struct {
 }
 
 // NewHeadersSyncState creates a new presync state machine for a peer.
-//
-// peerID: peer identifier for logging
-// params: chain configuration
-// start: info about the fork point (the last known block before the peer's chain)
-// minimumRequiredWork: the anti-DoS work threshold
 func NewHeadersSyncState(
 	peerID int32,
 	params *chaincfg.Params,
@@ -188,8 +216,8 @@ func NewHeadersSyncState(
 	// Random salt for commitment hashing (SipHash-2-4 key).
 	rand.Read(s.hashSalt[:])
 
-	// First spot check lies in [start.Height+1, start.Height+2*spotCheckInvProb].
-	s.armNextSpotCheck(start.Height)
+	// First spot check lies in [start.Height+1, start.Height+2*spotCheckMeanGap].
+	s.scheduleNextSpotCheck(start.Height)
 
 	// Initialize lastHeaderReceived with chain_start fields for timestamp/bits
 	// lookups, and lastHeaderHash with the actual chain_start hash for
@@ -200,47 +228,29 @@ func NewHeadersSyncState(
 	}
 	s.lastHeaderHash = start.Hash
 
-	// Compute initial expected nBits.
 	s.chainStartNextNBits = s.computeNextNBits(
 		start.Height, start.Bits,
 		start.Timestamp, start.PrevTimestamp,
 	)
 	s.nextExpectedNBits = s.chainStartNextNBits
 
-	s.maxCommitments = uint64(s.maxBlocksSinceStart())
-	s.certThresholdNBits = s.computeCertThreshold()
+	remainingWork := new(big.Int).Sub(s.minimumRequiredWork, s.chainStart.WorkSum)
+	if remainingWork.Sign() > 0 {
+		rw, _ := new(big.Float).SetInt(remainingWork).Float64()
+		s.workNormalization = float64(lg2UnauthorisedPresync) * math.Ln2 /
+			((1.0 - certifiedWorkProportion) * rw)
+	}
 
 	log.Infof("Headers presync started with peer=%d: height=%d, "+
-		"max_commitments=%d, min_work=%s, cert_threshold=0x%08x",
-		peerID, s.currentHeight, s.maxCommitments,
-		s.minimumRequiredWork, s.certThresholdNBits)
+		"min_work=%s, work_norm=%e",
+		peerID, s.currentHeight,
+		s.minimumRequiredWork, s.workNormalization)
 
 	return s
 }
 
 // Phase returns the current phase.
 func (s *HeadersSyncState) Phase() HeadersSyncPhase { return s.phase }
-
-// PresyncHeight returns the height reached during PRESYNC.
-func (s *HeadersSyncState) PresyncHeight() int32 { return s.currentHeight }
-
-// PresyncWork returns the cumulative claimed work so far.
-func (s *HeadersSyncState) PresyncWork() *big.Int { return s.currentChainWork }
-
-// CurrentHeight returns the phase-aware current height:
-// - In PRESYNC / PRESYNC_SPOT_CHECK / FINAL: the PRESYNC endpoint height.
-// - In REDOWNLOAD: the REDOWNLOAD cursor height (last header appended to Tier-1).
-func (s *HeadersSyncState) CurrentHeight() int32 {
-	if s.phase == PhaseRedownload {
-		return s.redownloadCursor.height
-	}
-	return s.currentHeight
-}
-
-// RedownloadHeight returns the height of the REDOWNLOAD cursor.
-func (s *HeadersSyncState) RedownloadHeight() int32 {
-	return s.redownloadCursor.height
-}
 
 // LastHeaderHash returns the hash of the last header processed in PRESYNC.
 func (s *HeadersSyncState) LastHeaderHash() chainhash.Hash {
@@ -252,29 +262,12 @@ func (s *HeadersSyncState) RedownloadTipHash() chainhash.Hash {
 	return s.redownloadCursor.hash
 }
 
-// ShouldIncludeCertificates returns whether the next getheaders request
-// should ask for certificates.
-func (s *HeadersSyncState) ShouldIncludeCertificates() bool {
-	switch s.phase {
-	case PhasePresync:
-		return isAtLeastAsHard(s.lastHeaderReceived.Bits, s.certThresholdNBits)
-	case PhaseRedownload, PhaseFinal:
-		return false
-	default:
-		return true
-	}
-}
-
-// ShouldIncludeCertificatesAfterBits predicts the cert flag for the speculative
-// next GETHEADERS, using bits as a proxy for the next batch's difficulty
-// without waiting for ProcessNextHeaders to complete. This mirrors the logic
-// in ShouldIncludeCertificates for PhasePresync; REDOWNLOAD always returns
-// false regardless of bits.
-func (s *HeadersSyncState) ShouldIncludeCertificatesAfterBits(bits uint32) bool {
-	if s.phase != PhasePresync {
-		return false
-	}
-	return isAtLeastAsHard(bits, s.certThresholdNBits)
+// SpotCheckBackpressured returns true when the PRESYNC header pipeline should
+// pause because the current height is more than spotCheckMeanGap ahead of the
+// oldest unresolved spot check.
+func (s *HeadersSyncState) SpotCheckBackpressured() bool {
+	return len(s.pendingSpotChecks) > 0 &&
+		s.currentHeight-s.pendingSpotChecks[0].height >= spotCheckMeanGap
 }
 
 // SpeculativeLocator builds a getheaders locator with tip as the first entry
@@ -294,18 +287,9 @@ func (s *HeadersSyncState) PopApprovedRedownloadHashes(n int) []ApprovedRedownlo
 	if n <= 0 || len(s.redownloadApproved) == 0 {
 		return nil
 	}
-	if n > len(s.redownloadApproved) {
-		n = len(s.redownloadApproved)
-	}
-	out := make([]ApprovedRedownloadEntry, n)
-	copy(out, s.redownloadApproved[:n])
-	// Compact in-place.
-	remaining := len(s.redownloadApproved) - n
-	copy(s.redownloadApproved, s.redownloadApproved[n:])
-	for i := remaining; i < len(s.redownloadApproved); i++ {
-		s.redownloadApproved[i] = ApprovedRedownloadEntry{}
-	}
-	s.redownloadApproved = s.redownloadApproved[:remaining]
+	n = min(n, len(s.redownloadApproved))
+	out := s.redownloadApproved[:n:n]
+	s.redownloadApproved = s.redownloadApproved[n:]
 	return out
 }
 
@@ -359,6 +343,8 @@ func (s *HeadersSyncState) RedownloadEmissionsComplete() bool {
 }
 
 // ProcessNextHeaders processes a batch of headers from the peer.
+// fullMessage is true when the peer filled the batch to wire.MaxBlockHeadersPerMsg,
+// indicating more headers are available; false signals a partial (final) batch.
 func (s *HeadersSyncState) ProcessNextHeaders(
 	headers []wire.MsgHeader, fullMessage bool,
 ) HeadersSyncResult {
@@ -370,45 +356,75 @@ func (s *HeadersSyncState) ProcessNextHeaders(
 		return result
 	}
 
+	if s.phase == PhasePresync {
+		if scIdx := s.findPendingSpotCheck(headers[0].BlockHeader.BlockHash()); scIdx >= 0 {
+			hwc := headers[0]
+			scHeight := s.pendingSpotChecks[scIdx].height
+			if hwc.BlockCertificate() == nil {
+				log.Infof("Headers presync aborted with peer=%d: "+
+					"spot-check cert missing (presync)", s.peerID)
+			} else if err := zkpow.VerifyCertificate(&hwc.BlockHeader, hwc.BlockCertificate()); err != nil {
+				log.Warnf("Headers presync aborted with peer=%d: "+
+					"spot-check cert invalid: %v (presync)", s.peerID, err)
+				s.shouldPunish = true
+			} else {
+				if scIdx == 0 {
+					s.pendingSpotChecks = s.pendingSpotChecks[1:]
+				} else {
+					s.pendingSpotChecks = append(s.pendingSpotChecks[:scIdx], s.pendingSpotChecks[scIdx+1:]...)
+				}
+				result.Success = true
+
+				log.Infof("Headers presync spot-check passed with peer=%d: "+
+					"height=%d, pending=%d (presync)",
+					s.peerID, scHeight, len(s.pendingSpotChecks))
+
+				if s.currentChainWork.Cmp(s.minimumRequiredWork) >= 0 &&
+					len(s.pendingSpotChecks) == 0 {
+					s.transitionToRedownload()
+					result.RequestMore = true
+					log.Infof("Headers presync transition with peer=%d: "+
+						"sufficient work at height=%d, redownloading from height=%d",
+						s.peerID, s.currentHeight, s.redownloadCursor.height)
+				} else if !s.SpotCheckBackpressured() && !s.PresyncWorkSufficient() {
+					result.RequestMore = true
+				}
+			}
+			result.ShouldPunish = s.shouldPunish
+			if !result.Success {
+				s.finalize()
+			}
+			return result
+		}
+	}
+
 	switch s.phase {
 	case PhasePresync:
+		prevPending := len(s.pendingSpotChecks)
 		result.Success = s.validateAndStoreCommitments(headers)
 		if result.Success {
-			if fullMessage || s.phase == PhaseRedownload || s.phase == PhasePresyncSpotCheck {
+			for _, sc := range s.pendingSpotChecks[prevPending:] {
+				result.SpotCheckRequests = append(result.SpotCheckRequests, SpotCheckRequest{
+					Locator:  s.SpeculativeLocator(sc.prevBlock),
+					StopHash: sc.hash,
+				})
+			}
+			switch {
+			case s.phase == PhaseRedownload:
 				result.RequestMore = true
-				if s.phase == PhasePresync {
-					log.Infof("Headers presync with peer=%d: "+
-						"height=%d, commitments=%d/%d, certs_required=%t (presync)",
-						s.peerID, s.currentHeight,
-						s.headerCommitments.Len(), s.maxCommitments,
-						s.ShouldIncludeCertificates())
+			case fullMessage:
+				if !s.SpotCheckBackpressured() && !s.PresyncWorkSufficient() {
+					result.RequestMore = true
 				}
-			} else {
+				log.Infof("Headers presync with peer=%d: "+
+					"height=%d, commitments=%d, pending_checks=%d (presync)",
+					s.peerID, s.currentHeight,
+					s.headerCommitments.Len(),
+					len(s.pendingSpotChecks))
+			default:
 				log.Infof("Headers presync aborted with peer=%d: "+
 					"incomplete message at height=%d (presync)", s.peerID, s.currentHeight)
 			}
-		}
-
-	case PhasePresyncSpotCheck:
-		hwc := headers[0]
-		if hwc.BlockHeader.BlockHash() != s.spotCheckHeader.BlockHash() {
-			log.Infof("Headers presync aborted with peer=%d: "+
-				"spot-check hash mismatch (presync)", s.peerID)
-		} else if hwc.BlockCertificate() == nil {
-			log.Infof("Headers presync aborted with peer=%d: "+
-				"spot-check cert missing (presync)", s.peerID)
-		} else if err := zkpow.VerifyCertificate(&hwc.BlockHeader, hwc.BlockCertificate()); err != nil {
-			log.Warnf("Headers presync aborted with peer=%d: "+
-				"spot-check cert invalid: %v (presync)", s.peerID, err)
-			s.shouldPunish = true
-		} else {
-			s.spotCheckHeader = nil
-			s.phase = PhasePresync
-			s.armNextSpotCheck(s.currentHeight)
-			result.Success = true
-			result.RequestMore = true
-			log.Infof("Headers presync spot-check passed with peer=%d: "+
-				"resuming at height=%d (presync)", s.peerID, s.currentHeight)
 		}
 
 	case PhaseRedownload:
@@ -457,7 +473,8 @@ func (s *HeadersSyncState) ProcessNextHeaders(
 	// SyncManager explicitly tears it down after both Tier-1 and Tier-2 drain.
 	if !result.Success && s.phase != PhaseRedownload {
 		s.finalize()
-	} else if result.Success && s.phase != PhaseRedownload && !result.RequestMore {
+	} else if result.Success && s.phase != PhaseRedownload && !result.RequestMore &&
+		!s.PresyncWorkSufficient() {
 		s.finalize()
 	}
 	return result
@@ -475,35 +492,80 @@ func (s *HeadersSyncState) NextHeadersRequestLocator() []*chainhash.Hash {
 	switch s.phase {
 	case PhasePresync:
 		tipHash = s.lastHeaderHash
-	case PhasePresyncSpotCheck:
-		tipHash = s.spotCheckHeader.PrevBlock
 	case PhaseRedownload:
 		tipHash = s.redownloadCursor.hash
 	}
 	return s.SpeculativeLocator(tipHash)
 }
 
-// --- internal methods ---
+// findPendingSpotCheck returns the index of the pending spot check whose hash
+// matches h, or -1 if not found. Checks the front first since responses
+// typically arrive in order.
+func (s *HeadersSyncState) findPendingSpotCheck(h chainhash.Hash) int {
+	if len(s.pendingSpotChecks) > 0 && s.pendingSpotChecks[0].hash == h {
+		return 0
+	}
+	for i := 1; i < len(s.pendingSpotChecks); i++ {
+		if s.pendingSpotChecks[i].hash == h {
+			return i
+		}
+	}
+	return -1
+}
+
+func (s *HeadersSyncState) transitionToRedownload() {
+	s.redownloadApproved = s.redownloadApproved[:0]
+	s.redownloadCursor = redownloadCursor{
+		hash:      s.chainStart.Hash,
+		timestamp: s.chainStart.Timestamp,
+		height:    s.chainStart.Height,
+	}
+	s.redownloadChainWork = new(big.Int).Set(s.chainStart.WorkSum)
+	s.nextExpectedNBits = s.chainStartNextNBits
+	s.phase = PhaseRedownload
+}
 
 func (s *HeadersSyncState) finalize() {
 	s.headerCommitments.Clear()
 	s.redownloadApproved = nil
 	s.processAllRemainingHeaders = false
 	s.redownloadShortBatchSeen = false
-	s.spotCheckHeader = nil
+	s.pendingSpotChecks = nil
 	s.currentHeight = 0
 	s.phase = PhaseFinal
 }
 
-// armNextSpotCheck schedules the next cert-less PRESYNC spot-check by drawing
-// a uniform gap in [1, 2*spotCheckInvProb+1] and anchoring it at baseHeight.
-// This keeps the mean gap at spotCheckInvProb while bounding the worst-case
-// distance between consecutive spot-checks to 2*spotCheckInvProb - 1 headers.
-func (s *HeadersSyncState) armNextSpotCheck(baseHeight int32) {
-	n, err := rand.Int(rand.Reader, big.NewInt(2*spotCheckInvProb))
+// shouldSpotCheckByWork returns true with probability min(C * headerWork, 1),
+// implementing the work-proportional spot-check trigger.
+func (s *HeadersSyncState) shouldSpotCheckByWork(headerWork *big.Int) bool {
+	if s.workNormalization == 0 {
+		return false
+	}
+	wf, _ := new(big.Float).SetInt(headerWork).Float64()
+	prob := s.workNormalization * wf
+	if prob >= 1.0 {
+		return true
+	}
+	var buf [2]byte
+	rand.Read(buf[:])
+	r := uint16(buf[0]) | uint16(buf[1])<<8
+	return r < uint16(prob*65536)
+}
+
+// PresyncWorkSufficient returns true when cumulative work has reached the
+// minimum required threshold but the REDOWNLOAD transition has not yet
+// occurred (pending spot checks may be blocking it).
+func (s *HeadersSyncState) PresyncWorkSufficient() bool {
+	return s.phase == PhasePresync &&
+		s.currentChainWork.Cmp(s.minimumRequiredWork) >= 0
+}
+
+// scheduleNextSpotCheck sets nextSpotCheckHeight to baseHeight + U[1, 2*spotCheckMeanGap],
+// bounding the worst-case distance between consecutive mandatory spot-checks to
+// 2*spotCheckMeanGap headers while keeping the mean gap at spotCheckMeanGap.
+func (s *HeadersSyncState) scheduleNextSpotCheck(baseHeight int32) {
+	n, err := rand.Int(rand.Reader, big.NewInt(2*spotCheckMeanGap))
 	if err != nil {
-		// crypto/rand.Reader is documented never to return an error on
-		// supported platforms; panic is the only sane response.
 		panic("headers presync: crypto/rand failed: " + err.Error())
 	}
 	s.nextSpotCheckHeight = baseHeight + 1 + int32(n.Int64())
@@ -520,67 +582,42 @@ func (s *HeadersSyncState) validateAndStoreCommitments(headers []wire.MsgHeader)
 		return false
 	}
 
-	includeCerts := s.ShouldIncludeCertificates()
-
-	// Determine whether this batch covers the pre-scheduled spot-check
-	// target height. Heights covered by this batch are
-	// [s.currentHeight+1, s.currentHeight+len(headers)] at entry.
-	targetIdx := -1
-	if d := int64(s.nextSpotCheckHeight) - int64(s.currentHeight); d >= 1 && d <= int64(len(headers)) {
-		targetIdx = int(d - 1)
-	}
-
 	for i := range headers {
-		if !s.validateAndProcessSingleHeader(&headers[i], includeCerts) {
+		if s.currentChainWork.Cmp(s.minimumRequiredWork) >= 0 {
+			break
+		}
+
+		if !s.validateAndProcessSingleHeader(&headers[i]) {
 			return false
+		}
+
+		spotCheck := s.currentHeight == s.nextSpotCheckHeight ||
+			s.shouldSpotCheckByWork(blockchain.CalcWork(headers[i].BlockHeader.Bits))
+
+		if spotCheck {
+			hwc := &headers[i]
+			s.pendingSpotChecks = append(s.pendingSpotChecks, pendingSpotCheck{
+				height:    s.currentHeight,
+				hash:      s.lastHeaderHash,
+				prevBlock: hwc.BlockHeader.PrevBlock,
+			})
+			s.scheduleNextSpotCheck(s.currentHeight)
 		}
 	}
 
 	if s.currentChainWork.Cmp(s.minimumRequiredWork) >= 0 {
-		// Transition to REDOWNLOAD: initialize the cursor from chainStart.
-		s.redownloadApproved = s.redownloadApproved[:0]
-		s.redownloadCursor = redownloadCursor{
-			hash:      s.chainStart.Hash,
-			timestamp: s.chainStart.Timestamp,
-			height:    s.chainStart.Height,
+		if len(s.pendingSpotChecks) > 0 {
+			return true
 		}
-		s.redownloadChainWork = new(big.Int).Set(s.chainStart.WorkSum)
-		s.nextExpectedNBits = s.chainStartNextNBits
-		s.phase = PhaseRedownload
+		s.transitionToRedownload()
 		log.Infof("Headers presync transition with peer=%d: "+
 			"sufficient work at height=%d, redownloading from height=%d",
 			s.peerID, s.currentHeight, s.redownloadCursor.height)
-	} else if targetIdx >= 0 {
-		hwc := &headers[targetIdx]
-		targetHeight := s.nextSpotCheckHeight
-		if cert := hwc.BlockCertificate(); cert != nil {
-			// Cert-bearing target. When includeCerts is true, the per-header
-			// loop already invoked zkpow.VerifyCertificate on this spot-check header, so
-			// we trust it.
-			if !includeCerts {
-				if err := zkpow.VerifyCertificate(&hwc.BlockHeader, cert); err != nil {
-					log.Warnf("Headers presync aborted with peer=%d: "+
-						"spot-check cert invalid (inline): %v (presync)",
-						s.peerID, err)
-					s.shouldPunish = true
-					return false
-				}
-			}
-			s.armNextSpotCheck(s.currentHeight)
-		} else {
-			// Cert-less target: issue a getheaders round-trip so the peer
-			// must produce the certificate for this exact header.
-			h := hwc.BlockHeader
-			s.spotCheckHeader = &h
-			s.phase = PhasePresyncSpotCheck
-			log.Infof("Headers presync spot-check issued with peer=%d: "+
-				"height=%d (presync)", s.peerID, targetHeight)
-		}
 	}
 	return true
 }
 
-func (s *HeadersSyncState) validateAndProcessSingleHeader(hwc *wire.MsgHeader, includeCerts bool) bool {
+func (s *HeadersSyncState) validateAndProcessSingleHeader(hwc *wire.MsgHeader) bool {
 	if s.phase != PhasePresync {
 		return false
 	}
@@ -599,42 +636,10 @@ func (s *HeadersSyncState) validateAndProcessSingleHeader(hwc *wire.MsgHeader, i
 		return false
 	}
 
-	if cert := hwc.BlockCertificate(); cert != nil {
-		if cert.ProofCommitment() != header.ProofCommitment {
-			log.Warnf("Headers presync aborted with peer=%d: "+
-				"cert ProofCommitment mismatch at height=%d (presync)",
-				s.peerID, nextHeight)
-			s.shouldPunish = true
-			return false
-		}
-	}
-
-	if includeCerts {
-		cert := hwc.BlockCertificate()
-		if cert == nil {
-			log.Infof("Headers presync aborted with peer=%d: "+
-				"cert missing at height=%d (presync, include_certs=true)",
-				s.peerID, nextHeight)
-			return false
-		}
-		if err := zkpow.VerifyCertificate(header, cert); err != nil {
-			log.Warnf("Headers presync aborted with peer=%d: "+
-				"cert invalid at height=%d (presync, include_certs=true): %v",
-				s.peerID, nextHeight, err)
-			s.shouldPunish = true
-			return false
-		}
-	}
-
 	headerHash := header.BlockHash()
 
 	bit := s.commitBit(headerHash)
 	s.headerCommitments.PushBack(bit)
-	if uint64(s.headerCommitments.Len()) > s.maxCommitments {
-		log.Infof("Headers presync aborted with peer=%d: "+
-			"exceeded max commitments at height=%d (presync)", s.peerID, nextHeight)
-		return false
-	}
 
 	work := blockchain.CalcWork(header.Bits)
 	s.currentChainWork = new(big.Int).Add(s.currentChainWork, work)
@@ -684,16 +689,6 @@ func (s *HeadersSyncState) checkHeaderTransition(
 	return true
 }
 
-// redownloadTipHash returns the hash of the current REDOWNLOAD cursor.
-func (s *HeadersSyncState) redownloadTipHash() chainhash.Hash {
-	return s.redownloadCursor.hash
-}
-
-// redownloadTipTime returns the timestamp of the current REDOWNLOAD cursor.
-func (s *HeadersSyncState) redownloadTipTime() int64 {
-	return s.redownloadCursor.timestamp
-}
-
 func (s *HeadersSyncState) validateAndStoreRedownloadedHeader(hwc *wire.MsgHeader) bool {
 	if s.phase != PhaseRedownload {
 		return false
@@ -701,8 +696,8 @@ func (s *HeadersSyncState) validateAndStoreRedownloadedHeader(hwc *wire.MsgHeade
 	header := &hwc.BlockHeader
 	nextHeight := s.redownloadCursor.height + 1
 
-	prevHash := s.redownloadTipHash()
-	lastTime := s.redownloadTipTime()
+	prevHash := s.redownloadCursor.hash
+	lastTime := s.redownloadCursor.timestamp
 	if !s.checkHeaderTransition(header, lastTime, nextHeight, &prevHash) {
 		return false
 	}
@@ -743,7 +738,6 @@ func (s *HeadersSyncState) validateAndStoreRedownloadedHeader(hwc *wire.MsgHeade
 		Header: *header,
 	})
 
-	// Advance the cursor to this header.
 	s.redownloadCursor = redownloadCursor{
 		hash:      headerHash,
 		timestamp: header.Timestamp.Unix(),
@@ -757,77 +751,12 @@ func (s *HeadersSyncState) validateAndStoreRedownloadedHeader(hwc *wire.MsgHeade
 	return true
 }
 
-// --- helpers ---
-
 // commitBit computes the 1-bit commitment for a header hash using
 // SipHash-2-4 keyed by the per-session hashSalt. The PRF property ensures
 // an attacker without the salt cannot predict or bias bits for arbitrary
 // headers.
 func (s *HeadersSyncState) commitBit(hash chainhash.Hash) bool {
 	return siphash.Sum64(hash[:], &s.hashSalt)&1 != 0
-}
-
-// maxBlocksSinceStart returns an upper bound on the number of blocks a peer
-// could have produced since chainStart, used to cap the PRESYNC commitment
-// buffer and scale the certificate-threshold computation.
-//
-// It is the minimum of two valid upper bounds:
-//
-//  1. Wall-clock: timestamps must advance by ≥ MinTimestampDeltaSeconds per
-//     block, so at most maxSeconds / MinTimestampDeltaSeconds fit.
-//
-//  2. Work bound: smallest n such that any WTEMA-legal
-//     n-1 block chain spanning ≤ maxSeconds must accumulate strictly more
-//     work than the peer's budget minimumRequiredWork - chainStart.WorkSum.
-func (s *HeadersSyncState) maxBlocksSinceStart() int64 {
-	maxSeconds := time.Now().Unix() - s.chainStart.Timestamp + s.chainParams.MaxTimeOffsetMinutes*60
-	if maxSeconds <= 0 {
-		return 0
-	}
-	wallBound := maxSeconds / int64(blockchain.MinTimestampDeltaSeconds)
-	remainingWork := new(big.Int).Sub(s.minimumRequiredWork, s.chainStart.WorkSum)
-	if remainingWork.Sign() <= 0 || wallBound <= 0 {
-		return wallBound
-	}
-
-	targetSpacing := int64(s.chainParams.TargetTimePerBlock / time.Second)
-	halfLife := int64(s.chainParams.WTEMAHalfLife / time.Second)
-	if targetSpacing <= int64(blockchain.MinTimestampDeltaSeconds) || halfLife <= 0 {
-		return wallBound
-	}
-
-	easiestBits := blockchain.CalcEasiestDifficulty(
-		s.chainParams, s.chainStart.Bits, time.Duration(maxSeconds)*time.Second)
-	wBase, _ := new(big.Float).SetInt(blockchain.CalcWork(easiestBits)).Float64()
-	remWork, _ := new(big.Float).SetInt(remainingWork).Float64()
-	if !(wBase > 0) || math.IsInf(wBase, 0) || math.IsInf(remWork, 0) {
-		// Values outside float64 range; fall back to the wall-clock bound
-		// rather than risk a spurious result. In practice wBase and
-		// remainingWork are well below 2^1023 for all realistic params.
-		return wallBound
-	}
-	exceeds := func(k int64) bool {
-		if k <= 0 {
-			return false
-		}
-		if k > maxSeconds {
-			return true
-		}
-		m := min(max((maxSeconds-k)/(targetSpacing-1), 0), k)
-		tail := s.wtemaGrowthSum(k - m)
-		return wBase*(float64(m)+tail) > remWork
-	}
-
-	lo, hi := int64(1), wallBound+1
-	for lo < hi {
-		mid := lo + (hi-lo)/2
-		if exceeds(mid - 1) {
-			hi = mid
-		} else {
-			lo = mid + 1
-		}
-	}
-	return min(lo+1, wallBound)
 }
 
 func (s *HeadersSyncState) computeNextNBits(height int32, bits uint32, ts, prevTs int64) uint32 {
@@ -838,55 +767,4 @@ func (s *HeadersSyncState) computeNextNBits(height int32, bits uint32, ts, prevT
 		return s.chainParams.PowLimitBits
 	}
 	return result
-}
-
-func (s *HeadersSyncState) computeCertThreshold() uint32 {
-	powLimitBits := s.chainParams.PowLimitBits
-
-	if s.minimumRequiredWork.Cmp(s.chainStart.WorkSum) <= 0 {
-		return powLimitBits
-	}
-
-	remainingWork := new(big.Int).Sub(s.minimumRequiredWork, s.chainStart.WorkSum)
-	n := int64(wire.MaxBlockHeadersPerMsg)
-
-	S := s.wtemaGrowthSum(n)
-
-	maxHeaders := s.maxCommitments
-	scaledMax := uint64(float64(maxHeaders) * S)
-	if scaledMax == 0 {
-		return powLimitBits
-	}
-
-	thresholdWork := new(big.Int).Mul(remainingWork, big.NewInt(n))
-	thresholdWork.Div(thresholdWork, new(big.Int).SetUint64(scaledMax))
-	if thresholdWork.Sign() == 0 {
-		return powLimitBits
-	}
-
-	// target = (2^256 - 1) / work
-	max256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
-	thresholdTarget := new(big.Int).Div(max256, thresholdWork)
-
-	powLimit := blockchain.CompactToBig(powLimitBits)
-	return blockchain.BigToCompact(blockchain.MinBigInt(thresholdTarget, powLimit))
-}
-
-// wtemaGrowthSum returns a + a^2 + ... + a^blocks, where
-// a = 1 + targetSpacing/halfLife is the per-block WTEMA work growth factor
-// at the 1-second minimum spacing.
-func (s *HeadersSyncState) wtemaGrowthSum(blocks int64) float64 {
-	targetSpacing := float64(s.chainParams.TargetTimePerBlock / time.Second)
-	halfLife := float64(s.chainParams.WTEMAHalfLife / time.Second)
-	am1 := targetSpacing / halfLife
-	a := 1.0 + am1
-	return (math.Pow(a, float64(blocks+1)) - a) / am1
-}
-
-// isAtLeastAsHard returns true when nBits a represents at least as much
-// difficulty as nBits b (i.e. target_a <= target_b).
-func isAtLeastAsHard(a, b uint32) bool {
-	targetA := blockchain.CompactToBig(a)
-	targetB := blockchain.CompactToBig(b)
-	return targetA.Cmp(targetB) <= 0
 }

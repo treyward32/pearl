@@ -12,7 +12,7 @@ Pearl therefore keeps Bitcoin's two-pass anti-DoS structure but changes what is 
 
 > **Note:** The primary goal of this two-phase syncing is to protect against memory DoS (storing too many unverified blocks), and *not* against futile block verification time DoS.
 
-- **PRESYNC** performs cheap structural checks, stores dense commitments, accumulates provisional chain work, and verifies certificates only selectively (above-threshold batches and random spot-checks).
+- **PRESYNC** performs cheap structural checks, stores dense commitments, accumulates provisional chain work, and verifies certificates only via random spot-checks (work-proportional and periodic).
 - **REDOWNLOAD** replays the same chain *without certificates in HEADERS*, runs cheap contextual checks against PRESYNC commitments, and defers ZK certificate verification to block-arrival time (each certificate travels inside the full-block payload, so it is transferred exactly once).
 
 **Invariants:**
@@ -112,69 +112,67 @@ For each header, the receiver:
 2. Stores a **1-bit commitment**: `salted_hash(header.BlockHash()) & 1`. The salt is a random 16-byte key generated once per session. Every header gets one bit (denser than Bitcoin; Pearl defers many certificate checks to REDOWNLOAD, so PRESYNC needs stronger replay binding).
 3. Accumulates **provisional chain work** from `header.Bits`.
 
-If the commitment deque exceeds `maxCommitments` (= `maxBlocksSinceStart`, derived from wall-clock time and `MIN_BLOCK_INTERVAL`), the presync is aborted.
+The commitment deque grows unboundedly during PRESYNC but is implicitly bounded by the timestamp monotonicity requirement (`MIN_BLOCK_INTERVAL` per header) and the work threshold that terminates the phase.
 
 ### Certificate policy
 
-Certificate verification during PRESYNC is batch-level. For each outgoing `GETHEADERS`, the receiver decides:
+All regular PRESYNC `GETHEADERS` requests use `IncludeCertificates=false`. Certificate verification is performed exclusively via spot-checks — targeted single-header requests with `IncludeCertificates=true`.
+
+- **Regular PRESYNC batches**: `IncludeCertificates=false`. No certificate verification; headers contribute provisional work only.
+- **Spot-check requests**: `IncludeCertificates=true`, issued as separate requests (with a stop hash) independently of the regular pipeline.
+- **REDOWNLOAD**: `IncludeCertificates=false`. The certificate is bundled into the full-block payload requested via `getdata`.
+
+The provisional work accumulated during PRESYNC is backed by spot-checks whose frequency is calibrated so that a chain with less than `certifiedWorkProportion` (p = 1/2) of its work backed by valid certificates is rejected with probability at least `1 - 2^{-t}` where `t = lg2UnauthorisedPresync` (default 100).
+
+### Spot-check policy
+
+Each header is considered for spot-checking by two independent triggers:
+
+**1. Work-proportional trigger.** A normalization constant is computed once at session creation:
 
 ```
-ShouldIncludeCertificates():
-    switch phase:
-    case PRESYNC:             return isAtLeastAsHard(lastHeader.Bits, certThresholdNBits)
-    case PRESYNC_SPOT_CHECK:  return true
-    case REDOWNLOAD:          return false   // cert travels inside the block
-    case FINAL:               return false   // no getheaders issued
+C = t * ln(2) / ((1 - p) * remainingWork)
 ```
 
-- **Above-threshold PRESYNC batches**: `IncludeCertificates=true`. Every certificate in the batch is verified.
-- **Below-threshold PRESYNC batches**: `IncludeCertificates=false`. No ordinary certificate verification, but random spot-checks may apply.
-- **PRESYNC_SPOT_CHECK**: `IncludeCertificates=true` for the one header being re-requested.
-- **REDOWNLOAD**: `IncludeCertificates=false`. The certificate is bundled into the full-block payload we will request via `getdata`, so piggybacking it on the HEADERS response would double the bytes for no benefit.
+where `remainingWork = minimumRequiredWork - chainStart.WorkSum`. For each header, with probability `min(C * header_work, 1)`, the header is independently spot-checked. High-difficulty headers are thus checked more frequently, proportional to their contribution to total work.
 
-The provisional work accumulated during PRESYNC is not fully validated: above-threshold work is backed by certificate verification; below-threshold work is not yet certificate-verified and is used only to decide whether the chain is worth redownloading.
+**2. Periodic random-walk trigger.** A mandatory spot-check height `nextSpotCheckHeight` is maintained. When `currentHeight == nextSpotCheckHeight`, the header is spot-checked regardless of the probabilistic trigger. This ensures that even sequences of very low-difficulty headers are periodically verified.
 
-### Certificate threshold
+Whenever either trigger fires, `nextSpotCheckHeight` is reset to `currentHeight + U[1, 2*s]` where `s = spotCheckMeanGap` (default 1000). At session start, the initial `nextSpotCheckHeight` is drawn from `chainStart.Height + U[1, 2*s]`.
 
-A fixed threshold `certThresholdNBits` is computed once when the session is created, using the chain-start state:
+**Parameters:**
 
-```
-maxRemainingBlocks = (now - startTime + TIMESTAMP_WINDOW) / MIN_BLOCK_INTERVAL
-a = 1 + targetSpacing / wtemaHalfLife
-S = (a^(N+1) - a) / (a - 1)        where N = MAX_HEADERS_RESULTS
-thresholdWork = remainingWork / maxRemainingBlocks * N / S
-certThresholdNBits = min(workToTarget(thresholdWork), powLimitBits)
-```
+| Name | Value | Meaning |
+|------|-------|---------|
+| `lg2UnauthorisedPresync` | 100 | Security parameter: lg2(false-acceptance probability) smaller than this |
+| `certifiedWorkProportion` | 0.5 | Minimum fraction of work that must be backed by certificates |
+| `spotCheckMeanGap` | 1000 | Mean gap between mandatory periodic spot-checks |
 
-Where:
+### Spot-check mechanics (pipelined)
 
-- `remainingWork` = work needed to reach `minimum_required_work` from chain_start.
-- `maxRemainingBlocks` = upper bound on how many blocks the peer's chain could contain since chain_start, given wall-clock time and `TIMESTAMP_WINDOW`.
-- `N = MAX_HEADERS_RESULTS`.
+When a spot-check is triggered for a header:
 
-The threshold ensures the high-difficulty region, which contributes most of the work toward `minimum_required_work`, is fully certificate-verified during PRESYNC. It remains constant for the entire session.
+- **Certificate already present** (peer voluntarily included it): verify inline. Invalid certificate is punishable. Call `armNextSpotCheck(currentHeight)` and continue.
+- **Certificate not present**: queue the header as a pending spot check, call `armNextSpotCheck(currentHeight)`, and continue processing headers without pausing. A separate `GETHEADERS` request (with `IncludeCertificates=true` and `hashStop` = target hash) is issued for the spot check. Multiple spot checks can be in-flight simultaneously.
 
-### Random spot-checks
+**Backpressure.** Headers may advance at most `spotCheckMeanGap` (1000) heights ahead of the oldest pending spot check. When this limit is reached, `RequestMore` is suppressed and speculative dispatch is gated until a spot-check response clears the oldest entry.
 
-For each below-threshold batch, the receiver draws a random index:
+**Spot-check response handling.** Spot-check responses (1-header messages whose hash matches a pending entry) are matched at the top of `ProcessNextHeaders`, before the phase switch. This ensures stale responses arriving after a PRESYNC→REDOWNLOAD transition are absorbed harmlessly. On match:
 
-```
-spotCheckIdx = rand.Int63n(SPOT_CHECK_INV_PROB)
-```
+- Certificate missing → non-punishable abort (peer may have answered a different query).
+- Invalid certificate → punishable.
+- Valid → remove from pending queue; if backpressure is relieved and phase is still PRESYNC, signal `RequestMore` to resume the pipeline. If work threshold was already reached and this was the last pending spot check, transition to REDOWNLOAD.
 
-All headers in the batch are processed normally. After the batch:
+### PRESYNC → REDOWNLOAD transition
 
-- If `provisional_work >= minimum_required_work`, transition to REDOWNLOAD (takes priority).
-- Otherwise, if `spotCheckIdx < len(headers)`, the header at that index is selected for spot-checking.
+The transition occurs when **both** conditions hold:
 
-When a header is selected:
+1. Cumulative provisional work >= `minimumRequiredWork`.
+2. All pending spot checks have been resolved (the `pendingSpotChecks` queue is empty).
 
-1. **Certificate present in batch** (batch happened to include certs): verify `CheckProofOfWork(header, cert)`. Invalid certificate is punishable. Otherwise continue normally.
-2. **Certificate not present**: save the header, transition to `PRESYNC_SPOT_CHECK`. Issue a one-header `GETHEADERS` positioned so the selected header is the first returned, with `IncludeCertificates=true`. On reply:
-   - Hash mismatch → abort without punishment (peer may have answered a different query).
-   - Certificate missing → abort without punishment.
-   - Invalid certificate → punishable.
-   - Valid → return to PRESYNC, resume from the stored presync tip.
+Once cumulative work crosses the threshold mid-batch, remaining headers in that batch are discarded without being committed or spot-checked. This ensures no unnecessary spot checks are queued after the work target is met.
+
+If work is sufficient but spot checks are still pending, the session stays in PRESYNC with `RequestMore` suppressed, waiting for spot-check responses only.
 
 ---
 
@@ -214,7 +212,7 @@ Decoupling the cursor from Tier-1 is required because speculative GETHEADERS and
 
 ### Per-batch timeline
 
-1. **Request** — `GETHEADERS` is issued with `IncludeCertificates=false`. REDOWNLOAD is the only phase that explicitly turns the cert flag off (`ShouldIncludeCertificates` and `ShouldIncludeCertificatesAfterBits` both return `false` for `PhaseRedownload`). The locator is `[cursor.hash, ...chainStart.locator]` where `cursor.hash` is the REDOWNLOAD tip cursor described above (the hash of the last header appended to Tier-1, or `chainStart.Hash` before the first append). The cursor is stable across Tier-1 drain.
+1. **Request** — `GETHEADERS` is issued with `IncludeCertificates=false`. The locator is `[cursor.hash, ...chainStart.locator]` where `cursor.hash` is the REDOWNLOAD tip cursor described above (the hash of the last header appended to Tier-1, or `chainStart.Hash` before the first append). The cursor is stable across Tier-1 drain.
 2. **Receive + cheap validate** — for each header `validateAndStoreRedownloadedHeader` performs: the common header checks (continuity, timestamp monotonicity, difficulty); non-zero `ProofCommitment`; and the 1-bit salted-commitment cross-check against the PRESYNC deque while within the PRESYNC commitment window (see *Commitment bit primitive* below). On success the `{hash, header}` pair is appended to Tier-1 and work is accumulated. **No ZK verification runs at this step.** Certificates never arrive in HEADERS during REDOWNLOAD.
 3. **Drain Tier-1 into `getdata`** — `driveRedownloadGetdata` pops up to `redownloadPendingCap - len(redownloadExpected)` entries from the Tier-1 head, tracks them in Tier-2, and emits one `GETDATA(InvTypeWitnessBlock)` batch. Popped entries retain their approved `BlockHeader` so the arriving block can be cross-checked byte-for-byte against it.
 4. **Next `GETHEADERS`** — after clearing the per-peer rate limit, `isContinuationOfLowWorkHeadersSync` issues the next REDOWNLOAD `GETHEADERS` (cert-less) via the existing pipelining path. If Tier-1 was saturated, `RequestMore` is suppressed; a later block-arrival drain re-triggers the follow-up request via `maybeTriggerRedownloadGetHeaders`.
@@ -224,7 +222,7 @@ Decoupling the cursor from Tier-1 is required because speculative GETHEADERS and
 
 Replacing the cert-carrying REDOWNLOAD HEADERS with cert-less HEADERS + getdata-for-body is safe because:
 
-- **Work still pays to get past PRESYNC.** A peer must still deliver a chain whose claimed cumulative work hits `minimum_required_work`, with above-threshold batches cert-verified inline and 1-in-1000 spot checks binding the below-threshold region.
+- **Work still pays to get past PRESYNC.** A peer must still deliver a chain whose claimed cumulative work hits `minimum_required_work`, with work-proportional and periodic spot checks ensuring at least half the work is backed by valid certificates.
 - **Salted commitment bits still bind the chain.** Any substitution of a REDOWNLOAD header is caught by the `hash → SipHash-2-4(salt, hash) & 1` cross-check against the PRESYNC deque, as long as we are within the commitment window. Outside the window (`processAllRemainingHeaders`), the accumulated work requirement has already been met, so any further header would only add to that accumulation.
 - **Cert verification is block-gated, not header-gated.** No REDOWNLOAD header enters the block index until its block has arrived and `zkpow.VerifyCertificate` has succeeded on the cert carried in the block payload. A peer who withholds blocks only stalls the single peer session; it cannot cause us to accept bogus headers.
 - **Header-bytes-equal on arrival.** The arriving block's `BlockHeader` must exactly match the approved Tier-1 header (we compare `BlockHash()`, which covers all serialisable header fields). Any discrepancy is a punishable peer violation — the peer tried to bait-and-switch the approval with a different header whose cert they actually own.
@@ -280,7 +278,7 @@ A peer that fails presync or aborts REDOWNLOAD early causes **zero persistent st
 
 | Object | Location | Bound |
 |---|---|---|
-| Commitment deque | `HeadersSyncState.headerCommitments` | ≤ `maxCommitments` bits (≈ 252 K bits ≈ 32 KB) |
+| Commitment deque | `HeadersSyncState.headerCommitments` | Bounded by timestamp monotonicity and work threshold |
 | Tier-1 | `HeadersSyncState.redownloadApproved` | ≤ `redownloadApprovedCap` = 500 entries |
 | Tier-2 | `peerSyncState.redownloadExpected` + `redownloadPendingBlocks` | ≤ `redownloadPendingCap` = 100 entries |
 
@@ -350,10 +348,11 @@ Headers or blocks whose parent is unknown are silently ignored, as if never sent
 
 ### Non-punishable (abort presync, mark peer low-quality)
 
-- Missing certificates in a response to an `IncludeCertificates=true` request (PRESYNC threshold batches, spot-checks).
+- Missing certificates in a response to an `IncludeCertificates=true` spot-check request.
 - Spot-check hash mismatch (peer may have answered a different query).
 - Commitment mismatch during REDOWNLOAD.
 - Incomplete message before reaching minimum work.
+- Presync stall: no response to an in-flight getheaders (regular or spot-check) within `headersResponseTime` (2 min). The session is torn down and the peer is marked low-quality.
 
 ### REDOWNLOAD-specific punishable violations
 
@@ -367,18 +366,17 @@ Peers that fail presync are marked low-quality by setting their counter above th
 
 ## Locator Construction
 
-Presync-driven `GETHEADERS` requests (PRESYNC, PRESYNC_SPOT_CHECK, REDOWNLOAD) use a locator built from two parts:
+Presync-driven `GETHEADERS` requests (PRESYNC, REDOWNLOAD, spot-check) use a locator built from two parts:
 
 1. A **phase-specific tip hash**:
    - PRESYNC: `lastHeaderHash` (the presync tip).
-   - PRESYNC_SPOT_CHECK: `spotCheckHeader.PrevBlock` (so the selected header is the first returned).
    - REDOWNLOAD: the REDOWNLOAD cursor hash (`redownloadCursor.hash` — stable across Tier-1 drain; see the *REDOWNLOAD tip cursor* section).
+   - Spot-check: `target.PrevBlock` (so the selected header is the first returned), with `hashStop` = target hash.
 2. **Exponentially-spaced ancestors** of `chain_start`, matching Bitcoin Core's `LocatorEntries` format.
 
 Event-driven `GETHEADERS` requests from outside the presync state machine use simpler single-hash locators:
 
 - **Acceptance-tail probe** (`acceptValidatedHeaders`): `[lastAcceptedHash]` when the batch produced at least one new header, or `[headers[len-1].BlockHash()]` when every header in the batch was already in the block index.
-- **Missing-cert retry** (sufficient-work batch with no certificates): `[firstHeader.PrevBlock]`, re-requesting the same range with `IncludeCertificates=true`.
 - **Disconnected-batch backfill** (first header does not connect to anything we know): `LatestBlockLocator()`, the standard exponentially-spaced locator from our best header.
 - **Initial sync** (`startSync`): `LatestBlockLocator()`.
 
@@ -403,10 +401,11 @@ When an incoming PRESYNC or REDOWNLOAD batch extends the current phase tip, the 
 **Speculative dispatch preconditions.** At the entry of `handleHeadersMsg`, the node dispatches a speculative `GETHEADERS` only when **all** of the following hold:
 
 - the peer has an active presync session (`state.headersSyncState != nil`);
-- the session phase is PRESYNC or REDOWNLOAD (no speculation during PRESYNC spot-check or FINAL);
+- the session phase is PRESYNC or REDOWNLOAD (no speculation during FINAL);
 - the wire batch is full (`numHeaders == MAX_HEADERS_RESULTS`);
 - the batch structurally continues the current phase tip (`headers[0].PrevBlock` equals `hss.lastHeaderHash` in PRESYNC, or the REDOWNLOAD cursor hash in REDOWNLOAD);
-- no speculative request is already in flight (`state.pipelinedLocatorHead == nil`).
+- no speculative request is already in flight (`state.pipelinedLocatorHead == nil`);
+- in PRESYNC: `SpotCheckBackpressured()` is false (headers are not too far ahead of the oldest pending spot check).
 
 When dispatched, the locator is the phase-specific locator with `specTip = headers[len-1].BlockHash()` as the tip entry. `state.pipelinedLocatorHead` is set to `specTip`, and the `RequestMore`-driven `maybeSendGetHeaders` inside `isContinuationOfLowWorkHeadersSync` is suppressed for this batch.
 
@@ -415,11 +414,11 @@ When dispatched, the locator is the phase-specific locator with `specTip = heade
 - no session → expected is zero;
 - PRESYNC session → expected is `hss.lastHeaderHash`;
 - REDOWNLOAD session → expected is the REDOWNLOAD cursor hash (exposed as `hss.RedownloadTipHash()`);
-- PRESYNC spot-check or FINAL phase → expected is zero (these phases do not request follow-up headers non-speculatively).
+- FINAL phase → expected is zero (this phase does not request follow-up headers).
 
 If the expected prev-hash does not equal `state.pipelinedLocatorHead`, the speculative response is **silently dropped** (no processing, no disconnect, no peer-quality penalty). This exactly covers every case in which the non-speculative flow would have stopped before issuing the follow-up `GETHEADERS`: the previous batch's `ProcessNextHeaders` returned `!Success` (session aborted non-punishably), transitioned to FINAL without `RequestMore`, or failed a continuity / commitment check. If the expected prev-hash matches, `state.pipelinedLocatorHead` is cleared (consumed) and the batch flows through normal processing.
 
-**DoS invariant.** *Speculation never causes the node to accept, validate beyond silent drop, or otherwise progress on any batch that the non-speculative flow would not have requested.* The stale-drop guard is the single enforcement point for this invariant. All other DoS mechanisms — anti-DoS work threshold, `maxCommitments` bound, cert threshold, spot-check selection, commitment cross-check during REDOWNLOAD, release-time certificate verification — run unchanged inside `ProcessNextHeaders` on every batch that is not dropped.
+**DoS invariant.** *Speculation never causes the node to accept, validate beyond silent drop, or otherwise progress on any batch that the non-speculative flow would not have requested.* The stale-drop guard is the single enforcement point for this invariant. All other DoS mechanisms — anti-DoS work threshold, spot-check selection, commitment cross-check during REDOWNLOAD, release-time certificate verification — run unchanged inside `ProcessNextHeaders` on every batch that is not dropped.
 
 **Lifetime of `pipelinedLocatorHead`.** The field lives on `peerSyncState`, not inside `HeadersSyncState`, because it tracks a network-level expectation independent of the state machine's replay semantics. It is cleared when:
 
@@ -448,18 +447,16 @@ The PRESYNC gain is close to the theoretical ceiling: once pipelining hides RTT,
 ## State Machine
 
 ```
-PRESYNC
-  |
-  +-- (spot-check selected, cert not in batch) --> PRESYNC_SPOT_CHECK --> PRESYNC
+PRESYNC  (spot checks issued in parallel, backpressure at +1000 headers)
   |
   +-- (provisional_work >= minimum_required_work)
   v
 REDOWNLOAD --> FINAL
 ```
 
-`FINAL` is a terminal sentinel for the PRESYNC side of the state machine. A session reaches it when PRESYNC aborts or when REDOWNLOAD is dismissed by the `SyncManager` after the peer has signalled end-of-headers (`redownloadShortBatchSeen`) *and* both Tier-1 and Tier-2 have drained. Under the cert-less REDOWNLOAD design, REDOWNLOAD does not itself transition to FINAL on the header path; instead the `SyncManager` sets `state.headersSyncState = nil` when block-gated acceptance finishes. Subsequent headers from this peer re-enter the unified entry point at full strength — either taking the above-threshold path directly or starting a new presync on a different low-work fork.
+`FINAL` is a terminal sentinel for the PRESYNC side of the state machine. A session reaches it when PRESYNC aborts or when REDOWNLOAD is dismissed by the `SyncManager` after the peer has signalled end-of-headers (`redownloadShortBatchSeen`) *and* both Tier-1 and Tier-2 have drained. Under the cert-less REDOWNLOAD design, REDOWNLOAD does not itself transition to FINAL on the header path; instead the `SyncManager` sets `state.headersSyncState = nil` when block-gated acceptance finishes. Subsequent headers from this peer re-enter the unified entry point at full strength — either taking the sufficient-work path directly or starting a new presync on a different low-work fork.
 
-Because REDOWNLOAD accepts its cert-verified blocks through the dedicated block-arrival path (`handleRedownloadBlockArrival`), the ordinary acceptance tail is only invoked for above-threshold batches. The acceptance tail (`acceptValidatedHeaders`) composes a single `shouldProbe` signal and, when it is set, issues a follow-up `GETHEADERS`. `shouldProbe` is true when any of the following holds on the current HEADERS batch:
+Because REDOWNLOAD accepts its cert-verified blocks through the dedicated block-arrival path (`handleRedownloadBlockArrival`), the ordinary acceptance tail is only invoked for sufficient-work batches. The acceptance tail (`acceptValidatedHeaders`) composes a single `shouldProbe` signal and, when it is set, issues a follow-up `GETHEADERS`. `shouldProbe` is true when any of the following holds on the current HEADERS batch:
 
 - The wire batch was at `MAX_HEADERS_RESULTS` (a full batch, the usual progression case).
 - The presync state machine transitioned to `FINAL` on this batch (even if the wire batch was shorter than `MAX_HEADERS_RESULTS`).
@@ -483,7 +480,10 @@ This unified tail lets the node transparently advance past the presync tip witho
 | Name | Value | Description |
 | --- | --- | --- |
 | `MAX_HEADERS_RESULTS` | 100 | Headers per HEADERS message |
-| `SPOT_CHECK_INV_PROB` | 1000 | Per-batch spot-check range |
+| `lg2UnauthorisedPresync` | 100 | Security parameter t: false-acceptance probability < 2^{-t} |
+| `certifiedWorkProportion` | 0.5 | Minimum fraction of work that must be backed by certificates |
+| `spotCheckMeanGap` | 1000 | Mean gap between mandatory periodic spot-checks |
+| `redownloadGetdataDepth` | 100 (= `lg2UnauthorisedPresync`) | Commitment-checked headers required on top of a Tier-1 entry before it is eligible for `getdata` |
 | `redownloadApprovedCap` | 500 | Tier-1 REDOWNLOAD approved-headers FIFO cap (`HeadersSyncState`) |
 | `redownloadApprovedHeadroom` | 200 | Free slots required in Tier-1 before `RequestMore=true` |
 | `redownloadPendingCap` | 100 | Tier-2 REDOWNLOAD block-fetch buffer cap (`peerSyncState`) |
@@ -507,7 +507,7 @@ This unified tail lets the node transparently advance past the presync tip witho
 | PRESYNC PoW verification | Cheap for every header | Above-threshold batches + random spot-checks |
 | PRESYNC work meaning | Effectively validated | Provisional |
 | Commitment density | Sparse | 1 bit per header |
-| Spot-check state | None | `PRESYNC_SPOT_CHECK` |
+| Spot-check state | None | Pipelined (queued, backpressure at +1000) |
 | REDOWNLOAD cert requests | N/A | `IncludeCertificates=false`; certificate travels inside the block body |
 | REDOWNLOAD PoW verification | Not needed | Required before permanent acceptance |
 | Permanent header acceptance | After redownload consistency | After redownload consistency + valid certificate |

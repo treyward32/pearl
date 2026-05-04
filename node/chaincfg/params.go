@@ -358,12 +358,7 @@ var MainNetParams = Params{
 	// address generation.
 	HDCoinType: HDCoinTypePearl,
 
-	// Headers presync parameters
-	// 2^80.4 ≈ 1.595e24, expressed as floor(2^80.4).
-	MinimumChainWork: func() *big.Int {
-		v, _ := new(big.Int).SetString("151cb453b953840000000", 16)
-		return v
-	}(),
+	MinimumChainWork: big.NewInt(0),
 }
 
 // RegressionNetParams defines the network parameters for the regression test

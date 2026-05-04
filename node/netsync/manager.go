@@ -552,6 +552,22 @@ func (sm *SyncManager) handleStallSample() {
 
 	disconnectSyncPeer := sm.shouldDCStalledSyncPeer()
 	sm.updateSyncPeer(disconnectSyncPeer)
+
+	// Abort stale presync sessions on any peer. A non-zero
+	// lastGetHeadersTime means a request is in-flight; if it stays
+	// unanswered beyond headersResponseTime the session is dead.
+	now := time.Now()
+	for peer, st := range sm.peerStates {
+		if st.headersSyncState != nil &&
+			!st.lastGetHeadersTime.IsZero() &&
+			now.Sub(st.lastGetHeadersTime) > headersResponseTime {
+			log.Infof("Presync session with peer %s stalled, aborting",
+				peer.Addr())
+			st.headersSyncState = nil
+			st.pipelinedLocatorHead = nil
+			st.peerQualityCounter = peerQualityThreshold + 1
+		}
+	}
 }
 
 // shouldDCStalledSyncPeer determines whether or not we should disconnect a
@@ -798,10 +814,9 @@ func (sm *SyncManager) handleBlockMsg(bmsg *blockMsg) error {
 					threshold,
 				)
 				hssLocator := state.headersSyncState.NextHeadersRequestLocator()
-				includeCerts := state.headersSyncState.ShouldIncludeCertificates()
 				state.clearHeadersRateLimit()
 				sm.maybeSendGetHeaders(peer, state,
-					hssLocator, &zeroHash, includeCerts)
+					hssLocator, &zeroHash, false)
 			}
 			return nil
 		}
@@ -1075,7 +1090,7 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) error {
 		switch hss.Phase() {
 		case PhasePresync:
 			phaseTipMatches = headers[0].BlockHeader.PrevBlock ==
-				hss.LastHeaderHash()
+				hss.LastHeaderHash() && !hss.SpotCheckBackpressured()
 		case PhaseRedownload:
 			phaseTipMatches = headers[0].BlockHeader.PrevBlock ==
 				hss.RedownloadTipHash()
@@ -1083,13 +1098,11 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) error {
 		if phaseTipMatches {
 			specTip := headers[numHeaders-1].BlockHeader.BlockHash()
 			locator := hss.SpeculativeLocator(specTip)
-			includeCerts := hss.ShouldIncludeCertificatesAfterBits(
-				headers[numHeaders-1].BlockHeader.Bits)
 			// Clear rate limit: a full phase-continuing batch is a
 			// plausible response to our outstanding getheaders.
 			state.clearHeadersRateLimit()
 			if sm.maybeSendGetHeaders(peer, state, locator,
-				&zeroHash, includeCerts) {
+				&zeroHash, false) {
 				specTipCopy := specTip
 				state.pipelinedLocatorHead = &specTipCopy
 				speculatedTip = &specTipCopy
@@ -2069,17 +2082,6 @@ func (sm *SyncManager) isContinuationOfLowWorkHeadersSync(
 		return presyncContinuationResult{}, nil
 	}
 
-	// If certs were expected but none are present, abort the sync
-	// without punishment (the peer may have answered a different query).
-	if hss.ShouldIncludeCertificates() && headers[0].BlockCertificate() == nil {
-		log.Debugf("Presync aborted: peer %s omitted expected "+
-			"certificates", peer.Addr())
-		state.peerQualityCounter = peerQualityThreshold + 1
-		state.headersSyncState = nil
-		state.pipelinedLocatorHead = nil
-		return presyncContinuationResult{handled: true}, nil
-	}
-
 	fullMsg := len(headers) == wire.MaxBlockHeadersPerMsg
 	phaseBefore := hss.Phase()
 	result := hss.ProcessNextHeaders(headers, fullMsg)
@@ -2098,22 +2100,31 @@ func (sm *SyncManager) isContinuationOfLowWorkHeadersSync(
 
 	if result.RequestMore {
 		locator := hss.NextHeadersRequestLocator()
-		includeCerts := hss.ShouldIncludeCertificates()
 
 		skipSend := false
 		if speculatedTip != nil && len(locator) > 0 &&
 			*locator[0] == *speculatedTip {
-			// Speculative request already covers this follow-up.
 			skipSend = true
 		} else if speculatedTip != nil {
-			// State transitioned; speculation is stale. Clear the rate
-			// limit so the correct follow-up goes out now.
 			state.clearHeadersRateLimit()
+		}
+		if !skipSend && state.pipelinedLocatorHead != nil &&
+			len(locator) > 0 && *locator[0] == *state.pipelinedLocatorHead {
+			skipSend = true
 		}
 		if !skipSend {
 			sm.maybeSendGetHeaders(peer, state,
-				locator, &zeroHash, includeCerts)
+				locator, &zeroHash, false)
 		}
+	}
+
+	// Send spot-check requests independently of the regular pipeline.
+	for i := range result.SpotCheckRequests {
+		sc := &result.SpotCheckRequests[i]
+		peer.PushGetHeadersMsg(sc.Locator, &sc.StopHash, true)
+	}
+	if len(result.SpotCheckRequests) > 0 {
+		state.lastGetHeadersTime = time.Now()
 	}
 
 	justFinalized := phaseBefore != PhaseFinal && hss.Phase() == PhaseFinal
@@ -2373,8 +2384,7 @@ func (sm *SyncManager) maybeTriggerRedownloadGetHeaders(
 		return
 	}
 	locator := hss.NextHeadersRequestLocator()
-	includeCerts := hss.ShouldIncludeCertificates()
-	sm.maybeSendGetHeaders(peer, state, locator, &zeroHash, includeCerts)
+	sm.maybeSendGetHeaders(peer, state, locator, &zeroHash, false)
 }
 
 // canDirectFetch returns true if we are close enough to the tip to directly
