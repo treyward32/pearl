@@ -404,7 +404,7 @@ func (s *HeadersSyncState) ProcessNextHeaders(
 		} else {
 			s.spotCheckHeader = nil
 			s.phase = PhasePresync
-			s.armNextSpotCheck(s.nextSpotCheckHeight)
+			s.armNextSpotCheck(s.currentHeight)
 			result.Success = true
 			result.RequestMore = true
 			log.Infof("Headers presync spot-check passed with peer=%d: "+
@@ -566,7 +566,7 @@ func (s *HeadersSyncState) validateAndStoreCommitments(headers []wire.MsgHeader)
 					return false
 				}
 			}
-			s.armNextSpotCheck(targetHeight)
+			s.armNextSpotCheck(s.currentHeight)
 		} else {
 			// Cert-less target: issue a getheaders round-trip so the peer
 			// must produce the certificate for this exact header.
