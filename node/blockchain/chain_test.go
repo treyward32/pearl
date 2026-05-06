@@ -20,8 +20,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHaveBlock tests the HaveBlock API to ensure proper functionality.
-func TestHaveBlock(t *testing.T) {
+// TestBlockInIndex tests the BlockInIndex API to ensure proper functionality.
+func TestBlockInIndex(t *testing.T) {
 	require := require.New(t)
 
 	t.Skip("Test files rely on Bitcoin block format, which is no longer supported") // TODO Or: re-enable with Pearl-format test fixtures

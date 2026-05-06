@@ -164,24 +164,20 @@ func calcNextRequiredDifficulty(lastNode chaincfg.HeaderCtx, newBlockTime time.T
 // difficulty adjustment. Here the period is WTEMAHalfLife and the multiplier
 // is 87/32 instead.
 func (b *BlockChain) calcEasiestDifficulty(bits uint32, duration time.Duration) uint32 {
-	return CalcEasiestDifficulty(b.chainParams, bits, duration)
-}
-
-func CalcEasiestDifficulty(params *chaincfg.Params, bits uint32, duration time.Duration) uint32 {
 	durationVal := int64(duration / time.Second)
 
 	// Test networks allow minimum-difficulty blocks after a prolonged gap.
 	// If the elapsed time exceeds that threshold, any difficulty is
 	// reachable so return the easiest possible value immediately.
-	if params.ReduceMinDifficulty {
-		reductionTime := int64(params.MinDiffReductionTime /
+	if b.chainParams.ReduceMinDifficulty {
+		reductionTime := int64(b.chainParams.MinDiffReductionTime /
 			time.Second)
 		if durationVal > reductionTime {
-			return params.PowLimitBits
+			return b.chainParams.PowLimitBits
 		}
 	}
 
-	halfLifeSec := int64(params.WTEMAHalfLife / time.Second)
+	halfLifeSec := int64(b.chainParams.WTEMAHalfLife / time.Second)
 	newTarget := CompactToBig(bits)
 
 	if durationVal > 0 {
@@ -192,7 +188,7 @@ func CalcEasiestDifficulty(params *chaincfg.Params, bits uint32, duration time.D
 		// (87/32)^178 > e^178 > 2^256, which overflows any target.
 		// Short-circuit to avoid computing a huge exponent for nothing.
 		if periods > 177 {
-			return params.PowLimitBits
+			return b.chainParams.PowLimitBits
 		}
 
 		// newTarget = newTarget * (87/32)^periods.
@@ -206,8 +202,8 @@ func CalcEasiestDifficulty(params *chaincfg.Params, bits uint32, duration time.D
 		newTarget.Rsh(newTarget, uint(5*periods)) // ÷ 32^periods
 	}
 
-	if newTarget.Cmp(params.PowLimit) > 0 {
-		newTarget.Set(params.PowLimit)
+	if newTarget.Cmp(b.chainParams.PowLimit) > 0 {
+		newTarget.Set(b.chainParams.PowLimit)
 	}
 
 	return BigToCompact(newTarget)

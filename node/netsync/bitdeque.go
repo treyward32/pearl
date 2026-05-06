@@ -71,9 +71,6 @@ func (d *BitDeque) Clear() {
 // the new buffer, preserving head's intra-word bit offset.
 func (d *BitDeque) grow() {
 	newWords := len(d.buf) * 2
-	if newWords < 1 {
-		newWords = 1
-	}
 	newBuf := make([]uint64, newWords)
 
 	headWord := d.head / bitsPerWord

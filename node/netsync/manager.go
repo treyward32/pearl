@@ -1118,7 +1118,7 @@ func (sm *SyncManager) handleHeadersMsg(hmsg *headersMsg) error {
 			return err
 		}
 		if res.handled {
-			sm.driveRedownloadGetdata(peer, state, res.newlyApproved)
+			sm.driveRedownloadGetdata(peer, state)
 			if res.justFinalized {
 				return sm.acceptValidatedHeaders(peer, state, headers[:0], true)
 			}
@@ -2175,7 +2175,6 @@ func (sm *SyncManager) pushGetHeadersDirect(peer *peerpkg.Peer,
 // emits a getdata batch for the newly-popped entries.
 func (sm *SyncManager) driveRedownloadGetdata(
 	peer *peerpkg.Peer, state *peerSyncState,
-	newlyApproved []ApprovedRedownloadEntry,
 ) {
 	hss := state.headersSyncState
 	if hss == nil || hss.Phase() != PhaseRedownload {
@@ -2184,12 +2183,6 @@ func (sm *SyncManager) driveRedownloadGetdata(
 
 	free := redownloadPendingCap - len(state.redownloadExpected)
 	if free <= 0 {
-		if len(newlyApproved) > 0 {
-			log.Debugf("REDOWNLOAD getdata back-pressured: peer=%s "+
-				"tier2=%d/%d approved_waiting=%d",
-				peer.Addr(), len(state.redownloadExpected),
-				redownloadPendingCap, hss.RedownloadApprovedLen())
-		}
 		return
 	}
 
@@ -2291,7 +2284,7 @@ func (sm *SyncManager) handleRedownloadBlockArrival(
 		}
 	}
 
-	sm.driveRedownloadGetdata(peer, state, nil)
+	sm.driveRedownloadGetdata(peer, state)
 	sm.maybeTriggerRedownloadGetHeaders(peer, state)
 
 	if state.headersSyncState != nil &&
@@ -2305,8 +2298,8 @@ func (sm *SyncManager) handleRedownloadBlockArrival(
 	return true, false, nil
 }
 
-// redownloadHeaderBytesEqual compares two BlockHeaders for byte-equal
-// identity via their hashes.
+// redownloadHeaderBytesEqual compares two BlockHeaders for identity via
+// their hashes.
 func redownloadHeaderBytesEqual(a, b *wire.BlockHeader) bool {
 	return a.BlockHash() == b.BlockHash()
 }
@@ -2385,40 +2378,6 @@ func (sm *SyncManager) maybeTriggerRedownloadGetHeaders(
 	}
 	locator := hss.NextHeadersRequestLocator()
 	sm.maybeSendGetHeaders(peer, state, locator, &zeroHash, false)
-}
-
-// canDirectFetch returns true if we are close enough to the tip to directly
-// fetch blocks from announcements (within antiDoSBufferBlocks of the tip).
-func (sm *SyncManager) canDirectFetch() bool {
-	best := sm.chain.BestSnapshot()
-	targetSpacing := sm.chainParams.TargetTimePerBlock
-	maxAge := time.Duration(antiDoSBufferBlocks) * targetSpacing
-	return time.Since(best.BlockTime) < maxAge
-}
-
-// headerDirectFetchBlocks requests full blocks for headers that have been
-// accepted into the block index and are on a chain worth downloading.
-func (sm *SyncManager) headerDirectFetchBlocks(
-	peer *peerpkg.Peer, state *peerSyncState,
-	acceptedHeaders []*blockchain.AcceptedHeader,
-) {
-	if !sm.canDirectFetch() {
-		return
-	}
-	for _, ah := range acceptedHeaders {
-		if _, exists := state.requestedBlocks[ah.Hash]; exists {
-			continue
-		}
-		if _, exists := sm.requestedBlocks[ah.Hash]; exists {
-			continue
-		}
-		iv := wire.NewInvVect(wire.InvTypeWitnessBlock, &ah.Hash)
-		limitAdd(state.requestedBlocks, ah.Hash, maxRequestedBlocks)
-		limitAdd(sm.requestedBlocks, ah.Hash, maxRequestedBlocks)
-		gdmsg := wire.NewMsgGetDataSizeHint(1)
-		gdmsg.AddInvVect(iv)
-		peer.QueueMessage(gdmsg, nil)
-	}
 }
 
 // New constructs a new SyncManager. Use Start to begin processing asynchronous

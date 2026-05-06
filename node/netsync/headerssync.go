@@ -531,7 +531,6 @@ func (s *HeadersSyncState) finalize() {
 	s.processAllRemainingHeaders = false
 	s.redownloadShortBatchSeen = false
 	s.pendingSpotChecks = nil
-	s.currentHeight = 0
 	s.phase = PhaseFinal
 }
 
